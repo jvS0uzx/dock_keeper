@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"log"
 	"os"
-	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/joaov/vd_stats/internal/api"
@@ -32,20 +30,7 @@ func main() {
 
 	log.Printf("Carregados %d servidores do banco de dados.", len(servers))
 	for _, s := range servers {
-		if s.Name == "Load Balancer" {
-			go func(id, host, user, key string) {
-				ctx := context.Background()
-				for {
-					err := ssh.StartNginxStream(ctx, id, host, user, key)
-					if err != nil {
-						log.Printf("Erro no NGINX Stream %s: %v. Tentando reconectar...", host, err)
-						time.Sleep(5 * time.Second)
-					}
-				}
-			}(s.ID, s.HostIP, s.User, sshKey)
-		} else {
-			ssh.Manager.Start(s.ID, s.HostIP, s.User, sshKey)
-		}
+		ssh.Manager.Start(s.ID, s.Name, s.HostIP, s.User, sshKey)
 	}
 
 	select {}

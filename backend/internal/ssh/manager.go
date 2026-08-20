@@ -16,7 +16,7 @@ var Manager = &ServerManager{
 	cancelFuncs: make(map[string]context.CancelFunc),
 }
 
-func (m *ServerManager) Start(id, host, user, keyPath string) {
+func (m *ServerManager) Start(id, name, host, user, keyPath string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -46,22 +46,24 @@ func (m *ServerManager) Start(id, host, user, keyPath string) {
 			}
 		}()
 
-		// Goroutine para o Nginx Access Log
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					log.Printf("[RealTime] Parando stream NGINX para a VPS %s...", host)
-					return
-				default:
-					err := StartNginxStream(ctx, id, host, user, keyPath)
-					if err != nil {
-						log.Printf("Erro no NGINX Stream %s: %v. Tentando reconectar em 5s...", host, err)
-						time.Sleep(5 * time.Second)
+		// Goroutine para o Nginx Access Log (Apenas para o Load Balancer)
+		if name == "Load Balancer" {
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						log.Printf("[RealTime] Parando stream NGINX para a VPS %s...", host)
+						return
+					default:
+						err := StartNginxStream(ctx, id, host, user, keyPath)
+						if err != nil {
+							log.Printf("Erro no NGINX Stream %s: %v. Tentando reconectar em 5s...", host, err)
+							time.Sleep(5 * time.Second)
+						}
 					}
 				}
-			}
-		}()
+			}()
+		}
 	}()
 }
 

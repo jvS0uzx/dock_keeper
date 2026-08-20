@@ -90,7 +90,7 @@ func StartServer(port string) {
 				HostIP: req.HostIP,
 			})
 			sshKey := os.Getenv("SSH_KEY_PATH")
-			ssh.Manager.Start(server.ID, server.HostIP, server.User, sshKey)
+			ssh.Manager.Start(server.ID, server.Name, server.HostIP, server.User, sshKey)
 			json.NewEncoder(w).Encode(server)
 			return
 		}
