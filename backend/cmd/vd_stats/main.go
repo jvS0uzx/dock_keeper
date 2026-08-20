@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"time"
@@ -33,8 +34,9 @@ func main() {
 	for _, s := range servers {
 		if s.Name == "Load Balancer" {
 			go func(id, host, user, key string) {
+				ctx := context.Background()
 				for {
-					err := ssh.StartNginxStream(id, host, user, key)
+					err := ssh.StartNginxStream(ctx, id, host, user, key)
 					if err != nil {
 						log.Printf("Erro no NGINX Stream %s: %v. Tentando reconectar...", host, err)
 						time.Sleep(5 * time.Second)

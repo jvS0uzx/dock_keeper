@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -79,7 +80,7 @@ type SysPayload struct {
 	Containers []ContainerPayload `json:"containers"`
 }
 
-func StartStream(serverID, host, user, keyPath string) error {
+func StartStream(ctx context.Context, serverID, host, user, keyPath string) error {
 
 	keyPath = strings.Replace(keyPath, "~", os.Getenv("HOME"), 1)
 	keyBytes, err := os.ReadFile(keyPath)
@@ -107,6 +108,12 @@ func StartStream(serverID, host, user, keyPath string) error {
 
 	session, err := client.NewSession()
 	if err != nil { return err }
+
+	go func() {
+		<-ctx.Done()
+		session.Close()
+		client.Close()
+	}()
 	defer session.Close()
 
 	stdout, err := session.StdoutPipe()
@@ -190,7 +197,7 @@ func StartStream(serverID, host, user, keyPath string) error {
 	return session.Wait()
 }
 
-func StartNginxStream(serverID, host, user, keyPath string) error {
+func StartNginxStream(ctx context.Context, serverID, host, user, keyPath string) error {
 
 	keyPath = strings.Replace(keyPath, "~", os.Getenv("HOME"), 1)
 	keyBytes, err := os.ReadFile(keyPath)
@@ -215,6 +222,12 @@ func StartNginxStream(serverID, host, user, keyPath string) error {
 
 	session, err := client.NewSession()
 	if err != nil { return err }
+
+	go func() {
+		<-ctx.Done()
+		session.Close()
+		client.Close()
+	}()
 	defer session.Close()
 
 	stdout, err := session.StdoutPipe()
