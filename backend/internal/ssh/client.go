@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -317,5 +318,63 @@ func StartNginxStream(ctx context.Context, serverID, host, user, keyPath string)
 			}
 		}
 	}
+	return session.Wait()
+}
+
+func StreamDockerLogs(ctx context.Context, host, user, keyPath, containerName string, w http.ResponseWriter, flusher http.Flusher) error {
+	keyPath = strings.Replace(keyPath, "~", os.Getenv("HOME"), 1)
+	keyBytes, err := os.ReadFile(keyPath)
+	if err != nil { return err }
+
+	signer, err := ssh.ParsePrivateKey(keyBytes)
+	if err != nil { return err }
+
+	config := &ssh.ClientConfig{
+		User: user,
+		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout: 10 * time.Second,
+	}
+
+	hostPort := fmt.Sprintf("%s:22", host)
+	client, err := ssh.Dial("tcp", hostPort, config)
+	if err != nil { return err }
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil { return err }
+
+	go func() {
+		<-ctx.Done()
+		session.Close()
+		client.Close()
+	}()
+	defer session.Close()
+
+	stdout, err := session.StdoutPipe()
+	if err != nil { return err }
+
+	stderr, err := session.StderrPipe()
+	if err != nil { return err }
+
+	err = session.Start(fmt.Sprintf("docker logs -f --tail 100 %s", containerName))
+	if err != nil { return err }
+
+	go func() {
+		scannerErr := bufio.NewScanner(stderr)
+		for scannerErr.Scan() {
+			line := scannerErr.Text()
+			fmt.Fprintf(w, "data: %s\n\n", line)
+			flusher.Flush()
+		}
+	}()
+
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		fmt.Fprintf(w, "data: %s\n\n", line)
+		flusher.Flush()
+	}
+
 	return session.Wait()
 }

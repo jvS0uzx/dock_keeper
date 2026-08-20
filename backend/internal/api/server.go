@@ -192,6 +192,46 @@ func StartServer(port string) {
 		json.NewEncoder(w).Encode(res)
 	}))
 
+	mux.HandleFunc("/api/containers/logs/stream", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if r.Method == "OPTIONS" {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		serverID := r.URL.Query().Get("server_id")
+		containerName := r.URL.Query().Get("container_name")
+
+		if serverID == "" || containerName == "" {
+			http.Error(w, "server_id e container_name sao obrigatorios", http.StatusBadRequest)
+			return
+		}
+
+		var server database.Server
+		if err := database.DB.Where("id = ?", serverID).First(&server).Error; err != nil {
+			http.Error(w, "Servidor nao encontrado", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+			return
+		}
+
+		sshKey := os.Getenv("SSH_KEY_PATH")
+		ctx := r.Context()
+		
+		err := ssh.StreamDockerLogs(ctx, server.HostIP, server.User, sshKey, containerName, w, flusher)
+		if err != nil {
+			log.Printf("Erro no stream de logs: %v", err)
+		}
+	})
+
 	log.Printf("[RealTime] Servidor da API rodando em http://localhost%s", port)
 	if err := http.ListenAndServe(port, mux); err != nil {
 		log.Fatalf("Erro crítico na API HTTP: %v", err)
