@@ -5,10 +5,10 @@ const SslView = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   const mockDomains = [
-    { id: 1, domain: 'api.projeto.com', server: 'VPS Produção', status: 'valid', daysLeft: 68, issuer: 'Let\'s Encrypt' },
-    { id: 2, domain: 'meusite.com.br', server: 'VPS Produção', status: 'warning', daysLeft: 12, issuer: 'Let\'s Encrypt' },
-    { id: 3, domain: 'dev.sistema.io', server: 'Worker Node', status: 'expired', daysLeft: 0, issuer: 'Let\'s Encrypt' },
-    { id: 4, domain: 'grafana.empresa.net', server: 'VPS Produção', status: 'valid', daysLeft: 84, issuer: 'Cloudflare' },
+    { id: 1, domain: 'api.example.com', server: 'VPS Produção', status: 'valid', daysLeft: 68, issuer: 'Let\'s Encrypt' },
+    { id: 2, domain: 'sgo.example.com', server: 'VPS Produção', status: 'warning', daysLeft: 12, issuer: 'Let\'s Encrypt' },
+    { id: 3, domain: 'bi.example.com', server: 'Worker Node', status: 'expired', daysLeft: 0, issuer: 'Let\'s Encrypt' },
+    { id: 4, domain: 'grafana.example.com', server: 'VPS Produção', status: 'valid', daysLeft: 84, issuer: 'Cloudflare' },
   ];
 
   const getStatusStyle = (status: string) => {

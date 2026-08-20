@@ -2,10 +2,12 @@ import React from 'react';
 import { Globe, ArrowUpRight, ArrowDownRight, Server, Activity, Network } from 'lucide-react';
 
 const NginxView = () => {
+  // Mocks ajustados para o seu ecossistema (Exemplo / SGO)
   const mockVHosts = [
-    { domain: 'api.projeto.com', upstream: '127.0.0.1:8080', status: 'healthy', reqs: '124 req/s' },
-    { domain: 'sistema.io', upstream: '127.0.0.1:3000', status: 'healthy', reqs: '42 req/s' },
-    { domain: 'blog.empresa.net', upstream: '127.0.0.1:8000', status: 'degraded', reqs: '12 req/s' },
+    { domain: 'api.example.com', upstream: '127.0.0.1:8000', status: 'healthy', reqs: '124 req/s' },
+    { domain: 'sgo.example.com', upstream: '127.0.0.1:3000', status: 'healthy', reqs: '42 req/s' },
+    { domain: 'bi.example.com', upstream: '127.0.0.1:8050', status: 'degraded', reqs: '12 req/s' },
+    { domain: 'ativos.example.com', upstream: '127.0.0.1:8080', status: 'healthy', reqs: '5 req/s' },
   ];
 
   return (
