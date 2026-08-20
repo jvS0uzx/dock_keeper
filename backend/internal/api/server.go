@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/joaov/vd_stats/internal/database"
+	"github.com/joaov/vd_stats/internal/network"
 	"github.com/joaov/vd_stats/internal/ssh"
 )
 
@@ -231,6 +232,99 @@ func StartServer(port string) {
 			log.Printf("Erro no stream de logs: %v", err)
 		}
 	})
+
+	mux.HandleFunc("/api/security/radar", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		serverID := r.URL.Query().Get("server_id")
+		if serverID == "" {
+			http.Error(w, "server_id is required", http.StatusBadRequest)
+			return
+		}
+		var server database.Server
+		if err := database.DB.Where("id = ?", serverID).First(&server).Error; err != nil {
+			http.Error(w, "Servidor nao encontrado", http.StatusNotFound)
+			return
+		}
+		
+		ports, err := ssh.GetRadarPorts(server.HostIP, server.User, os.Getenv("SSH_KEY_PATH"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(ports)
+	}))
+
+	mux.HandleFunc("/api/security/authlog/stream", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if r.Method == "OPTIONS" {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		serverID := r.URL.Query().Get("server_id")
+		if serverID == "" {
+			http.Error(w, "server_id is required", http.StatusBadRequest)
+			return
+		}
+
+		var server database.Server
+		if err := database.DB.Where("id = ?", serverID).First(&server).Error; err != nil {
+			http.Error(w, "Servidor nao encontrado", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		err := ssh.StreamAuthLogs(r.Context(), server.HostIP, server.User, os.Getenv("SSH_KEY_PATH"), w, flusher)
+		if err != nil {
+			log.Printf("Erro no stream de auth logs: %v", err)
+		}
+	})
+
+	mux.HandleFunc("/api/ssl/domains", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			var domains []database.Domain
+			database.DB.Find(&domains)
+			json.NewEncoder(w).Encode(domains)
+			return
+		}
+		if r.Method == "POST" {
+			var req struct {
+				Domain   string `json:"domain"`
+				ServerID string `json:"server_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+				domain := database.Domain{Name: req.Domain, ServerID: req.ServerID}
+				database.DB.Create(&domain)
+				json.NewEncoder(w).Encode(domain)
+			}
+			return
+		}
+		if r.Method == "DELETE" {
+			id := r.URL.Query().Get("id")
+			database.DB.Where("id = ?", id).Delete(&database.Domain{})
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+	}))
+
+	mux.HandleFunc("/api/ssl/check", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		domain := r.URL.Query().Get("domain")
+		if domain == "" {
+			http.Error(w, "domain is required", http.StatusBadRequest)
+			return
+		}
+		
+		info := network.CheckSSL(domain)
+		json.NewEncoder(w).Encode(info)
+	}))
 
 	log.Printf("[RealTime] Servidor da API rodando em http://localhost%s", port)
 	if err := http.ListenAndServe(port, mux); err != nil {

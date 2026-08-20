@@ -25,7 +25,7 @@ func Connect() error {
 		return err
 	}
 
-	err = DB.AutoMigrate(&Server{}, &Container{}, &MetricServer{}, &MetricContainer{}, &MetricLoadBalancer{})
+	err = DB.AutoMigrate(&Server{}, &Container{}, &MetricServer{}, &MetricContainer{}, &MetricLoadBalancer{}, &Domain{})
 	if err != nil {
 		return fmt.Errorf("erro ao migrar as tabelas: %w", err)
 	}

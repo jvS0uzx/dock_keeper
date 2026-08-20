@@ -57,3 +57,10 @@ type MetricLoadBalancer struct {
 	RequestsCount  int       `gorm:"not null"`
 	Timestamp      time.Time `gorm:"index;not null"`
 }
+
+type Domain struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Name      string    `gorm:"size:255;not null;unique" json:"domain"`
+	ServerID  string    `gorm:"type:uuid;index" json:"server_id"`
+	CreatedAt time.Time `json:"created_at"`
+}

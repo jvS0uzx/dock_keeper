@@ -1,68 +1,117 @@
-import React, { useState } from 'react';
-import { ShieldAlert, Activity, Server, AlertOctagon, Terminal, Shield, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ShieldAlert, Activity, Server, AlertOctagon, Terminal, Shield, RefreshCw, XCircle } from 'lucide-react';
+
+interface PortInfo {
+  protocol: string;
+  state: string;
+  port: string;
+  process: string;
+}
+
+interface AuthLog {
+  time: string;
+  raw: string;
+  type: 'error' | 'success' | 'info';
+}
 
 const SecurityView = () => {
   const [activeTab, setActiveTab] = useState<'radar' | 'auth'>('radar');
+  const [servers, setServers] = useState<any[]>([]);
+  const [selectedServer, setSelectedServer] = useState<string>('');
+  
+  const [ports, setPorts] = useState<PortInfo[]>([]);
+  const [loadingPorts, setLoadingPorts] = useState(false);
+  
+  const [authLogs, setAuthLogs] = useState<AuthLog[]>([]);
+  const [streamActive, setStreamActive] = useState(false);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
-  const mockPorts = [
-    { port: 22, protocol: 'tcp', service: 'sshd', process: 'systemd', state: 'LISTEN' },
-    { port: 80, protocol: 'tcp', service: 'nginx', process: 'nginx', state: 'LISTEN' },
-    { port: 443, protocol: 'tcp', service: 'nginx', process: 'nginx', state: 'LISTEN' },
-    { port: 5432, protocol: 'tcp', service: 'postgres', process: 'postgres', state: 'LISTEN' },
-    { port: 6379, protocol: 'tcp', service: 'redis-server', process: 'redis', state: 'LISTEN' },
-  ];
+  // Busca servidores iniciais
+  useEffect(() => {
+    fetch('http://localhost:8080/api/metrics/live')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.servers && data.servers.length > 0) {
+          // Filtra o Load Balancer, pois queremos VPS reais para SSH
+          const vpsList = data.servers.filter((s: any) => s.name !== 'Load Balancer');
+          setServers(vpsList);
+          if (vpsList.length > 0) {
+            setSelectedServer(vpsList[0].id);
+          }
+        }
+      })
+      .catch(console.error);
+  }, []);
 
-  const mockAuthLogs = [
-    { time: '10:42:15', ip: '192.168.1.100', user: 'root', status: 'Failed password', type: 'error' },
-    { time: '10:41:20', ip: '203.0.113.5', user: 'admin', status: 'Failed password', type: 'error' },
-    { time: '10:30:05', ip: '203.0.113.22', user: 'joao', status: 'Accepted publickey', type: 'success' },
-    { time: '09:15:00', ip: '10.0.0.5', user: 'root', status: 'Connection closed', type: 'info' },
-  ];
+  // Efeito Radar de Portas
+  useEffect(() => {
+    if (activeTab === 'radar' && selectedServer) {
+      setLoadingPorts(true);
+      fetch(`http://localhost:8080/api/security/radar?server_id=${selectedServer}`)
+        .then(res => res.json())
+        .then(data => {
+          setPorts(data || []);
+          setLoadingPorts(false);
+        })
+        .catch(err => {
+          console.error(err);
+          setLoadingPorts(false);
+        });
+    }
+  }, [activeTab, selectedServer]);
+
+  // Efeito Stream Auth.log
+  useEffect(() => {
+    if (activeTab === 'auth' && selectedServer) {
+      setAuthLogs([]);
+      setStreamActive(true);
+      
+      const es = new EventSource(`http://localhost:8080/api/security/authlog/stream?server_id=${selectedServer}`);
+      eventSourceRef.current = es;
+
+      es.onmessage = (event) => {
+        const line = event.data;
+        let type: 'error' | 'success' | 'info' = 'info';
+        if (line.includes('Failed') || line.includes('Invalid') || line.includes('error')) type = 'error';
+        if (line.includes('Accepted')) type = 'success';
+        
+        const now = new Date().toLocaleTimeString('pt-BR');
+        setAuthLogs(prev => [...prev.slice(-49), { time: now, raw: line, type }]);
+      };
+
+      es.onerror = () => {
+        es.close();
+        setStreamActive(false);
+      };
+
+      return () => {
+        es.close();
+        setStreamActive(false);
+      };
+    }
+  }, [activeTab, selectedServer]);
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden">
       <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-light text-white mb-2 flex items-center gap-3">
-            <ShieldAlert className="text-[#10b981]" /> Segurança & <span className="font-bold">Auditoria</span>
+            <ShieldAlert className="text-[#10b981]" /> Segurança & <span className="font-bold">Auditoria (Live SSH)</span>
           </h1>
-          <p className="text-[#737373] text-sm">Monitoramento de portas expostas (ss -tuln) e tentativas de intrusão.</p>
+          <p className="text-[#737373] text-sm">Monitoramento de portas expostas (ss -tuln) e tentativas de intrusão via syslog em tempo real.</p>
         </div>
-      </div>
-
-      {/* Resumo */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="glass-panel rounded-xl p-5 border border-white/5 bg-white/[0.02]">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-gray-400 font-medium text-sm">Portas Expostas</h3>
-            <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
-              <Activity size={18} />
-            </div>
-          </div>
-          <div className="text-3xl font-bold text-white">5</div>
-          <p className="text-xs text-gray-500 mt-2">Abertas para 0.0.0.0</p>
-        </div>
-        <div className="glass-panel rounded-xl p-5 border border-white/5 bg-white/[0.02]">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-gray-400 font-medium text-sm">Tentativas SSH (Hoje)</h3>
-            <div className="p-2 bg-rose-500/10 rounded-lg text-rose-400">
-              <AlertOctagon size={18} />
-            </div>
-          </div>
-          <div className="text-3xl font-bold text-white">124</div>
-          <p className="text-xs text-gray-500 mt-2">Falhas de autenticação detectadas</p>
-        </div>
-        <div className="glass-panel rounded-xl p-5 border border-white/5 bg-white/[0.02]">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-gray-400 font-medium text-sm">Status UFW/Fail2Ban</h3>
-            <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
-              <Shield size={18} />
-            </div>
-          </div>
-          <div className="text-xl font-bold text-emerald-400 flex items-center gap-2">
-            Ativo
-          </div>
-          <p className="text-xs text-gray-500 mt-2">Proteção ativa e monitorando</p>
+        
+        <div className="flex items-center gap-2">
+          <label className="text-gray-400 text-sm">Servidor Alvo:</label>
+          <select 
+            className="bg-[#0c0c0e] border border-white/10 text-white text-sm rounded-lg p-2.5 focus:border-[#10b981] focus:outline-none"
+            value={selectedServer}
+            onChange={e => setSelectedServer(e.target.value)}
+          >
+            {servers.map(s => (
+              <option key={s.id} value={s.id}>{s.name} ({s.host_ip})</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -86,45 +135,57 @@ const SecurityView = () => {
         {/* Content */}
         <div className="flex-1 overflow-auto custom-scrollbar p-4">
           {activeTab === 'radar' ? (
+            loadingPorts ? (
+               <div className="flex justify-center items-center h-full text-emerald-400">
+                  <RefreshCw className="animate-spin mr-2" size={20} /> Rodando ss -tuln na VPS...
+               </div>
+            ) : (
             <table className="w-full text-left text-sm whitespace-nowrap">
               <thead className="text-gray-500">
                 <tr>
-                  <th className="py-2 px-4 font-medium">Porta</th>
+                  <th className="py-2 px-4 font-medium">Porta (0.0.0.0)</th>
                   <th className="py-2 px-4 font-medium">Protocolo</th>
                   <th className="py-2 px-4 font-medium">Serviço / Processo</th>
                   <th className="py-2 px-4 font-medium">Estado</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {mockPorts.map((port, idx) => (
+                {ports.map((port, idx) => (
                   <tr key={idx} className="hover:bg-white/[0.02] transition-colors">
-                    <td className="py-3 px-4 font-mono text-gray-300">{port.port}</td>
+                    <td className="py-3 px-4 font-mono text-gray-300 border-l-2 border-transparent hover:border-emerald-500">{port.port}</td>
                     <td className="py-3 px-4 text-gray-400 uppercase">{port.protocol}</td>
                     <td className="py-3 px-4 text-gray-300">
-                      <span className="bg-white/10 px-2 py-1 rounded text-xs mr-2">{port.service}</span>
-                      <span className="text-gray-500">{port.process}</span>
+                      <span className="bg-white/10 px-2 py-1 rounded text-xs text-amber-300">{port.process}</span>
                     </td>
                     <td className="py-3 px-4">
                       <span className="text-emerald-400 text-xs bg-emerald-400/10 px-2 py-1 rounded border border-emerald-400/20">{port.state}</span>
                     </td>
                   </tr>
                 ))}
+                {ports.length === 0 && (
+                   <tr>
+                     <td colSpan={4} className="py-6 text-center text-gray-500">Nenhuma porta LISTEN exposta encontrada.</td>
+                   </tr>
+                )}
               </tbody>
             </table>
+            )
           ) : (
-            <div className="font-mono text-sm bg-[#0c0c0e] rounded-lg p-4 border border-white/5">
-              {mockAuthLogs.map((log, idx) => (
-                <div key={idx} className="mb-2 flex gap-3">
-                  <span className="text-gray-600">{log.time}</span>
-                  <span className="text-blue-400 w-32">{log.ip}</span>
-                  <span className="text-amber-300 w-24">user: {log.user}</span>
+            <div className="font-mono text-sm bg-[#0c0c0e] rounded-lg p-4 border border-white/5 h-full overflow-y-auto">
+              {authLogs.map((log, idx) => (
+                <div key={idx} className="mb-1.5 flex gap-3 break-all">
+                  <span className="text-gray-600 shrink-0">[{log.time}]</span>
                   <span className={log.type === 'error' ? 'text-rose-400' : log.type === 'success' ? 'text-emerald-400' : 'text-gray-400'}>
-                    {log.status}
+                    {log.raw}
                   </span>
                 </div>
               ))}
-              <div className="mt-4 flex items-center text-gray-500 gap-2">
-                <RefreshCw size={14} className="animate-spin" /> Escutando novos eventos...
+              <div className="mt-4 flex items-center text-gray-500 gap-2 border-t border-white/5 pt-2">
+                {streamActive ? (
+                  <><RefreshCw size={14} className="animate-spin text-emerald-500" /> <span className="text-emerald-500/70">Túnel SSH Aberto. Escutando /var/log/auth.log...</span></>
+                ) : (
+                  <><XCircle size={14} className="text-rose-500" /> <span className="text-rose-500/70">Conexão SSE Fechada.</span></>
+                )}
               </div>
             </div>
           )}
