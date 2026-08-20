@@ -6,14 +6,14 @@ import (
 )
 
 type Server struct {
-	ID        string         `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	Name      string         `gorm:"size:255;not null"`
-	HostIP    string         `gorm:"size:255;not null"`
-	User      string         `gorm:"size:100;default:'root'"`
-	Port      int            `gorm:"default:22"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt `gorm:"index"`
+	ID        string         `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	Name      string         `gorm:"size:255;not null" json:"name"`
+	HostIP    string         `gorm:"size:255;not null" json:"host_ip"`
+	User      string         `gorm:"size:100;default:'root'" json:"user"`
+	Port      int            `gorm:"default:22" json:"port"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 type Container struct {
