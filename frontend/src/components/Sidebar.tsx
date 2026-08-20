@@ -1,3 +1,4 @@
+import { LayoutDashboard, Box, Globe, Lock, ShieldAlert, Server } from 'lucide-react';
 
 interface SidebarProps {
   activeTab: string;
@@ -6,12 +7,12 @@ interface SidebarProps {
 
 const Sidebar = ({ activeTab, setActiveTab }: SidebarProps) => {
   const menuItems = [
-    { id: 'dashboard', label: '📊 Dashboard Geral' },
-    { id: 'containers', label: '🐳 Containers' },
-    { id: 'nginx', label: '🌐 Nginx & Tráfego (Read Only)' },
-    { id: 'ssl', label: '🔐 SSL & Domínios' },
-    { id: 'security', label: '🛡️ Segurança & Auditoria' },
-    { id: 'servers', label: '⚙️ Servidores' },
+    { id: 'dashboard', label: 'Dashboard Geral', icon: LayoutDashboard },
+    { id: 'containers', label: 'Containers', icon: Box },
+    { id: 'nginx', label: 'Nginx & Tráfego (Read Only)', icon: Globe },
+    { id: 'ssl', label: 'SSL & Domínios', icon: Lock },
+    { id: 'security', label: 'Segurança & Auditoria', icon: ShieldAlert },
+    { id: 'servers', label: 'Servidores', icon: Server },
   ];
 
   return (
@@ -27,6 +28,7 @@ const Sidebar = ({ activeTab, setActiveTab }: SidebarProps) => {
         <ul className="flex flex-col gap-1 px-3">
           {menuItems.map((item) => {
             const isActive = activeTab === item.id;
+            const Icon = item.icon;
             return (
               <li key={item.id}>
                 <button
@@ -37,6 +39,7 @@ const Sidebar = ({ activeTab, setActiveTab }: SidebarProps) => {
                       : 'text-white/60 hover:bg-white/5 hover:text-white border border-transparent'
                   }`}
                 >
+                  <Icon size={18} className={isActive ? 'text-[#10b981]' : 'text-[#737373]'} />
                   <span className="truncate">{item.label}</span>
                 </button>
               </li>
