@@ -191,7 +191,7 @@ func StartServer(port string) {
 		json.NewEncoder(w).Encode(res)
 	}))
 
-	log.Printf("🚀 Servidor da API rodando em http://localhost%s", port)
+	log.Printf("[RealTime] Servidor da API rodando em http://localhost%s", port)
 	if err := http.ListenAndServe(port, mux); err != nil {
 		log.Fatalf("Erro crítico na API HTTP: %v", err)
 	}

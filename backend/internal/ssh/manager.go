@@ -32,7 +32,7 @@ func (m *ServerManager) Start(id, host, user, keyPath string) {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Printf("🛑 Parando stream SSH para a VPS %s...", host)
+				log.Printf("[RealTime] Parando stream SSH para a VPS %s...", host)
 				return
 			default:
 				err := StartStream(host, user, keyPath)

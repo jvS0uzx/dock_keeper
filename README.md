@@ -1,65 +1,67 @@
-# VD Stats (v2)
+# DockKeeper (Formerly VD Stats)
 
-Uma plataforma em tempo real para monitoramento de servidores (VPS), containers Docker e fluxo de balanceamento de carga (NGINX).
+**DockKeeper** is an agentless, self-hosted platform for real-time observability and management of VPS environments, Docker containers, and NGINX Load Balancers. 
 
-O sistema usa uma arquitetura de extração via SSH, agregação em memória no Go (redução de gargalo de banco de dados) e armazenamento no PostgreSQL para retenção de histórico. O Frontend (React/Vite) consulta essa API para exibição em painéis dinâmicos.
+Built with Go (Backend) and React (Frontend), it connects to your servers exclusively via SSH. No agents to install on your target servers—just add your SSH keys and IPs, and you instantly get a beautiful, unified dashboard with live metrics, history, and container management.
 
-## Fluxo e Arquitetura do Projeto
+## 🚀 Vision (SaaS Evolution)
+
+DockKeeper is evolving from a simple CLI/monitoring tool (`vd_stats`) into a full-fledged local SaaS. The next major milestones include:
+1. **Dynamic Server Management:** Transition from `.env`-based server loading to a complete CRUD interface in the Frontend, storing servers safely in PostgreSQL.
+2. **Container Actions:** Not just monitoring, but allowing you to Restart/Stop/View Logs of containers directly from the UI.
+3. **SSL/Domain Monitoring:** Automated cron jobs that check your domain's SSL validity and alert you before expiration.
+4. **Alerting System:** Webhook/Telegram notifications when a server or container goes down or CPU/RAM spikes.
+
+## 🏗️ Architecture
 
 1. **Backend (Go Engine):**
-   - Estabelece conexões SSH seguras com os servidores VPS.
-   - Executa comandos não-bloqueantes para extrair métricas de CPU, Memória e Disco de processos, containers (Docker) e NGINX (Logs de acesso).
-   - Mantém agregação em memória (Mutex lock) para não sobrecarregar o banco com inserções contínuas, gravando lotes consolidados no PostgreSQL.
-   - Fornece endpoints REST para o Frontend consumir métricas consolidadas e históricas.
+   - **Agentless:** Establishes secure SSH connections using your local keys.
+   - Executes non-blocking commands (`docker stats`, `top`, `df -h`) and streams logs.
+   - Buffers real-time metrics in memory (Mutex lock) and flushes batches to PostgreSQL to prevent I/O bottlenecks.
+   - Serves REST/WebSocket endpoints.
 
 2. **Frontend (React + Vite + Tailwind):**
-   - Consome a API Go para alimentar gráficos dinâmicos de consumo de CPU, RAM e Disco de Containers.
-   - Mapeia ativamente o fluxo e distribuição do Load Balancer em um painel específico.
+   - Sleek "glass-panel" UI with Recharts for time-series data.
+   - Real-time gauges and metric tables.
+   - Load Balancer traffic visualization.
 
 3. **Database (PostgreSQL):**
-   - Armazena metadados e séries temporais com alto desempenho de leitura.
+   - Persists temporal data and configurations.
 
-## Como Executar (Ambiente de Desenvolvimento)
+## 🛠️ How to Run (Development)
 
-### 1. Configurar Variáveis de Ambiente
-Crie um arquivo `.env` na raiz ou exporte as seguintes variáveis:
-```bash
-export DATABASE_URL="host=localhost user=SEU_USER password=SUA_SENHA dbname=vd_stats port=5432 sslmode=disable TimeZone=UTC"
-
-# Servidores Alvo
-export VPS1_IP="0.0.0.0"
-export VPS2_IP="0.0.0.0"
-export LB_IP="0.0.0.0"
-
-# Autenticação
-export SSH_USER="root"
-export SSH_KEY_PATH="~/.ssh/sua_chave_aqui"
-```
-
-No Frontend, crie um arquivo `frontend/.env`:
+### 1. Environment Setup
+Create a `.env` in the root:
 ```env
-VITE_VPS1_IP="IP DA VPS 1"
-VITE_VPS2_IP="IP DA VPS 2"
-VITE_LB_IP="IP DO LOAD BALANCER"
+# Database
+DATABASE_URL="host=localhost user=postgres password=root dbname=dockkeeper port=5432 sslmode=disable TimeZone=UTC"
+
+# Initial Seeding (Soon to be migrated to UI-based management)
+TARGET_VPS_IPS="10.0.0.1,10.0.0.2"
+LB_IP="10.0.0.3"
+
+# SSH Authentication
+SSH_USER="root"
+SSH_KEY_PATH="~/.ssh/id_rsa"
 ```
 
-### 2. Rodando o Backend
+Frontend `.env` (`frontend/.env`):
+```env
+VITE_LB_IP="10.0.0.3"
+```
+
+### 2. Backend
 ```bash
 cd backend
 go mod tidy
-go run cmd/vd_stats/main.go
+go run cmd/vd_stats/main.go # Note: binary rename pending
 ```
 
-### 3. Rodando o Frontend
+### 3. Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-## Como funciona a extração dos dados (Load Balancer)
-O backend conecta-se via stream SSH (`tail -f`) ao log de acesso (`access.log`) do NGINX do Load Balancer. Cada linha recebida é processada com base nas variáveis do bloco upstream:
-* `upstream_addr`: Identifica para qual servidor de processamento o tráfego foi roteado. Se não houver processamento externo (ex: cache de estáticos, redirects), é capturado como tráfego Local.
-* `server_name`: Identifica o projeto / domínio do request (`$host` config no Nginx).
-
-*Este repositório foi otimizado e formatado para uso open-source.*
+*Built for Developers, by Developers.*

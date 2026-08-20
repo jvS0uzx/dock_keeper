@@ -30,7 +30,7 @@ func Connect() error {
 		return fmt.Errorf("erro ao migrar as tabelas: %w", err)
 	}
 	
-	log.Println("📦 Schemas do Banco de Dados criados/atualizados com sucesso!")
+	log.Println("[RealTime] Schemas do Banco de Dados criados/atualizados com sucesso!")
 
 	return nil
 }

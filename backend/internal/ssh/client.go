@@ -17,19 +17,46 @@ import (
 
 func parseDockerSize(sizeStr string) int64 {
 	sizeStr = strings.TrimSpace(sizeStr)
-	if sizeStr == "" { return 0 }
-	var val float64
-	var unit string
-	fmt.Sscanf(sizeStr, "%f%s", &val, &unit)
-
-	unit = strings.ToUpper(unit)
-	multiplier := float64(1)
-	switch {
-	case strings.Contains(unit, "K"): multiplier = 1024
-	case strings.Contains(unit, "M"): multiplier = 1024 * 1024
-	case strings.Contains(unit, "G"): multiplier = 1024 * 1024 * 1024
-	case strings.Contains(unit, "T"): multiplier = 1024 * 1024 * 1024 * 1024
+	if sizeStr == "" {
+		return 0
 	}
+
+	// Separa a parte numérica da unidade de medida
+	var numStr, unitStr string
+	for i, r := range sizeStr {
+		// Ao encontrar a primeira letra, dividimos a string
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+			numStr = sizeStr[:i]
+			unitStr = sizeStr[i:]
+			break
+		}
+	}
+
+	// Se não encontrou unidade, a string inteira é o número
+	if numStr == "" {
+		numStr = sizeStr
+	}
+
+	val, err := strconv.ParseFloat(strings.TrimSpace(numStr), 64)
+	if err != nil {
+		return 0
+	}
+
+	var multiplier float64 = 1
+	if len(unitStr) > 0 {
+		// Verifica apenas o primeiro caractere da unidade (K, M, G, T)
+		switch unitStr[0] {
+		case 'k', 'K':
+			multiplier = 1024
+		case 'm', 'M':
+			multiplier = 1024 * 1024
+		case 'g', 'G':
+			multiplier = 1024 * 1024 * 1024
+		case 't', 'T':
+			multiplier = 1024 * 1024 * 1024 * 1024
+		}
+	}
+
 	return int64(val * multiplier)
 }
 
@@ -39,10 +66,17 @@ func parsePercent(p string) float64 {
 	return val
 }
 
+type ContainerPayload struct {
+	DockerID   string `json:"docker_id"`
+	Name       string `json:"name"`
+	CPUPercent string `json:"cpu_percent"`
+	MemUsage   string `json:"mem_usage"`
+}
+
 type SysPayload struct {
-	Uptime     float64               `json:"uptime"`
-	DiskRoot   string                `json:"disk_root"`
-	Containers []map[string]string   `json:"containers"`
+	Uptime     float64            `json:"uptime"`
+	DiskRoot   string             `json:"disk_root"`
+	Containers []ContainerPayload `json:"containers"`
 }
 
 func StartStream(host, user, keyPath string) error {
@@ -70,7 +104,7 @@ func StartStream(host, user, keyPath string) error {
 	}
 
 	hostPort := fmt.Sprintf("%s:22", host)
-	log.Printf("🔌 Iniciando conexão SSH com a VPS %s...", hostPort)
+	log.Printf("[RealTime] Iniciando conexão SSH com a VPS %s...", hostPort)
 	
 	startPing := time.Now()
 	client, err := ssh.Dial("tcp", hostPort, config)
@@ -97,6 +131,9 @@ done`
 	err = session.Start(query)
 	if err != nil { return err }
 
+	// Cache de containers na memória para evitar SELECT (FirstOrCreate) a cada loop
+	containerCache := make(map[string]string)
+
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -117,26 +154,39 @@ done`
 			PingLatencyMs: latencyMs, Timestamp: time.Now().UTC(),
 		})
 
-		for _, raw := range payload.Containers {
-			dockerID := raw["docker_id"]
-			var container database.Container
-			database.DB.Where("server_id = ? AND docker_id = ?", server.ID, dockerID).FirstOrCreate(&container, database.Container{
-				ServerID: server.ID, DockerID: dockerID, Name: raw["name"],
-			})
+		var containerMetrics []database.MetricContainer
 
-			memParts := strings.Split(raw["mem_usage"], "/")
+		for _, raw := range payload.Containers {
+			containerID, exists := containerCache[raw.DockerID]
+			if !exists {
+				// Só vai ao banco se for um container novo que ainda não está no cache
+				var container database.Container
+				database.DB.Where("server_id = ? AND docker_id = ?", server.ID, raw.DockerID).FirstOrCreate(&container, database.Container{
+					ServerID: server.ID, DockerID: raw.DockerID, Name: raw.Name,
+				})
+				containerID = container.ID
+				containerCache[raw.DockerID] = containerID
+			}
+
+			memParts := strings.Split(raw.MemUsage, "/")
 			var memUsed, memLimit int64
 			if len(memParts) == 2 {
 				memUsed = parseDockerSize(memParts[0])
 				memLimit = parseDockerSize(memParts[1])
 			}
 
-			database.DB.Create(&database.MetricContainer{
-				ContainerID: container.ID, CPUUsagePercent: parsePercent(raw["cpu_percent"]),
+			containerMetrics = append(containerMetrics, database.MetricContainer{
+				ContainerID: containerID, CPUUsagePercent: parsePercent(raw.CPUPercent),
 				MemUsedBytes: memUsed, MemLimitBytes: memLimit,
 				Status: "running", Timestamp: time.Now().UTC(),
 			})
 		}
+		
+		// Batch Insert de todas as métricas dos containers de uma só vez
+		if len(containerMetrics) > 0 {
+			database.DB.Create(&containerMetrics)
+		}
+
 		log.Printf("[GRAVADO] %s | Latência: %.0fms | Containers: %d", host, latencyMs, len(payload.Containers))
 	}
 	return session.Wait()
@@ -164,7 +214,7 @@ func StartNginxStream(host, user, keyPath string) error {
 	}
 
 	hostPort := fmt.Sprintf("%s:22", host)
-	log.Printf("🔌 Iniciando stream do NGINX na VPS %s...", hostPort)
+	log.Printf("[RealTime] Iniciando stream do NGINX na VPS %s...", hostPort)
 	
 	client, err := ssh.Dial("tcp", hostPort, config)
 	if err != nil { return err }
