@@ -78,8 +78,16 @@ const ContainersView = () => {
                 </tr>
               ) : (
                 filtered.map((c, idx) => {
-                  const memUsedMB = (c.mem_used / 1024 / 1024).toFixed(1);
-                  const memLimitMB = (c.mem_limit / 1024 / 1024).toFixed(1);
+                  const formatBytes = (bytes: number) => {
+                    if (bytes === 0) return '0 B';
+                    const k = 1024;
+                    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+                  };
+                  
+                  const memUsedStr = formatBytes(c.mem_used);
+                  const memLimitStr = formatBytes(c.mem_limit);
                   const memPercent = c.mem_limit > 0 ? ((c.mem_used / c.mem_limit) * 100).toFixed(1) : '0.0';
                   
                   return (
@@ -101,7 +109,7 @@ const ContainersView = () => {
                       </td>
                       <td className="py-4 px-4 text-right font-medium text-white/90">
                         <div className="flex flex-col items-end">
-                          <span>{memUsedMB} MB <span className="text-[#737373] text-xs">/ {memLimitMB} MB</span></span>
+                          <span>{memUsedStr} <span className="text-[#737373] text-xs">/ {memLimitStr}</span></span>
                           <span className="text-[10px] text-[#10b981] mt-0.5">{memPercent}%</span>
                         </div>
                       </td>

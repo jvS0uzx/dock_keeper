@@ -485,18 +485,28 @@ export default function Dashboard() {
                 <tr>
                   <th className="py-3 px-2 rounded-l">Container</th>
                   <th className="py-3 px-2 text-right">CPU</th>
-                  <th className="py-3 px-2 text-right rounded-r">Memória (MB)</th>
+                  <th className="py-3 px-2 text-right rounded-r">Memória</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredContainers.length === 0 && <tr><td colSpan={3} className="text-center py-8 text-[#737373] text-xs">Buscando dados no motor Go...</td></tr>}
-                {filteredContainers.map(s => (
+                {filteredContainers.map(s => {
+                  const formatBytes = (bytes: number) => {
+                    if (bytes === 0) return '0 B';
+                    const k = 1024;
+                    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+                  };
+
+                  return (
                   <tr key={s.docker_id} className="border-b border-white/[0.03] hover:bg-white/[0.05] transition-all duration-300">
                     <td className="py-3 px-2 text-[#f59e0b] font-mono text-[12px]">{s.name}</td>
                     <td className="py-3 px-2 text-right font-medium text-white/90">{s.cpu.toFixed(2)}%</td>
-                    <td className="py-3 px-2 text-right font-medium text-white/90">{(s.mem_used / 1024 / 1024).toFixed(1)}</td>
+                    <td className="py-3 px-2 text-right font-medium text-white/90">{formatBytes(s.mem_used)}</td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
