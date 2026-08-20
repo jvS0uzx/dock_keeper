@@ -29,19 +29,39 @@ func (m *ServerManager) Start(id, host, user, keyPath string) {
 	m.cancelFuncs[id] = cancel
 
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				log.Printf("[RealTime] Parando stream SSH para a VPS %s...", host)
-				return
-			default:
-				err := StartStream(host, user, keyPath)
-				if err != nil {
-					log.Printf("Erro na VPS %s: %v. Tentando reconectar em 5s...", host, err)
-					time.Sleep(5 * time.Second)
+		// Goroutine para métricas gerais (Docker/CPU)
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					log.Printf("[RealTime] Parando stream SSH para a VPS %s...", host)
+					return
+				default:
+					err := StartStream(host, user, keyPath)
+					if err != nil {
+						log.Printf("Erro na VPS %s: %v. Tentando reconectar em 5s...", host, err)
+						time.Sleep(5 * time.Second)
+					}
 				}
 			}
-		}
+		}()
+
+		// Goroutine para o Nginx Access Log
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					log.Printf("[RealTime] Parando stream NGINX para a VPS %s...", host)
+					return
+				default:
+					err := StartNginxStream(host, user, keyPath)
+					if err != nil {
+						log.Printf("Erro no NGINX Stream %s: %v. Tentando reconectar em 5s...", host, err)
+						time.Sleep(5 * time.Second)
+					}
+				}
+			}
+		}()
 	}()
 }
 

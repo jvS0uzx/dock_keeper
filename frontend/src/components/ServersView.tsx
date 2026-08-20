@@ -8,8 +8,15 @@ interface Server {
   created_at: string;
 }
 
+interface ServerLiveStat {
+  id: string;
+  uptime: number;
+  latency_ms: number;
+}
+
 const ServersView = () => {
   const [servers, setServers] = useState<Server[]>([]);
+  const [liveStats, setLiveStats] = useState<Record<string, ServerLiveStat>>({});
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ name: '', host_ip: '', user: 'root' });
 
@@ -25,8 +32,27 @@ const ServersView = () => {
     }
   };
 
+  const fetchLiveStatus = async () => {
+    try {
+      const res = await fetch('http://localhost:8080/api/metrics/live');
+      const data = await res.json();
+      const statsMap: Record<string, ServerLiveStat> = {};
+      if (data.servers) {
+        data.servers.forEach((s: ServerLiveStat) => {
+          statsMap[s.id] = s;
+        });
+      }
+      setLiveStats(statsMap);
+    } catch (err) {
+      // ignora erro silenciosamente
+    }
+  };
+
   useEffect(() => {
     fetchServers();
+    fetchLiveStatus();
+    const interval = setInterval(fetchLiveStatus, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleAdd = async (e: React.FormEvent) => {
@@ -125,12 +151,16 @@ const ServersView = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {servers.map((s) => (
+                  {servers.map((s) => {
+                    const isOnline = liveStats[s.id] && liveStats[s.id].uptime > 0;
+                    return (
                     <tr key={s.id} className="border-b border-white/[0.03] hover:bg-white/[0.05] transition-all">
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-[#10b981] animate-pulse"></span>
-                          <span className="text-[10px] text-[#10b981] font-bold tracking-widest uppercase">Online</span>
+                          <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-[#10b981] animate-pulse' : 'bg-red-500'}`}></span>
+                          <span className={`text-[10px] ${isOnline ? 'text-[#10b981]' : 'text-red-500'} font-bold tracking-widest uppercase`}>
+                            {isOnline ? 'Online' : 'Offline'}
+                          </span>
                         </div>
                       </td>
                       <td className="py-4 px-4 font-medium text-white/90">{s.name}</td>
@@ -145,7 +175,8 @@ const ServersView = () => {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
