@@ -120,15 +120,21 @@ func StartStream(host, user, keyPath string) error {
 	stdout, err := session.StdoutPipe()
 	if err != nil { return err }
 
-	query := `while true; do
-  DOCKER_JSON=$(docker stats --no-stream --format '{"docker_id":"{{.ID}}","name":"{{.Name}}","cpu_percent":"{{.CPUPerc}}","mem_usage":"{{.MemUsage}}"}' | paste -sd, -)
-  UPTIME=$(cat /proc/uptime | awk '{print $1}')
-  DISK_ROOT=$(df -B1 / | awk 'NR==2 {print $3","$2}')
-  echo "{\"uptime\":$UPTIME,\"disk_root\":\"$DISK_ROOT\",\"containers\":[$DOCKER_JSON]}"
-  sleep 2
-done`
+	scriptBytes, err := os.ReadFile("scripts/stream_metrics.sh")
+	if err != nil { return fmt.Errorf("erro ao ler script de métricas: %w", err) }
 
-	err = session.Start(query)
+	stdin, err := session.StdinPipe()
+	if err != nil { return err }
+
+	// Aqui podemos injetar params base64 no futuro (ex: para IPs específicos)
+	finalScript := string(scriptBytes)
+
+	go func() {
+		defer stdin.Close()
+		stdin.Write([]byte(finalScript))
+	}()
+
+	err = session.Start("bash -s")
 	if err != nil { return err }
 
 	// Cache de containers na memória para evitar SELECT (FirstOrCreate) a cada loop
@@ -227,8 +233,18 @@ func StartNginxStream(host, user, keyPath string) error {
 	stdout, err := session.StdoutPipe()
 	if err != nil { return err }
 
-	query := `tail -n 0 -F /var/log/nginx/access.log`
-	err = session.Start(query)
+	scriptBytes, err := os.ReadFile("scripts/stream_nginx.sh")
+	if err != nil { return fmt.Errorf("erro ao ler script nginx: %w", err) }
+
+	stdin, err := session.StdinPipe()
+	if err != nil { return err }
+
+	go func() {
+		defer stdin.Close()
+		stdin.Write(scriptBytes)
+	}()
+
+	err = session.Start("bash -s")
 	if err != nil { return err }
 
 	scanner := bufio.NewScanner(stdout)
