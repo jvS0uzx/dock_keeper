@@ -79,15 +79,7 @@ type SysPayload struct {
 	Containers []ContainerPayload `json:"containers"`
 }
 
-func StartStream(host, user, keyPath string) error {
-	name := "VPS Veloci-Auto"
-	if strings.Contains(host, "39") {
-		name = "VPS Veloci-BI"
-	}
-	var server database.Server
-	database.DB.Where("host_ip = ?", host).FirstOrCreate(&server, database.Server{
-		Name: name, HostIP: host, User: user,
-	})
+func StartStream(serverID, host, user, keyPath string) error {
 
 	keyPath = strings.Replace(keyPath, "~", os.Getenv("HOME"), 1)
 	keyBytes, err := os.ReadFile(keyPath)
@@ -155,7 +147,7 @@ func StartStream(host, user, keyPath string) error {
 		}
 
 		database.DB.Create(&database.MetricServer{
-			ServerID: server.ID, UptimeSeconds: payload.Uptime,
+			ServerID: serverID, UptimeSeconds: payload.Uptime,
 			DiskUsedBytes: dUsed, DiskTotalBytes: dTotal,
 			PingLatencyMs: latencyMs, Timestamp: time.Now().UTC(),
 		})
@@ -167,8 +159,8 @@ func StartStream(host, user, keyPath string) error {
 			if !exists {
 				// Só vai ao banco se for um container novo que ainda não está no cache
 				var container database.Container
-				database.DB.Where("server_id = ? AND docker_id = ?", server.ID, raw.DockerID).FirstOrCreate(&container, database.Container{
-					ServerID: server.ID, DockerID: raw.DockerID, Name: raw.Name,
+				database.DB.Where("server_id = ? AND docker_id = ?", serverID, raw.DockerID).FirstOrCreate(&container, database.Container{
+					ServerID: serverID, DockerID: raw.DockerID, Name: raw.Name,
 				})
 				containerID = container.ID
 				containerCache[raw.DockerID] = containerID
@@ -198,12 +190,7 @@ func StartStream(host, user, keyPath string) error {
 	return session.Wait()
 }
 
-func StartNginxStream(host, user, keyPath string) error {
-	name := "Load Balancer"
-	var server database.Server
-	database.DB.Where("host_ip = ?", host).FirstOrCreate(&server, database.Server{
-		Name: name, HostIP: host, User: user,
-	})
+func StartNginxStream(serverID, host, user, keyPath string) error {
 
 	keyPath = strings.Replace(keyPath, "~", os.Getenv("HOME"), 1)
 	keyBytes, err := os.ReadFile(keyPath)

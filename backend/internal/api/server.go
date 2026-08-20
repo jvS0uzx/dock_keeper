@@ -83,10 +83,11 @@ func StartServer(port string) {
 				req.User = "root"
 			}
 			var server database.Server
-			database.DB.FirstOrCreate(&server, database.Server{
+			database.DB.Where("host_ip = ?", req.HostIP).Assign(database.Server{
+				Name: req.Name,
+				User: req.User,
+			}).FirstOrCreate(&server, database.Server{
 				HostIP: req.HostIP,
-				Name:   req.Name,
-				User:   req.User,
 			})
 			sshKey := os.Getenv("SSH_KEY_PATH")
 			ssh.Manager.Start(server.ID, server.HostIP, server.User, sshKey)

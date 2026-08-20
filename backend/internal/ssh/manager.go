@@ -37,7 +37,7 @@ func (m *ServerManager) Start(id, host, user, keyPath string) {
 					log.Printf("[RealTime] Parando stream SSH para a VPS %s...", host)
 					return
 				default:
-					err := StartStream(host, user, keyPath)
+					err := StartStream(id, host, user, keyPath)
 					if err != nil {
 						log.Printf("Erro na VPS %s: %v. Tentando reconectar em 5s...", host, err)
 						time.Sleep(5 * time.Second)
@@ -54,7 +54,7 @@ func (m *ServerManager) Start(id, host, user, keyPath string) {
 					log.Printf("[RealTime] Parando stream NGINX para a VPS %s...", host)
 					return
 				default:
-					err := StartNginxStream(host, user, keyPath)
+					err := StartNginxStream(id, host, user, keyPath)
 					if err != nil {
 						log.Printf("Erro no NGINX Stream %s: %v. Tentando reconectar em 5s...", host, err)
 						time.Sleep(5 * time.Second)
