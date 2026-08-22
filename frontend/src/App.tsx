@@ -6,6 +6,9 @@ import NginxView from './components/NginxView';
 import SslView from './components/SslView';
 import SecurityView from './components/SecurityView';
 import ServersView from './components/ServersView';
+import MetricsHistoryView from './components/MetricsHistoryView';
+import AlertRulesView from './components/AlertRulesView';
+import LogsView from './components/LogsView';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -14,12 +17,18 @@ function App() {
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard />;
+      case 'history':
+        return <MetricsHistoryView />;
       case 'containers':
         return <ContainersView />;
       case 'nginx':
         return <NginxView />;
       case 'ssl':
         return <SslView />;
+      case 'alerts':
+        return <AlertRulesView />;
+      case 'logs':
+        return <LogsView />;
       case 'security':
         return <SecurityView />;
       case 'servers':

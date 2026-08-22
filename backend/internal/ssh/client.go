@@ -16,6 +16,7 @@ import (
 
 	"github.com/joaov/vd_stats/internal/alert"
 	"github.com/joaov/vd_stats/internal/database"
+	"github.com/joaov/vd_stats/internal/logstore"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -412,7 +413,7 @@ func StartNginxStream(ctx context.Context, serverID, host, user, keyPath string)
 	return session.Wait()
 }
 
-func StreamDockerLogs(ctx context.Context, host, user, keyPath, containerName string, w http.ResponseWriter, flusher http.Flusher) error {
+func StreamDockerLogs(ctx context.Context, serverID, host, user, keyPath, containerName string, w http.ResponseWriter, flusher http.Flusher) error {
 	if !validContainerName.MatchString(containerName) {
 		return fmt.Errorf("nome de container inválido: %q", containerName)
 	}
@@ -480,6 +481,7 @@ func StreamDockerLogs(ctx context.Context, host, user, keyPath, containerName st
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		line := scanner.Text()
+		logstore.Save(serverID, "container", containerName, line)
 		fmt.Fprintf(w, "data: %s\n\n", line)
 		flusher.Flush()
 	}

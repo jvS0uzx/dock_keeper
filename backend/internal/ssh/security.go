@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joaov/vd_stats/internal/logstore"
 	"golang.org/x/crypto/ssh"
 )
 
-func StreamAuthLogs(ctx context.Context, host, user, keyPath string, w http.ResponseWriter, flusher http.Flusher) error {
+func StreamAuthLogs(ctx context.Context, serverID, host, user, keyPath string, w http.ResponseWriter, flusher http.Flusher) error {
 	keyPath = strings.Replace(keyPath, "~", os.Getenv("HOME"), 1)
 	keyBytes, err := os.ReadFile(keyPath)
 	if err != nil {
@@ -64,6 +65,7 @@ func StreamAuthLogs(ctx context.Context, host, user, keyPath string, w http.Resp
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		line := scanner.Text()
+		logstore.Save(serverID, "auth", "", line)
 		fmt.Fprintf(w, "data: %s\n\n", line)
 		flusher.Flush()
 	}

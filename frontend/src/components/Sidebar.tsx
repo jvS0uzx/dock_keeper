@@ -1,4 +1,4 @@
-import { LayoutDashboard, Box, Globe, Lock, ShieldAlert, Server } from 'lucide-react';
+import { LayoutDashboard, Box, Globe, Lock, ShieldAlert, Server, LineChart, BellRing, ScrollText } from 'lucide-react';
 
 interface SidebarProps {
   activeTab: string;
@@ -8,9 +8,12 @@ interface SidebarProps {
 const Sidebar = ({ activeTab, setActiveTab }: SidebarProps) => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard Geral', icon: LayoutDashboard },
+    { id: 'history', label: 'Histórico de Métricas', icon: LineChart },
     { id: 'containers', label: 'Containers', icon: Box },
     { id: 'nginx', label: 'Nginx & Tráfego (Read Only)', icon: Globe },
     { id: 'ssl', label: 'SSL & Domínios', icon: Lock },
+    { id: 'alerts', label: 'Regras de Alerta', icon: BellRing },
+    { id: 'logs', label: 'Logs & Busca', icon: ScrollText },
     { id: 'security', label: 'Segurança & Auditoria', icon: ShieldAlert },
     { id: 'servers', label: 'Servidores', icon: Server },
   ];

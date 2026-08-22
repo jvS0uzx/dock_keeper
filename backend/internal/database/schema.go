@@ -11,9 +11,33 @@ type Server struct {
 	HostIP    string         `gorm:"size:255;not null" json:"host_ip"`
 	User      string         `gorm:"size:100;default:'root'" json:"user"`
 	Port      int            `gorm:"default:22" json:"port"`
+	Kind      string         `gorm:"size:20;default:'ssh'" json:"kind"` // "ssh" (coleta via SSH) ou "agent" (push)
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+// AlertRule é uma regra configurável de alerta sobre métricas de host.
+type AlertRule struct {
+	ID        uint       `gorm:"primaryKey" json:"id"`
+	Name      string     `gorm:"size:255;not null" json:"name"`
+	Target    string     `gorm:"size:64;not null;default:'*'" json:"target"` // server_id ou "*" (todos)
+	Metric    string     `gorm:"size:32;not null" json:"metric"`             // cpu | mem | disk | load
+	Operator  string     `gorm:"size:4;not null" json:"operator"`            // ">" ou "<"
+	Threshold float64    `gorm:"not null" json:"threshold"`
+	Enabled   bool       `gorm:"default:true" json:"enabled"`
+	LastFired *time.Time `json:"last_fired"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+// LogEntry armazena linhas de log (auth.log / container) para histórico e busca.
+type LogEntry struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	ServerID  string    `gorm:"type:uuid;index:idx_logentry_srv_ts,priority:1" json:"server_id"`
+	Source    string    `gorm:"size:20;index" json:"source"` // "auth" | "container"
+	Container string    `gorm:"size:255;index" json:"container"`
+	Line      string    `gorm:"type:text" json:"line"`
+	Timestamp time.Time `gorm:"index:idx_logentry_srv_ts,priority:2,sort:desc" json:"timestamp"`
 }
 
 type Container struct {

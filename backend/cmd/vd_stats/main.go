@@ -7,7 +7,9 @@ import (
 
 	"github.com/joaov/vd_stats/internal/api"
 	"github.com/joaov/vd_stats/internal/database"
+	"github.com/joaov/vd_stats/internal/logstore"
 	"github.com/joaov/vd_stats/internal/network"
+	"github.com/joaov/vd_stats/internal/rules"
 	"github.com/joaov/vd_stats/internal/ssh"
 	"github.com/joho/godotenv"
 )
@@ -28,6 +30,12 @@ func main() {
 	// Revalida os certificados a cada 30min e alerta os que estão vencendo.
 	// O check imediato (ao adicionar) e o recheck manual dão o feedback ao vivo.
 	network.StartSSLWorker(30 * time.Minute)
+
+	// Motor de regras de alerta sobre métricas de host (avalia a cada 30s).
+	rules.StartEngine(30 * time.Second)
+
+	// Retenção do histórico de logs (7 dias, varre a cada 1h).
+	logstore.StartRetention(7*24*time.Hour, time.Hour)
 
 	go api.StartServer(":8080")
 

@@ -63,7 +63,7 @@ func StartServer(port string) {
 	withCORS := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 			w.Header().Set("Content-Type", "application/json")
 			if r.Method == "OPTIONS" {
@@ -243,7 +243,7 @@ func StartServer(port string) {
 		sshKey := os.Getenv("SSH_KEY_PATH")
 		ctx := r.Context()
 
-		err := ssh.StreamDockerLogs(ctx, server.HostIP, server.User, sshKey, containerName, w, flusher)
+		err := ssh.StreamDockerLogs(ctx, server.ID, server.HostIP, server.User, sshKey, containerName, w, flusher)
 		if err != nil {
 			log.Printf("Erro no stream de logs: %v", err)
 		}
@@ -328,7 +328,7 @@ func StartServer(port string) {
 			return
 		}
 
-		err := ssh.StreamAuthLogs(r.Context(), server.HostIP, server.User, os.Getenv("SSH_KEY_PATH"), w, flusher)
+		err := ssh.StreamAuthLogs(r.Context(), server.ID, server.HostIP, server.User, os.Getenv("SSH_KEY_PATH"), w, flusher)
 		if err != nil {
 			log.Printf("Erro no stream de auth logs: %v", err)
 		}
@@ -396,6 +396,12 @@ func StartServer(port string) {
 		w.WriteHeader(http.StatusAccepted)
 		json.NewEncoder(w).Encode(map[string]string{"status": "checking"})
 	}))
+
+	// Fase 6 — paridade com Grafana.
+	mux.HandleFunc("/api/metrics/history", withCORS(HistoryHandler)) // #1 histórico
+	mux.HandleFunc("/api/alerts/rules", withCORS(AlertRulesHandler)) // #2 regras de alerta
+	mux.HandleFunc("/api/ingest/metrics", IngestHandler)             // #3 ingestão do agente push (auth por token)
+	mux.HandleFunc("/api/logs/search", withCORS(LogSearchHandler))   // #4 busca de logs
 
 	log.Printf("[RealTime] Servidor da API rodando em http://localhost%s", port)
 	if err := http.ListenAndServe(port, mux); err != nil {
