@@ -15,25 +15,33 @@ import (
 func StreamAuthLogs(ctx context.Context, host, user, keyPath string, w http.ResponseWriter, flusher http.Flusher) error {
 	keyPath = strings.Replace(keyPath, "~", os.Getenv("HOME"), 1)
 	keyBytes, err := os.ReadFile(keyPath)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	signer, err := ssh.ParsePrivateKey(keyBytes)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	config := &ssh.ClientConfig{
-		User: user,
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		User:            user,
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout: 10 * time.Second,
+		Timeout:         10 * time.Second,
 	}
 
 	hostPort := fmt.Sprintf("%s:22", host)
 	client, err := ssh.Dial("tcp", hostPort, config)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer client.Close()
 
 	session, err := client.NewSession()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -43,11 +51,15 @@ func StreamAuthLogs(ctx context.Context, host, user, keyPath string, w http.Resp
 	defer session.Close()
 
 	stdout, err := session.StdoutPipe()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	// Lê as últimas 20 linhas e acompanha
 	err = session.Start("tail -n 20 -f /var/log/auth.log")
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
@@ -69,40 +81,52 @@ type PortInfo struct {
 func GetRadarPorts(host, user, keyPath string) ([]PortInfo, error) {
 	keyPath = strings.Replace(keyPath, "~", os.Getenv("HOME"), 1)
 	keyBytes, err := os.ReadFile(keyPath)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 
 	signer, err := ssh.ParsePrivateKey(keyBytes)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 
 	config := &ssh.ClientConfig{
-		User: user,
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		User:            user,
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout: 10 * time.Second,
+		Timeout:         10 * time.Second,
 	}
 
 	hostPort := fmt.Sprintf("%s:22", host)
 	client, err := ssh.Dial("tcp", hostPort, config)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer client.Close()
 
 	session, err := client.NewSession()
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer session.Close()
 
 	out, err := session.Output("ss -tulnp | grep LISTEN")
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 
 	var ports []PortInfo
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
-		if strings.TrimSpace(line) == "" { continue }
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
 		fields := strings.Fields(line)
 		if len(fields) >= 5 {
 			// tcp LISTEN 0 128 0.0.0.0:22 ...
 			protocol := fields[0]
 			state := fields[1]
-			
+
 			// extrai a porta
 			localAddr := fields[4] // 0.0.0.0:22 ou *:80
 			portIdx := strings.LastIndex(localAddr, ":")

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_URL } from '../config';
 import { Clock, Filter, Radio, Globe, Server, Database, Activity, ArrowRight } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
@@ -361,7 +362,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const fetchMetrics = () => {
-      fetch('http://localhost:8080/api/metrics/live')
+      fetch(API_URL + '/api/metrics/live')
         .then(res => res.json())
         .then(data => {
           if (data && data.servers) setServers(data.servers);

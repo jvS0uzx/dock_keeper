@@ -8,14 +8,20 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/joaov/vd_stats/internal/alert"
 	"github.com/joaov/vd_stats/internal/database"
 	"golang.org/x/crypto/ssh"
 )
+
+// Nomes de container Docker só têm [a-zA-Z0-9_.-]. Bloqueia injeção de comando
+// via query string no stream de logs (rodaria como root na VPS).
+var validContainerName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
 func parseDockerSize(sizeStr string) int64 {
 	sizeStr = strings.TrimSpace(sizeStr)
@@ -68,47 +74,67 @@ func parsePercent(p string) float64 {
 	return val
 }
 
-type ContainerPayload struct {
+type DockerPSPayload struct {
+	DockerID string `json:"docker_id"`
+	Name     string `json:"name"`
+	Project  string `json:"project"`
+	State    string `json:"state"`
+	Status   string `json:"status"`
+}
+
+type DockerStatsPayload struct {
 	DockerID   string `json:"docker_id"`
-	Name       string `json:"name"`
 	CPUPercent string `json:"cpu_percent"`
 	MemUsage   string `json:"mem_usage"`
 }
 
 type SysPayload struct {
-	Uptime     float64            `json:"uptime"`
-	DiskRoot   string             `json:"disk_root"`
-	Containers []ContainerPayload `json:"containers"`
+	Uptime   float64              `json:"uptime"`
+	HostCPU  float64              `json:"host_cpu"`
+	MemUsed  int64                `json:"mem_used"`
+	MemTotal int64                `json:"mem_total"`
+	Load1    float64              `json:"load1"`
+	DiskRoot string               `json:"disk_root"`
+	PS       []DockerPSPayload    `json:"ps"`
+	Stats    []DockerStatsPayload `json:"stats"`
 }
 
 func StartStream(ctx context.Context, serverID, host, user, keyPath string) error {
 
 	keyPath = strings.Replace(keyPath, "~", os.Getenv("HOME"), 1)
 	keyBytes, err := os.ReadFile(keyPath)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	signer, err := ssh.ParsePrivateKey(keyBytes)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	config := &ssh.ClientConfig{
-		User: user,
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		User:            user,
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout: 10 * time.Second,
+		Timeout:         10 * time.Second,
 	}
 
 	hostPort := fmt.Sprintf("%s:22", host)
 	log.Printf("[RealTime] Iniciando conexão SSH com a VPS %s...", hostPort)
-	
+
 	startPing := time.Now()
 	client, err := ssh.Dial("tcp", hostPort, config)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer client.Close()
-	
+
 	latencyMs := float64(time.Since(startPing).Milliseconds())
 
 	session, err := client.NewSession()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -118,13 +144,19 @@ func StartStream(ctx context.Context, serverID, host, user, keyPath string) erro
 	defer session.Close()
 
 	stdout, err := session.StdoutPipe()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	scriptBytes, err := os.ReadFile("scripts/stream_metrics.sh")
-	if err != nil { return fmt.Errorf("erro ao ler script de métricas: %w", err) }
+	if err != nil {
+		return fmt.Errorf("erro ao ler script de métricas: %w", err)
+	}
 
 	stdin, err := session.StdinPipe()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	// Aqui podemos injetar params base64 no futuro (ex: para IPs específicos)
 	finalScript := string(scriptBytes)
@@ -135,7 +167,9 @@ func StartStream(ctx context.Context, serverID, host, user, keyPath string) erro
 	}()
 
 	err = session.Start("bash -s")
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	// Cache de containers na memória para evitar SELECT (FirstOrCreate) a cada loop
 	containerCache := make(map[string]string)
@@ -143,9 +177,12 @@ func StartStream(ctx context.Context, serverID, host, user, keyPath string) erro
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		var payload SysPayload
-		if err := json.Unmarshal([]byte(line), &payload); err != nil { continue }
+		if err := json.Unmarshal([]byte(line), &payload); err != nil {
+			log.Printf("Erro de parse: %v, Linha: %s", err, line)
+			continue
+		}
 
 		diskParts := strings.Split(payload.DiskRoot, ",")
 		var dUsed, dTotal int64
@@ -157,43 +194,67 @@ func StartStream(ctx context.Context, serverID, host, user, keyPath string) erro
 		database.DB.Create(&database.MetricServer{
 			ServerID: serverID, UptimeSeconds: payload.Uptime,
 			DiskUsedBytes: dUsed, DiskTotalBytes: dTotal,
+			CPUUsagePercent: payload.HostCPU,
+			MemUsedBytes:    payload.MemUsed, MemTotalBytes: payload.MemTotal,
+			LoadAvg1:      payload.Load1,
 			PingLatencyMs: latencyMs, Timestamp: time.Now().UTC(),
 		})
 
+		// Alerta de container que caiu (fora de 'running'), com cooldown por container.
+		for _, ps := range payload.PS {
+			if ps.State != "running" && ps.State != "" {
+				alert.Notify("container_down:"+serverID+":"+ps.Name,
+					fmt.Sprintf("[ALERTA] Container *%s* está *%s* em %s", ps.Name, ps.State, host))
+			}
+		}
+
 		var containerMetrics []database.MetricContainer
 
-		for _, raw := range payload.Containers {
-			containerID, exists := containerCache[raw.DockerID]
+		statsMap := make(map[string]DockerStatsPayload)
+		for _, s := range payload.Stats {
+			statsMap[s.DockerID] = s
+		}
+
+		for _, ps := range payload.PS {
+			containerID, exists := containerCache[ps.DockerID]
 			if !exists {
-				// Só vai ao banco se for um container novo que ainda não está no cache
 				var container database.Container
-				database.DB.Where("server_id = ? AND docker_id = ?", serverID, raw.DockerID).FirstOrCreate(&container, database.Container{
-					ServerID: serverID, DockerID: raw.DockerID, Name: raw.Name,
+				database.DB.Where("server_id = ? AND docker_id = ?", serverID, ps.DockerID).FirstOrCreate(&container, database.Container{
+					ServerID: serverID, DockerID: ps.DockerID, Name: ps.Name, ProjectDir: ps.Project,
 				})
+				if container.ProjectDir != ps.Project {
+					database.DB.Model(&container).Update("project_dir", ps.Project)
+				}
 				containerID = container.ID
-				containerCache[raw.DockerID] = containerID
+				containerCache[ps.DockerID] = containerID
 			}
 
-			memParts := strings.Split(raw.MemUsage, "/")
 			var memUsed, memLimit int64
-			if len(memParts) == 2 {
-				memUsed = parseDockerSize(memParts[0])
-				memLimit = parseDockerSize(memParts[1])
+			var cpuPercent float64
+
+			if stat, ok := statsMap[ps.DockerID]; ok {
+				memParts := strings.Split(stat.MemUsage, "/")
+				if len(memParts) == 2 {
+					memUsed = parseDockerSize(memParts[0])
+					memLimit = parseDockerSize(memParts[1])
+				}
+				cpuPercent = parsePercent(stat.CPUPercent)
 			}
 
 			containerMetrics = append(containerMetrics, database.MetricContainer{
-				ContainerID: containerID, CPUUsagePercent: parsePercent(raw.CPUPercent),
+				ContainerID: containerID, CPUUsagePercent: cpuPercent,
 				MemUsedBytes: memUsed, MemLimitBytes: memLimit,
-				Status: "running", Timestamp: time.Now().UTC(),
+				State: ps.State, Status: ps.Status, Timestamp: time.Now().UTC(),
 			})
 		}
-		
+
 		// Batch Insert de todas as métricas dos containers de uma só vez
 		if len(containerMetrics) > 0 {
 			database.DB.Create(&containerMetrics)
 		}
 
-		log.Printf("[GRAVADO] %s | Latência: %.0fms | Containers: %d", host, latencyMs, len(payload.Containers))
+		log.Printf("[GRAVADO] %s | Latência: %.0fms | Containers: %d", host, latencyMs, len(payload.PS))
+
 	}
 	return session.Wait()
 }
@@ -202,27 +263,35 @@ func StartNginxStream(ctx context.Context, serverID, host, user, keyPath string)
 
 	keyPath = strings.Replace(keyPath, "~", os.Getenv("HOME"), 1)
 	keyBytes, err := os.ReadFile(keyPath)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	signer, err := ssh.ParsePrivateKey(keyBytes)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	config := &ssh.ClientConfig{
-		User: user,
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		User:            user,
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout: 10 * time.Second,
+		Timeout:         10 * time.Second,
 	}
 
 	hostPort := fmt.Sprintf("%s:22", host)
 	log.Printf("[RealTime] Iniciando stream do NGINX na VPS %s...", hostPort)
-	
+
 	client, err := ssh.Dial("tcp", hostPort, config)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer client.Close()
 
 	session, err := client.NewSession()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -232,13 +301,19 @@ func StartNginxStream(ctx context.Context, serverID, host, user, keyPath string)
 	defer session.Close()
 
 	stdout, err := session.StdoutPipe()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	scriptBytes, err := os.ReadFile("scripts/stream_nginx.sh")
-	if err != nil { return fmt.Errorf("erro ao ler script nginx: %w", err) }
+	if err != nil {
+		return fmt.Errorf("erro ao ler script nginx: %w", err)
+	}
 
 	stdin, err := session.StdinPipe()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	go func() {
 		defer stdin.Close()
@@ -246,10 +321,12 @@ func StartNginxStream(ctx context.Context, serverID, host, user, keyPath string)
 	}()
 
 	err = session.Start("bash -s")
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	scanner := bufio.NewScanner(stdout)
-	
+
 	type LbKey struct {
 		Upstream   string
 		ServerName string
@@ -301,13 +378,27 @@ func StartNginxStream(ctx context.Context, serverID, host, user, keyPath string)
 					status := "200"
 					reqStatusStr := parts[1]
 					if strings.Contains(reqStatusStr, " 50") || strings.Contains(reqStatusStr, " 40") {
-						if strings.Contains(reqStatusStr, " 500") { status = "500" }
-						if strings.Contains(reqStatusStr, " 502") { status = "502" }
-						if strings.Contains(reqStatusStr, " 503") { status = "503" }
-						if strings.Contains(reqStatusStr, " 504") { status = "504" }
-						if strings.Contains(reqStatusStr, " 404") { status = "404" }
-						if strings.Contains(reqStatusStr, " 400") { status = "400" }
-						if strings.Contains(reqStatusStr, " 429") { status = "429" }
+						if strings.Contains(reqStatusStr, " 500") {
+							status = "500"
+						}
+						if strings.Contains(reqStatusStr, " 502") {
+							status = "502"
+						}
+						if strings.Contains(reqStatusStr, " 503") {
+							status = "503"
+						}
+						if strings.Contains(reqStatusStr, " 504") {
+							status = "504"
+						}
+						if strings.Contains(reqStatusStr, " 404") {
+							status = "404"
+						}
+						if strings.Contains(reqStatusStr, " 400") {
+							status = "400"
+						}
+						if strings.Contains(reqStatusStr, " 429") {
+							status = "429"
+						}
 					}
 
 					key := LbKey{Upstream: upstream, ServerName: serverName, Status: status}
@@ -322,27 +413,38 @@ func StartNginxStream(ctx context.Context, serverID, host, user, keyPath string)
 }
 
 func StreamDockerLogs(ctx context.Context, host, user, keyPath, containerName string, w http.ResponseWriter, flusher http.Flusher) error {
+	if !validContainerName.MatchString(containerName) {
+		return fmt.Errorf("nome de container inválido: %q", containerName)
+	}
 	keyPath = strings.Replace(keyPath, "~", os.Getenv("HOME"), 1)
 	keyBytes, err := os.ReadFile(keyPath)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	signer, err := ssh.ParsePrivateKey(keyBytes)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	config := &ssh.ClientConfig{
-		User: user,
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		User:            user,
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout: 10 * time.Second,
+		Timeout:         10 * time.Second,
 	}
 
 	hostPort := fmt.Sprintf("%s:22", host)
 	client, err := ssh.Dial("tcp", hostPort, config)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer client.Close()
 
 	session, err := client.NewSession()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -352,13 +454,19 @@ func StreamDockerLogs(ctx context.Context, host, user, keyPath, containerName st
 	defer session.Close()
 
 	stdout, err := session.StdoutPipe()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	stderr, err := session.StderrPipe()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	err = session.Start(fmt.Sprintf("docker logs -f --tail 100 %s", containerName))
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	go func() {
 		scannerErr := bufio.NewScanner(stderr)

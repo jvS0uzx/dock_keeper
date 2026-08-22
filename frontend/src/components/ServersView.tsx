@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { API_URL } from '../config';
 
 interface Server {
   id: string;
@@ -12,7 +13,14 @@ interface ServerLiveStat {
   id: string;
   uptime: number;
   latency_ms: number;
+  cpu: number;
+  mem_used: number;
+  mem_total: number;
+  load1: number;
+  online: boolean;
 }
+
+const fmtGB = (bytes: number) => (bytes / (1024 ** 3)).toFixed(1);
 
 const ServersView = () => {
   const [servers, setServers] = useState<Server[]>([]);
@@ -22,7 +30,7 @@ const ServersView = () => {
 
   const fetchServers = async () => {
     try {
-      const res = await fetch('http://localhost:8080/api/servers');
+      const res = await fetch(API_URL + '/api/servers');
       const data = await res.json();
       setServers(data || []);
     } catch (err) {
@@ -34,7 +42,7 @@ const ServersView = () => {
 
   const fetchLiveStatus = async () => {
     try {
-      const res = await fetch('http://localhost:8080/api/metrics/live');
+      const res = await fetch(API_URL + '/api/metrics/live');
       const data = await res.json();
       const statsMap: Record<string, ServerLiveStat> = {};
       if (data.servers) {
@@ -60,7 +68,7 @@ const ServersView = () => {
     if (!form.host_ip || !form.name) return;
     
     try {
-      await fetch('http://localhost:8080/api/servers', {
+      await fetch(API_URL + '/api/servers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form)
@@ -75,7 +83,7 @@ const ServersView = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Deseja realmente remover este servidor? Os gráficos pararão imediatamente.')) return;
     try {
-      await fetch(`http://localhost:8080/api/servers?id=${id}`, { method: 'DELETE' });
+      await fetch(`${API_URL}/api/servers?id=${id}`, { method: 'DELETE' });
       fetchServers();
     } catch (err) {
       console.error(err);
@@ -146,13 +154,16 @@ const ServersView = () => {
                     <th className="py-3 px-4 rounded-l">Status</th>
                     <th className="py-3 px-4">Nome</th>
                     <th className="py-3 px-4">IP</th>
-                    <th className="py-3 px-4">Usuário</th>
+                    <th className="py-3 px-4 text-right">CPU</th>
+                    <th className="py-3 px-4 text-right">RAM</th>
+                    <th className="py-3 px-4 text-right">Load</th>
                     <th className="py-3 px-4 text-right rounded-r">Ação</th>
                   </tr>
                 </thead>
                 <tbody>
                   {servers.map((s) => {
-                    const isOnline = liveStats[s.id] && liveStats[s.id].uptime > 0;
+                    const live = liveStats[s.id];
+                    const isOnline = !!live && live.online;
                     return (
                     <tr key={s.id} className="border-b border-white/[0.03] hover:bg-white/[0.05] transition-all">
                       <td className="py-4 px-4">
@@ -165,7 +176,17 @@ const ServersView = () => {
                       </td>
                       <td className="py-4 px-4 font-medium text-white/90">{s.name}</td>
                       <td className="py-4 px-4 text-[#737373] font-mono">{s.host_ip}</td>
-                      <td className="py-4 px-4 text-[#737373]">{s.user}</td>
+                      <td className="py-4 px-4 text-right font-medium text-white/90">
+                        {isOnline ? `${live.cpu.toFixed(0)}%` : <span className="text-[#737373]">-</span>}
+                      </td>
+                      <td className="py-4 px-4 text-right text-white/90">
+                        {isOnline && live.mem_total > 0
+                          ? <span>{fmtGB(live.mem_used)}<span className="text-[#737373] text-xs">/{fmtGB(live.mem_total)}GB</span></span>
+                          : <span className="text-[#737373]">-</span>}
+                      </td>
+                      <td className="py-4 px-4 text-right text-white/90">
+                        {isOnline ? live.load1.toFixed(2) : <span className="text-[#737373]">-</span>}
+                      </td>
                       <td className="py-4 px-4 text-right">
                         <button 
                           onClick={() => handleDelete(s.id)}

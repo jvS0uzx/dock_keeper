@@ -2,11 +2,11 @@ package database
 
 import (
 	"fmt"
-	"log"
-	"os"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"log"
+	"os"
 )
 
 var DB *gorm.DB
@@ -29,7 +29,7 @@ func Connect() error {
 	if err != nil {
 		return fmt.Errorf("erro ao migrar as tabelas: %w", err)
 	}
-	
+
 	log.Println("[RealTime] Schemas do Banco de Dados criados/atualizados com sucesso!")
 
 	return nil

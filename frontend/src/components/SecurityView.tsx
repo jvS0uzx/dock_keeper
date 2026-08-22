@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { API_URL } from '../config';
 import { ShieldAlert, Activity, Server, AlertOctagon, Terminal, Shield, RefreshCw, XCircle } from 'lucide-react';
 
 interface PortInfo {
@@ -28,7 +29,7 @@ const SecurityView = () => {
 
   // Busca servidores iniciais
   useEffect(() => {
-    fetch('http://localhost:8080/api/metrics/live')
+    fetch(API_URL + '/api/metrics/live')
       .then(res => res.json())
       .then(data => {
         if (data && data.servers && data.servers.length > 0) {
@@ -47,7 +48,7 @@ const SecurityView = () => {
   useEffect(() => {
     if (activeTab === 'radar' && selectedServer) {
       setLoadingPorts(true);
-      fetch(`http://localhost:8080/api/security/radar?server_id=${selectedServer}`)
+      fetch(`${API_URL}/api/security/radar?server_id=${selectedServer}`)
         .then(res => res.json())
         .then(data => {
           setPorts(data || []);
@@ -66,7 +67,7 @@ const SecurityView = () => {
       setAuthLogs([]);
       setStreamActive(true);
       
-      const es = new EventSource(`http://localhost:8080/api/security/authlog/stream?server_id=${selectedServer}`);
+      const es = new EventSource(`${API_URL}/api/security/authlog/stream?server_id=${selectedServer}`);
       eventSourceRef.current = es;
 
       es.onmessage = (event) => {

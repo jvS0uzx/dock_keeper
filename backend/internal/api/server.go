@@ -15,6 +15,9 @@ type ContainerLiveStat struct {
 	ServerID string  `json:"server_id"`
 	DockerID string  `json:"docker_id"`
 	Name     string  `json:"name"`
+	Project  string  `json:"project"`
+	State    string  `json:"state"`
+	Status   string  `json:"status"`
 	CPU      float64 `json:"cpu"`
 	MemUsed  int64   `json:"mem_used"`
 	MemLimit int64   `json:"mem_limit"`
@@ -27,6 +30,11 @@ type ServerLiveStat struct {
 	Uptime        float64 `json:"uptime"`
 	DiskUsed      int64   `json:"disk_used"`
 	DiskTotal     int64   `json:"disk_total"`
+	CPU           float64 `json:"cpu"`
+	MemUsed       int64   `json:"mem_used"`
+	MemTotal      int64   `json:"mem_total"`
+	Load1         float64 `json:"load1"`
+	Online        bool    `json:"online"`
 	PingLatencyMs float64 `json:"latency_ms"`
 }
 
@@ -132,7 +140,7 @@ func StartServer(port string) {
 		var res LiveResponse
 		for _, s := range servers {
 			lastSrv, ok := serverMetricsMap[s.ID]
-			if ok || s.Name == "Load Balancer" {
+			if ok {
 				res.Servers = append(res.Servers, ServerLiveStat{
 					ID:            s.ID,
 					HostIP:        s.HostIP,
@@ -140,15 +148,20 @@ func StartServer(port string) {
 					Uptime:        lastSrv.UptimeSeconds,
 					DiskUsed:      lastSrv.DiskUsedBytes,
 					DiskTotal:     lastSrv.DiskTotalBytes,
+					CPU:           lastSrv.CPUUsagePercent,
+					MemUsed:       lastSrv.MemUsedBytes,
+					MemTotal:      lastSrv.MemTotalBytes,
+					Load1:         lastSrv.LoadAvg1,
+					Online:        true,
 					PingLatencyMs: lastSrv.PingLatencyMs,
 				})
 			} else {
-				// Show servers even if they don't have recent metrics (so they appear in the UI)
+				// Sem métrica recente: aparece na UI, mas marcado offline.
 				res.Servers = append(res.Servers, ServerLiveStat{
-					ID:            s.ID,
-					HostIP:        s.HostIP,
-					Name:          s.Name,
-					Uptime:        0,
+					ID:     s.ID,
+					HostIP: s.HostIP,
+					Name:   s.Name,
+					Online: false,
 				})
 			}
 		}
@@ -176,6 +189,9 @@ func StartServer(port string) {
 					ServerID: c.ServerID,
 					DockerID: c.DockerID,
 					Name:     c.Name,
+					Project:  c.ProjectDir,
+					State:    lastMetric.State,
+					Status:   lastMetric.Status,
 					CPU:      lastMetric.CPUUsagePercent,
 					MemUsed:  lastMetric.MemUsedBytes,
 					MemLimit: lastMetric.MemLimitBytes,
@@ -226,12 +242,42 @@ func StartServer(port string) {
 
 		sshKey := os.Getenv("SSH_KEY_PATH")
 		ctx := r.Context()
-		
+
 		err := ssh.StreamDockerLogs(ctx, server.HostIP, server.User, sshKey, containerName, w, flusher)
 		if err != nil {
 			log.Printf("Erro no stream de logs: %v", err)
 		}
 	})
+
+	// Fase 4 — ações de gestão em containers (start/stop/restart) via SSH.
+	mux.HandleFunc("/api/containers/action", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			ServerID      string `json:"server_id"`
+			ContainerName string `json:"container_name"`
+			Action        string `json:"action"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		var server database.Server
+		if err := database.DB.Where("id = ?", req.ServerID).First(&server).Error; err != nil {
+			http.Error(w, "Servidor nao encontrado", http.StatusNotFound)
+			return
+		}
+
+		out, err := ssh.RunContainerAction(server.HostIP, server.User, os.Getenv("SSH_KEY_PATH"), req.Action, req.ContainerName)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "output": out})
+	}))
 
 	mux.HandleFunc("/api/security/radar", withCORS(func(w http.ResponseWriter, r *http.Request) {
 		serverID := r.URL.Query().Get("server_id")
@@ -244,7 +290,7 @@ func StartServer(port string) {
 			http.Error(w, "Servidor nao encontrado", http.StatusNotFound)
 			return
 		}
-		
+
 		ports, err := ssh.GetRadarPorts(server.HostIP, server.User, os.Getenv("SSH_KEY_PATH"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -303,6 +349,8 @@ func StartServer(port string) {
 			if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
 				domain := database.Domain{Name: req.Domain, ServerID: req.ServerID}
 				database.DB.Create(&domain)
+				// Checa na hora para o domínio já aparecer com status, sem esperar o worker.
+				go network.CheckAndStore(domain)
 				json.NewEncoder(w).Encode(domain)
 			}
 			return
@@ -321,9 +369,32 @@ func StartServer(port string) {
 			http.Error(w, "domain is required", http.StatusBadRequest)
 			return
 		}
-		
+
 		info := network.CheckSSL(domain)
 		json.NewEncoder(w).Encode(info)
+	}))
+
+	// Recheca 1 domínio cadastrado agora, persiste e devolve o registro atualizado.
+	mux.HandleFunc("/api/ssl/recheck", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			http.Error(w, "id is required", http.StatusBadRequest)
+			return
+		}
+		var domain database.Domain
+		if err := database.DB.Where("id = ?", id).First(&domain).Error; err != nil {
+			http.Error(w, "Dominio nao encontrado", http.StatusNotFound)
+			return
+		}
+		updated := network.CheckAndStore(domain)
+		json.NewEncoder(w).Encode(updated)
+	}))
+
+	// Dispara a varredura de todos os domínios em background.
+	mux.HandleFunc("/api/ssl/recheck-all", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		go network.CheckAllDomains()
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]string{"status": "checking"})
 	}))
 
 	log.Printf("[RealTime] Servidor da API rodando em http://localhost%s", port)

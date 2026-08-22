@@ -2,9 +2,12 @@ package ssh
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
+
+	"github.com/joaov/vd_stats/internal/alert"
 )
 
 type ServerManager struct {
@@ -40,8 +43,12 @@ func (m *ServerManager) Start(id, name, host, user, keyPath string) {
 					err := StartStream(ctx, id, host, user, keyPath)
 					if err != nil {
 						log.Printf("Erro na VPS %s: %v. Tentando reconectar em 5s...", host, err)
-						time.Sleep(5 * time.Second)
+						alert.Notify("host_unreachable:"+id,
+							fmt.Sprintf("[CRITICO] VPS *%s* (%s) inalcançável: %v", name, host, err))
 					}
+					// Sempre pausa antes de reabrir a sessão; sem isso um retorno
+					// sem erro vira loop apertado de reconexão SSH.
+					time.Sleep(5 * time.Second)
 				}
 			}
 		}()
@@ -58,8 +65,8 @@ func (m *ServerManager) Start(id, name, host, user, keyPath string) {
 						err := StartNginxStream(ctx, id, host, user, keyPath)
 						if err != nil {
 							log.Printf("Erro no NGINX Stream %s: %v. Tentando reconectar em 5s...", host, err)
-							time.Sleep(5 * time.Second)
 						}
+						time.Sleep(5 * time.Second)
 					}
 				}
 			}()

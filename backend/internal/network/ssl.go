@@ -8,11 +8,11 @@ import (
 )
 
 type SSLInfo struct {
-	Domain     string `json:"domain"`
-	Valid      bool   `json:"valid"`
-	Issuer     string `json:"issuer"`
-	DaysLeft   int    `json:"days_left"`
-	ErrorMsg   string `json:"error_msg,omitempty"`
+	Domain   string `json:"domain"`
+	Valid    bool   `json:"valid"`
+	Issuer   string `json:"issuer"`
+	DaysLeft int    `json:"days_left"`
+	ErrorMsg string `json:"error_msg,omitempty"`
 }
 
 func CheckSSL(domain string) SSLInfo {
@@ -38,7 +38,7 @@ func CheckSSL(domain string) SSLInfo {
 
 	cert := certs[0]
 	daysLeft := int(time.Until(cert.NotAfter).Hours() / 24)
-	
+
 	// Issuer Common Name
 	issuer := cert.Issuer.CommonName
 	if issuer == "" {

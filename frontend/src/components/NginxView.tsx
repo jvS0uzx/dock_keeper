@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Globe, ArrowUpRight, ArrowDownRight, Server, Activity, Network } from 'lucide-react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { API_URL } from '../config';
+import { Globe, Server, Network } from 'lucide-react';
 
 interface LbStat {
   upstream_addr: string;
@@ -8,12 +9,87 @@ interface LbStat {
   requests_count: number;
 }
 
+// Agrega as linhas do LB por upstream para desenhar o diagrama de fluxo.
+interface UpstreamAgg {
+  addr: string;
+  reqs: number;
+  severity: 'ok' | 'warn' | 'error';
+}
+
+const aggregateUpstreams = (rows: LbStat[]): UpstreamAgg[] => {
+  const map: Record<string, UpstreamAgg> = {};
+  for (const r of rows) {
+    const key = r.upstream_addr || 'Local (Nginx/Cache)';
+    if (!map[key]) map[key] = { addr: key, reqs: 0, severity: 'ok' };
+    map[key].reqs += r.requests_count;
+    if (['500', '502', '503', '504'].includes(r.status)) map[key].severity = 'error';
+    else if (map[key].severity !== 'error' && ['400', '404', '429'].includes(r.status)) map[key].severity = 'warn';
+  }
+  return Object.values(map).sort((a, b) => b.reqs - a.reqs).slice(0, 6);
+};
+
+const sevColor = (s: UpstreamAgg['severity']) =>
+  s === 'error' ? '#f43f5e' : s === 'warn' ? '#f59e0b' : '#10b981';
+
+// Diagrama SVG: Load Balancer à esquerda, upstreams à direita, com "pacotes"
+// animados cuja quantidade e velocidade refletem as reqs/5s de cada upstream.
+const TrafficFlow = ({ upstreams }: { upstreams: UpstreamAgg[] }) => {
+  const W = 640, H = 260;
+  const lbX = 80, lbY = H / 2;
+  const upX = W - 120;
+  const n = Math.max(upstreams.length, 1);
+  const totalReqs = upstreams.reduce((s, u) => s + u.reqs, 0);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+      {/* nó do Load Balancer */}
+      <g>
+        <circle cx={lbX} cy={lbY} r="34" fill="#10b981" fillOpacity="0.08" stroke="#10b981" strokeOpacity="0.4" />
+        <circle cx={lbX} cy={lbY} r="34" fill="none" stroke="#10b981" strokeOpacity="0.25">
+          <animate attributeName="r" values="34;46;34" dur="2.5s" repeatCount="indefinite" />
+          <animate attributeName="stroke-opacity" values="0.35;0;0.35" dur="2.5s" repeatCount="indefinite" />
+        </circle>
+        <text x={lbX} y={lbY - 44} textAnchor="middle" fill="#10b981" fontSize="11" fontWeight="bold" letterSpacing="1">LOAD BALANCER</text>
+        <text x={lbX} y={lbY + 5} textAnchor="middle" fill="#e5e7eb" fontSize="10">{totalReqs} req/5s</text>
+      </g>
+
+      {upstreams.map((u, i) => {
+        const y = n === 1 ? lbY : 40 + (i * (H - 80)) / (n - 1);
+        const color = sevColor(u.severity);
+        const pathId = `flow-${i}`;
+        const d = `M ${lbX + 34} ${lbY} C ${(lbX + upX) / 2} ${lbY}, ${(lbX + upX) / 2} ${y}, ${upX - 12} ${y}`;
+        // mais reqs = mais pacotes e mais rápidos
+        const dots = Math.min(1 + Math.floor(u.reqs / 3), 6);
+        const dur = Math.max(0.7, 2.6 - u.reqs * 0.04);
+        return (
+          <g key={u.addr}>
+            <path id={pathId} d={d} fill="none" stroke={color} strokeOpacity="0.18" strokeWidth="2" />
+            {Array.from({ length: dots }).map((_, k) => (
+              <circle key={k} r="3.5" fill={color}>
+                <animateMotion dur={`${dur}s`} begin={`${(k * dur) / dots}s`} repeatCount="indefinite">
+                  <mpath href={`#${pathId}`} />
+                </animateMotion>
+              </circle>
+            ))}
+            {/* nó do upstream */}
+            <circle cx={upX} cy={y} r="9" fill={color} fillOpacity="0.15" stroke={color} strokeOpacity="0.6" />
+            <circle cx={upX} cy={y} r="3.5" fill={color} />
+            <text x={upX + 16} y={y - 4} fill="#e5e7eb" fontSize="10" fontFamily="monospace">{u.addr}</text>
+            <text x={upX + 16} y={y + 9} fill="#737373" fontSize="9">{u.reqs} reqs · {u.severity === 'ok' ? '200' : u.severity}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
 const NginxView = () => {
   const [loadBalancing, setLoadBalancing] = useState<LbStat[]>([]);
+  const upstreams = useMemo(() => aggregateUpstreams(loadBalancing), [loadBalancing]);
 
   useEffect(() => {
     const fetchMetrics = () => {
-      fetch('http://localhost:8080/api/metrics/live')
+      fetch(API_URL + '/api/metrics/live')
         .then(res => res.json())
         .then(data => {
           if (data && data.load_balancing) {
@@ -39,25 +115,20 @@ const NginxView = () => {
         </div>
       </div>
 
-      {/* Resumo Tráfego (Mock RX/TX, será implementado na Fase de Rede) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="glass-panel rounded-xl p-6 border border-white/5 bg-white/[0.02] flex items-center gap-6">
-          <div className="w-14 h-14 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400 border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
-            <ArrowDownRight size={24} />
-          </div>
-          <div>
-            <h3 className="text-gray-400 font-medium text-sm mb-1">Download (RX)</h3>
-            <div className="text-3xl font-bold text-white">45.2 <span className="text-lg text-gray-500 font-normal">MB/s</span></div>
-          </div>
+      {/* Fluxo de requisições em tempo real (LB → upstreams) */}
+      <div className="glass-panel rounded-xl border border-white/5 bg-white/[0.02] mb-6 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Server className="text-[#10b981]" size={16} />
+          <h2 className="text-white font-medium text-sm">Fluxo de Roteamento (Ao Vivo)</h2>
         </div>
-        <div className="glass-panel rounded-xl p-6 border border-white/5 bg-white/[0.02] flex items-center gap-6">
-          <div className="w-14 h-14 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-400 border border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]">
-            <ArrowUpRight size={24} />
-          </div>
-          <div>
-            <h3 className="text-gray-400 font-medium text-sm mb-1">Upload (TX)</h3>
-            <div className="text-3xl font-bold text-white">12.8 <span className="text-lg text-gray-500 font-normal">MB/s</span></div>
-          </div>
+        <div className="h-[260px]">
+          {upstreams.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-gray-500 text-sm">
+              Aguardando tráfego no Load Balancer...
+            </div>
+          ) : (
+            <TrafficFlow upstreams={upstreams} />
+          )}
         </div>
       </div>
 
