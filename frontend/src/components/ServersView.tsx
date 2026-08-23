@@ -1,38 +1,23 @@
-import { useState, useEffect } from 'react';
-import { API_URL } from '../config';
+import { useState, useEffect, type FormEvent } from 'react';
+import { ShieldOff } from 'lucide-react';
+import { api, type ServerLiveStat, type ServerRecord as Server } from '../lib/api';
+import { formatGB } from '../lib/format';
+import { useDialog } from './ui/dialog-context';
+import { useRole } from './ui/session-context';
 
-interface Server {
-  id: string;
-  name: string;
-  host_ip: string;
-  user: string;
-  created_at: string;
-}
-
-interface ServerLiveStat {
-  id: string;
-  uptime: number;
-  latency_ms: number;
-  cpu: number;
-  mem_used: number;
-  mem_total: number;
-  load1: number;
-  online: boolean;
-}
-
-const fmtGB = (bytes: number) => (bytes / (1024 ** 3)).toFixed(1);
+const emptyForm = { name: '', host_ip: '', user: 'root' };
 
 const ServersView = () => {
+  const dialog = useDialog();
+  const { canAdmin } = useRole();
   const [servers, setServers] = useState<Server[]>([]);
   const [liveStats, setLiveStats] = useState<Record<string, ServerLiveStat>>({});
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ name: '', host_ip: '', user: 'root' });
+  const [form, setForm] = useState({ ...emptyForm });
 
   const fetchServers = async () => {
     try {
-      const res = await fetch(API_URL + '/api/servers');
-      const data = await res.json();
-      setServers(data || []);
+      setServers(await api.servers());
     } catch (err) {
       console.error(err);
     } finally {
@@ -40,55 +25,68 @@ const ServersView = () => {
     }
   };
 
-  const fetchLiveStatus = async () => {
+  const fetchLiveStatus = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch(API_URL + '/api/metrics/live');
-      const data = await res.json();
-      const statsMap: Record<string, ServerLiveStat> = {};
-      if (data.servers) {
-        data.servers.forEach((s: ServerLiveStat) => {
-          statsMap[s.id] = s;
-        });
-      }
-      setLiveStats(statsMap);
-    } catch (err) {
-      // ignora erro silenciosamente
+      const data = await api.liveMetrics(signal);
+      setLiveStats(Object.fromEntries(data.servers.map(s => [s.id, s])));
+    } catch {
+      // Falha de polling não interrompe a tela: a próxima rodada tenta de novo.
     }
   };
 
   useEffect(() => {
+    const controller = new AbortController();
     fetchServers();
-    fetchLiveStatus();
-    const interval = setInterval(fetchLiveStatus, 5000);
-    return () => clearInterval(interval);
+    fetchLiveStatus(controller.signal);
+    const interval = setInterval(() => fetchLiveStatus(controller.signal), 5000);
+    return () => {
+      clearInterval(interval);
+      controller.abort();
+    };
   }, []);
 
-  const handleAdd = async (e: React.FormEvent) => {
+  const handleAdd = async (e: FormEvent) => {
     e.preventDefault();
     if (!form.host_ip || !form.name) return;
-    
+
     try {
-      await fetch(API_URL + '/api/servers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
-      });
-      setForm({ name: '', host_ip: '', user: 'root' });
+      await api.createServer(form);
+      setForm({ ...emptyForm });
       fetchServers();
+      dialog.notify(`${form.name} entrou no monitoramento.`, 'success');
     } catch (err) {
       console.error(err);
+      dialog.notify('Erro ao cadastrar o servidor.', 'error');
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Deseja realmente remover este servidor? Os gráficos pararão imediatamente.')) return;
+  const handleDelete = async (server: Server) => {
+    const confirmed = await dialog.confirm({
+      title: `Remover ${server.name}?`,
+      message: 'A coleta via SSH para e os gráficos deste host param imediatamente.',
+      confirmLabel: 'Remover',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
-      await fetch(`${API_URL}/api/servers?id=${id}`, { method: 'DELETE' });
+      await api.deleteServer(server.id);
       fetchServers();
     } catch (err) {
       console.error(err);
+      dialog.notify('Erro ao remover o servidor.', 'error');
     }
   };
+
+  // Servidor cadastrado entrega SSH root: tela restrita a administrador. A aba
+  // já some para os demais; isto cobre acesso por estado antigo.
+  if (!canAdmin) {
+    return (
+      <div className="p-8 h-full flex flex-col items-center justify-center text-[#737373] gap-3">
+        <ShieldOff size={32} className="opacity-40" />
+        <p className="text-sm">Seu perfil não permite esta tela.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8">
@@ -100,10 +98,11 @@ const ServersView = () => {
           <h2 className="text-sm font-bold tracking-widest text-[#737373] uppercase mb-6">Adicionar Servidor</h2>
           <form onSubmit={handleAdd} className="flex flex-col gap-4">
             <div>
-              <label className="text-xs text-[#737373] block mb-1">Nome de Identificação</label>
-              <input 
-                type="text" 
-                value={form.name} 
+              <label htmlFor="server-name" className="text-xs text-[#737373] block mb-1">Nome de Identificação</label>
+              <input
+                id="server-name"
+                type="text"
+                value={form.name}
                 onChange={(e) => setForm({...form, name: e.target.value})} 
                 className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors"
                 placeholder="Ex: VPS Produção"
@@ -111,10 +110,11 @@ const ServersView = () => {
               />
             </div>
             <div>
-              <label className="text-xs text-[#737373] block mb-1">Endereço IP</label>
-              <input 
-                type="text" 
-                value={form.host_ip} 
+              <label htmlFor="server-ip" className="text-xs text-[#737373] block mb-1">Endereço IP</label>
+              <input
+                id="server-ip"
+                type="text"
+                value={form.host_ip}
                 onChange={(e) => setForm({...form, host_ip: e.target.value})} 
                 className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors"
                 placeholder="Ex: 203.0.113.10"
@@ -122,10 +122,11 @@ const ServersView = () => {
               />
             </div>
             <div>
-              <label className="text-xs text-[#737373] block mb-1">Usuário SSH</label>
-              <input 
-                type="text" 
-                value={form.user} 
+              <label htmlFor="server-user" className="text-xs text-[#737373] block mb-1">Usuário SSH</label>
+              <input
+                id="server-user"
+                type="text"
+                value={form.user}
                 onChange={(e) => setForm({...form, user: e.target.value})} 
                 className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors"
                 placeholder="Padrão: root"
@@ -181,7 +182,7 @@ const ServersView = () => {
                       </td>
                       <td className="py-4 px-4 text-right text-white/90">
                         {isOnline && live.mem_total > 0
-                          ? <span>{fmtGB(live.mem_used)}<span className="text-[#737373] text-xs">/{fmtGB(live.mem_total)}GB</span></span>
+                          ? <span>{formatGB(live.mem_used)}<span className="text-[#737373] text-xs">/{formatGB(live.mem_total)}GB</span></span>
                           : <span className="text-[#737373]">-</span>}
                       </td>
                       <td className="py-4 px-4 text-right text-white/90">
@@ -189,7 +190,7 @@ const ServersView = () => {
                       </td>
                       <td className="py-4 px-4 text-right">
                         <button 
-                          onClick={() => handleDelete(s.id)}
+                          onClick={() => handleDelete(s)}
                           className="text-xs text-red-400/80 hover:text-red-400 hover:underline tracking-wider"
                         >
                           Remover

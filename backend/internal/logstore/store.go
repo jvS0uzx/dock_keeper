@@ -23,6 +23,14 @@ func Save(serverID, source, container, line string) {
 		Line:      line,
 		Timestamp: time.Now().UTC(),
 	}
+	// A guarda existe porque Save roda dentro das goroutines de streaming: um
+	// pânico ali derruba o processo inteiro, e perder uma linha de log vale
+	// menos que perder o painel. Hoje é inalcançável — main.go aborta se
+	// Connect() falhar —, mas o custo da guarda é uma comparação.
+	if database.DB == nil {
+		log.Printf("[LogStore] banco indisponível: linha de %s descartada", source)
+		return
+	}
 	if err := database.DB.Create(&entry).Error; err != nil {
 		log.Printf("[LogStore] erro ao salvar log (source=%s container=%s): %v", source, container, err)
 	}
@@ -37,11 +45,15 @@ func StartRetention(maxAge, interval time.Duration) {
 		defer ticker.Stop()
 		for {
 			cutoff := time.Now().UTC().Add(-maxAge)
-			res := database.DB.Exec("DELETE FROM log_entries WHERE timestamp < ?", cutoff)
-			if res.Error != nil {
-				log.Printf("[LogStore] erro ao podar log_entries: %v", res.Error)
-			} else if res.RowsAffected > 0 {
-				log.Printf("[LogStore] %d linhas de log antigas removidas", res.RowsAffected)
+			// Em lotes, com pausa entre eles. Um DELETE sem limite trava
+			// log_entries, que é a tabela de maior volume do sistema — recebe
+			// uma linha por linha de log de container e de auth.log —, e trava
+			// exatamente no momento em que mais se escreve nela.
+			n, err := database.PruneOlderThan("log_entries", "timestamp", cutoff)
+			if err != nil {
+				log.Printf("[LogStore] erro ao podar log_entries: %v", err)
+			} else if n > 0 {
+				log.Printf("[LogStore] %d linhas de log antigas removidas", n)
 			}
 			<-ticker.C
 		}

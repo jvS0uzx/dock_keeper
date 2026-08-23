@@ -1,0 +1,25 @@
+# Inventario exemplo do rollout do agente. Copie para inventory.ini e ajuste.
+#
+# O grupo pai "estacoes" e o alvo do playbook; os subgrupos separam as
+# unidades e definem o codigo (vd_agent_site) que cada estacao reporta —
+# precisa existir cadastrado na tela Unidades do painel.
+
+[estacoes:children]
+estacoes_matriz
+estacoes_norte
+
+[estacoes_matriz]
+pc-financeiro-01 ansible_host=192.168.0.31
+pc-rh-01         ansible_host=192.168.0.44
+
+[estacoes_matriz:vars]
+vd_agent_site=matriz
+
+[estacoes_norte]
+pc-recepcao-01   ansible_host=10.0.1.21
+
+[estacoes_norte:vars]
+vd_agent_site=norte
+
+[estacoes:vars]
+ansible_user=root

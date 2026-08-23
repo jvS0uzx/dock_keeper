@@ -1,0 +1,6 @@
+# node_modules do host não serve à imagem: pode ter binário compilado para outra
+# arquitetura, e o npm ci reinstala tudo a partir do lockfile de qualquer jeito.
+node_modules
+dist
+.env
+*.env

@@ -1,13 +1,6 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { API_URL } from '../config';
+import { useEffect, useState, useMemo } from 'react';
 import { Globe, Server, Network } from 'lucide-react';
-
-interface LbStat {
-  upstream_addr: string;
-  server_name: string;
-  status: string;
-  requests_count: number;
-}
+import { api, type LbStat } from '../lib/api';
 
 // Agrega as linhas do LB por upstream para desenhar o diagrama de fluxo.
 interface UpstreamAgg {
@@ -16,14 +9,17 @@ interface UpstreamAgg {
   severity: 'ok' | 'warn' | 'error';
 }
 
+const ERROR_STATUSES = ['500', '502', '503', '504'];
+const WARN_STATUSES = ['400', '404', '429'];
+
 const aggregateUpstreams = (rows: LbStat[]): UpstreamAgg[] => {
   const map: Record<string, UpstreamAgg> = {};
   for (const r of rows) {
     const key = r.upstream_addr || 'Local (Nginx/Cache)';
     if (!map[key]) map[key] = { addr: key, reqs: 0, severity: 'ok' };
     map[key].reqs += r.requests_count;
-    if (['500', '502', '503', '504'].includes(r.status)) map[key].severity = 'error';
-    else if (map[key].severity !== 'error' && ['400', '404', '429'].includes(r.status)) map[key].severity = 'warn';
+    if (ERROR_STATUSES.includes(r.status)) map[key].severity = 'error';
+    else if (map[key].severity !== 'error' && WARN_STATUSES.includes(r.status)) map[key].severity = 'warn';
   }
   return Object.values(map).sort((a, b) => b.reqs - a.reqs).slice(0, 6);
 };
@@ -88,20 +84,21 @@ const NginxView = () => {
   const upstreams = useMemo(() => aggregateUpstreams(loadBalancing), [loadBalancing]);
 
   useEffect(() => {
+    const controller = new AbortController();
     const fetchMetrics = () => {
-      fetch(API_URL + '/api/metrics/live')
-        .then(res => res.json())
-        .then(data => {
-          if (data && data.load_balancing) {
-            setLoadBalancing(data.load_balancing);
-          }
-        })
-        .catch(err => console.error("Erro API Nginx:", err));
+      api.liveMetrics(controller.signal)
+        .then(data => setLoadBalancing(data.load_balancing))
+        .catch(err => {
+          if (!controller.signal.aborted) console.error('Erro API Nginx:', err);
+        });
     };
-    
+
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 2000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      controller.abort();
+    };
   }, []);
 
   return (
@@ -115,7 +112,7 @@ const NginxView = () => {
         </div>
       </div>
 
-      {/* Fluxo de requisições em tempo real (LB → upstreams) */}
+      {/* Fluxo de requisições em tempo real: LB para os upstreams */}
       <div className="glass-panel rounded-xl border border-white/5 bg-white/[0.02] mb-6 p-4">
         <div className="flex items-center gap-2 mb-2">
           <Server className="text-[#10b981]" size={16} />
@@ -167,12 +164,15 @@ const NginxView = () => {
                   </td>
                 </tr>
               )}
-              {loadBalancing.map((host, idx) => {
-                const isError = ['500', '502', '503', '504'].includes(host.status);
-                const isWarn = ['400', '404', '429'].includes(host.status);
-                
+              {loadBalancing.map((host) => {
+                const isError = ERROR_STATUSES.includes(host.status);
+                const isWarn = WARN_STATUSES.includes(host.status);
+
                 return (
-                  <tr key={idx} className="hover:bg-white/[0.02] transition-colors">
+                  <tr
+                    key={`${host.server_name}-${host.upstream_addr}-${host.status}`}
+                    className="hover:bg-white/[0.02] transition-colors"
+                  >
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
                         <Globe size={14} className={isError ? 'text-rose-500' : 'text-[#10b981]'} />

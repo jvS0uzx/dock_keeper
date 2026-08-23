@@ -63,22 +63,30 @@ func CheckAndStore(d database.Domain) database.Domain {
 	d.Issuer = info.Issuer
 	d.DaysLeft = info.DaysLeft
 	d.ErrorMsg = info.ErrorMsg
+	d.InvalidReason = info.InvalidReason
 	d.LastCheck = &now
 
-	database.DB.Model(&database.Domain{}).Where("id = ?", d.ID).Updates(map[string]interface{}{
-		"valid":      d.Valid,
-		"issuer":     d.Issuer,
-		"days_left":  d.DaysLeft,
-		"error_msg":  d.ErrorMsg,
-		"last_check": &now,
-	})
+	// O mapa grava todas as chaves a cada verificação, inclusive as vazias.
+	// É o que apaga error_msg e invalid_reason quando o certificado é renovado:
+	// gravar só quando há problema deixaria o domínio verde exibindo o motivo
+	// da falha anterior, para sempre.
+	if err := database.DB.Model(&database.Domain{}).Where("id = ?", d.ID).Updates(map[string]any{
+		"valid":          d.Valid,
+		"issuer":         d.Issuer,
+		"days_left":      d.DaysLeft,
+		"error_msg":      d.ErrorMsg,
+		"invalid_reason": d.InvalidReason,
+		"last_check":     &now,
+	}).Error; err != nil {
+		log.Printf("[SSL] erro ao persistir o estado de %s: %v", d.Name, err)
+	}
 
 	if !info.Valid {
 		alert.Notify("ssl_invalid:"+d.Name,
-			fmt.Sprintf("[CRITICO] Certificado de *%s* inválido: %s", d.Name, info.ErrorMsg))
+			fmt.Sprintf("[CRITICO] Certificado de %s inválido: %s", d.Name, info.ErrorMsg))
 	} else if info.DaysLeft <= sslWarnDays {
 		alert.Notify("ssl_expiring:"+d.Name,
-			fmt.Sprintf("[ALERTA] Certificado de *%s* expira em *%d dias*", d.Name, info.DaysLeft))
+			fmt.Sprintf("[ALERTA] Certificado de %s expira em %d dias", d.Name, info.DaysLeft))
 	}
 	return d
 }

@@ -1,0 +1,89 @@
+# Rollout em massa do agente de estacao do vd_stats via Ansible (hosts Linux).
+#
+# Antes de rodar:
+#   1. Gere os binarios na raiz do backend: make agent-linux-amd64 agent-linux-arm64
+#   2. Copie inventory.example para inventory.ini e ajuste os hosts.
+#   3. Guarde o token fora do playbook:
+#        ansible-vault create secrets.yml   # com: vd_agent_token: "..."
+#
+# Executar:
+#   ansible-playbook -i inventory.ini vd-agent.yml --ask-vault-pass
+#
+# Idempotente: so reinicia o servico quando binario, config ou unit mudam.
+---
+- name: Instalar o agente de estacao do vd_stats
+  hosts: estacoes
+  become: true
+
+  vars_files:
+    - secrets.yml # define vd_agent_token (use ansible-vault)
+
+  vars:
+    vd_agent_server_url: "https://painel.exemplo.com"
+    vd_agent_interval: "5"
+    # Codigo da unidade cadastrado no painel. Defina por grupo no inventario
+    # (ex.: grupo [estacoes_norte] com vd_agent_site=norte) para cada filial
+    # se classificar sozinha.
+    vd_agent_site: ""
+
+    # Convite de enrollment. E de USO UNICO e por unidade, entao NAO pode ser um
+    # valor de playbook aplicado a um grupo inteiro: o primeiro host o consome e
+    # os demais falham. Defina por host no inventario, ou rode o playbook um host
+    # por vez com -e vd_agent_enroll_token=...
+    #
+    # Deixar vazio mantem o modo compartilhado com vd_agent_token, que continua
+    # aceito durante a transicao.
+    vd_agent_enroll_token: ""
+    # Mapeia a arquitetura reportada pelo Ansible para o binario gerado pelo
+    # make. Estacoes 32 bits nao sao suportadas.
+    vd_agent_binary:
+      x86_64: agent-linux-amd64
+      aarch64: agent-linux-arm64
+
+  tasks:
+    - name: Copiar o binario da arquitetura do host
+      ansible.builtin.copy:
+        src: "../../../dist/{{ vd_agent_binary[ansible_architecture] }}"
+        dest: /usr/local/bin/vd-agent
+        owner: root
+        group: root
+        mode: "0755"
+      notify: reiniciar vd-agent
+
+    - name: Gravar a configuracao com o token
+      ansible.builtin.copy:
+        dest: /etc/vd-agent.env
+        owner: root
+        group: root
+        # 600: o token vale para qualquer maquina que o tenha.
+        mode: "0600"
+        content: |
+          AGENT_SERVER_URL="{{ vd_agent_server_url }}"
+          AGENT_ENROLL_TOKEN="{{ vd_agent_enroll_token | default('') }}"
+          AGENT_TOKEN="{{ vd_agent_token | default('') }}"
+          AGENT_SITE="{{ vd_agent_site }}"
+          AGENT_INTERVAL="{{ vd_agent_interval }}"
+      notify: reiniciar vd-agent
+
+    - name: Instalar a unit systemd
+      ansible.builtin.copy:
+        src: ../vd-agent.service
+        dest: /etc/systemd/system/vd-agent.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: reiniciar vd-agent
+
+    - name: Habilitar e iniciar o servico
+      ansible.builtin.systemd:
+        name: vd-agent
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: reiniciar vd-agent
+      ansible.builtin.systemd:
+        name: vd-agent
+        state: restarted
+        daemon_reload: true

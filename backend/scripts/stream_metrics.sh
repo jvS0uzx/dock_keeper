@@ -24,6 +24,18 @@ while true; do
   MEM_TOTAL=$((MEM_TOTAL_KB*1024))
   MEM_USED=$(((MEM_TOTAL_KB-MEM_AVAIL_KB)*1024))
 
+  # --- Temperatura: maior leitura de sensor térmico, em °C ---
+  # Host sem hwmon (VM, container, VPS virtualizada) simplesmente não emite o
+  # campo. Mandar zero faria o painel exibir "0 °C" como se fosse medição.
+  # A faixa 1..150000 (milésimos de grau) descarta sensor devolvendo lixo.
+  TEMP_RAW=$(cat /sys/class/hwmon/hwmon*/temp*_input 2>/dev/null \
+    | awk '$1 > 0 && $1 < 150000' | sort -n | tail -1)
+  if [ -n "$TEMP_RAW" ]; then
+    TEMP_JSON=",\"temperature_c\":$(awk "BEGIN{printf \"%.1f\", $TEMP_RAW/1000}")"
+  else
+    TEMP_JSON=""
+  fi
+
   LOAD1=$(awk '{print $1}' /proc/loadavg)
   UPTIME=$(awk '{print $1}' /proc/uptime)
   DISK_ROOT=$(df -B1 / | awk 'NR==2 {print $3","$2}')
@@ -32,6 +44,6 @@ while true; do
   DOCKER_PS=$(docker ps -a --format '{"docker_id":"{{.ID}}","name":"{{.Names}}","project":"{{.Label "com.docker.compose.project"}}","state":"{{.State}}","status":"{{.Status}}"}' | tr -d '\r' | paste -sd, -)
   DOCKER_STATS=$(docker stats --no-stream --format '{"docker_id":"{{.ID}}","cpu_percent":"{{.CPUPerc}}","mem_usage":"{{.MemUsage}}"}' | tr -d '\r' | paste -sd, -)
 
-  echo "{\"uptime\":$UPTIME,\"host_cpu\":$HOST_CPU,\"mem_used\":$MEM_USED,\"mem_total\":$MEM_TOTAL,\"load1\":$LOAD1,\"disk_root\":\"$DISK_ROOT\",\"ps\":[$DOCKER_PS],\"stats\":[$DOCKER_STATS]}"
-  sleep 2
+  echo "{\"uptime\":$UPTIME,\"host_cpu\":$HOST_CPU,\"mem_used\":$MEM_USED,\"mem_total\":$MEM_TOTAL,\"load1\":$LOAD1,\"disk_root\":\"$DISK_ROOT\"$TEMP_JSON,\"ps\":[$DOCKER_PS],\"stats\":[$DOCKER_STATS]}"
+  sleep "${VD_INTERVAL:-2}"
 done

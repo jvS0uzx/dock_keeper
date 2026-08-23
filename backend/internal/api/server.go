@@ -1,410 +1,207 @@
 package api
 
 import (
-	"encoding/json"
+	"context"
 	"log"
 	"net/http"
-	"os"
+	"time"
 
-	"github.com/joaov/vd_stats/internal/database"
-	"github.com/joaov/vd_stats/internal/network"
-	"github.com/joaov/vd_stats/internal/ssh"
+	"github.com/joaov/vd_stats/internal/auth"
 )
 
-type ContainerLiveStat struct {
-	ServerID string  `json:"server_id"`
-	DockerID string  `json:"docker_id"`
-	Name     string  `json:"name"`
-	Project  string  `json:"project"`
-	State    string  `json:"state"`
-	Status   string  `json:"status"`
-	CPU      float64 `json:"cpu"`
-	MemUsed  int64   `json:"mem_used"`
-	MemLimit int64   `json:"mem_limit"`
-}
+const (
+	// Sem ReadHeaderTimeout uma conexão que nunca termina o cabeçalho segura um
+	// worker para sempre (Slowloris).
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 30 * time.Second
+	idleTimeout       = 120 * time.Second
+	shutdownTimeout   = 15 * time.Second
+)
 
-type ServerLiveStat struct {
-	ID            string  `json:"id"`
-	HostIP        string  `json:"host_ip"`
-	Name          string  `json:"name"`
-	Uptime        float64 `json:"uptime"`
-	DiskUsed      int64   `json:"disk_used"`
-	DiskTotal     int64   `json:"disk_total"`
-	CPU           float64 `json:"cpu"`
-	MemUsed       int64   `json:"mem_used"`
-	MemTotal      int64   `json:"mem_total"`
-	Load1         float64 `json:"load1"`
-	Online        bool    `json:"online"`
-	PingLatencyMs float64 `json:"latency_ms"`
-}
-
-type LbStat struct {
-	UpstreamAddr  string `json:"upstream_addr"`
-	ServerName    string `json:"server_name"`
-	Status        string `json:"status"`
-	RequestsCount int    `json:"requests_count"`
-}
-
-type LiveResponse struct {
-	Servers       []ServerLiveStat    `json:"servers"`
-	Containers    []ContainerLiveStat `json:"containers"`
-	LoadBalancing []LbStat            `json:"load_balancing"`
-}
-
-type ServerCreateRequest struct {
-	HostIP string `json:"host_ip"`
-	Name   string `json:"name"`
-	User   string `json:"user"`
-}
-
-func StartServer(port string) {
+// Routes monta o mux com toda a superfície HTTP da API.
+// Tudo exige o token: o painel comanda SSH como root nas VPS.
+func Routes(cfg Config) http.Handler {
 	mux := http.NewServeMux()
 
-	withCORS := func(h http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			w.Header().Set("Content-Type", "application/json")
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-			h(w, r)
-		}
+	// Config chega por valor, então o padrão vale só para este mux. Cobre quem
+	// monta a Config à mão — testes — sem obrigar cada ponto de construção a
+	// conhecer o limitador.
+	if cfg.logins == nil {
+		cfg.logins = newLoginLimiter(defaultLoginWindow, defaultLoginMaxPerIP, defaultLoginMaxPerUser)
 	}
 
-	mux.HandleFunc("/api/servers", withCORS(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			var servers []database.Server
-			database.DB.Find(&servers)
-			json.NewEncoder(w).Encode(servers)
-			return
-		}
+	// Rotas normais: CORS + teto de corpo + credencial por cabeçalho, papel
+	// mínimo viewer. O teto vem antes da autenticação de propósito: corpo
+	// absurdo é recusado sem custar nem uma consulta de sessão.
+	api := func(h http.HandlerFunc, methods ...string) http.HandlerFunc {
+		return chain(h, cfg.withCORS, cfg.audit(auditAll), limitBody(maxFormBodyBytes),
+			cfg.requireAuth, allowMethods(methods...))
+	}
+	// Rotas de administração: usuários e servidores com acesso SSH. O papel
+	// precisa valer globalmente — administrar uma filial não vira administrar
+	// o parque, nem na leitura.
+	admin := func(h http.HandlerFunc, methods ...string) http.HandlerFunc {
+		return chain(h, cfg.withCORS, cfg.audit(auditAll), limitBody(maxFormBodyBytes),
+			cfg.requireGlobalRole(auth.RoleAdmin), allowMethods(methods...))
+	}
+	// Rotas abertas a quem ainda não tem credencial.
+	public := func(h http.HandlerFunc, methods ...string) http.HandlerFunc {
+		return chain(h, cfg.withCORS, cfg.audit(auditAll), limitBody(maxFormBodyBytes),
+			allowMethods(methods...))
+	}
+	// Leitura para todos os papéis, escrita só a partir de operador ("Suporte
+	// TI" na interface). É a regra "Visualizador não cadastra nada".
+	readViewerWriteOperator := func(h http.HandlerFunc, methods ...string) http.HandlerFunc {
+		return chain(h, cfg.withCORS, cfg.audit(auditAll), limitBody(maxFormBodyBytes),
+			cfg.requireRoleByMethod(auth.RoleViewer, auth.RoleOperator),
+			allowMethods(methods...))
+	}
+	// Mesmo gate do readViewerWriteOperator, com teto próprio: o corpo aqui é
+	// a imagem da planta baixa, não um formulário.
+	upload := func(h http.HandlerFunc, methods ...string) http.HandlerFunc {
+		return chain(h, cfg.withCORS, cfg.audit(auditAll), limitBody(maxPlanUploadBytes),
+			cfg.requireRoleByMethod(auth.RoleViewer, auth.RoleOperator),
+			allowMethods(methods...))
+	}
+	// Infra sem unidade: leitura livre, escrita exige operador GLOBAL.
+	globalWrite := func(h http.HandlerFunc, methods ...string) http.HandlerFunc {
+		return chain(h, cfg.withCORS, cfg.audit(auditAll), limitBody(maxFormBodyBytes),
+			cfg.requireGlobalWrite(auth.RoleOperator),
+			allowMethods(methods...))
+	}
+	// Mesma cadeia do globalWrite, sem o middleware de auditoria: o handler
+	// audita por conta própria, com o verbo, o servidor alvo, a unidade e o
+	// nome do container, e gravando ANTES de o comando sair — nada disso o
+	// middleware genérico, que enxerga método, rota e status, tem como saber.
+	// Duas linhas por ação diriam a mesma coisa duas vezes, e a menos
+	// informativa apareceria junto na consulta.
+	globalWriteSelfAudited := func(h http.HandlerFunc, methods ...string) http.HandlerFunc {
+		return chain(h, cfg.withCORS, limitBody(maxFormBodyBytes),
+			cfg.requireGlobalWrite(auth.RoleOperator),
+			allowMethods(methods...))
+	}
+	// Rotas SSE: autorizadas por ticket de uso único, para o segredo permanente
+	// não acabar no access log do proxy nem no histórico do browser.
+	//
+	// Sem auditoria e sem teto de corpo de propósito: são GET, que o middleware
+	// de auditoria ignora, e a resposta fica aberta indefinidamente — envelopar
+	// o ResponseWriter aqui só acrescentaria risco de quebrar o streaming. A
+	// emissão do ticket, essa sim, é auditada em /api/stream-ticket.
+	stream := func(h http.HandlerFunc) http.HandlerFunc {
+		return chain(h, cfg.withCORS, cfg.requireTicket, allowMethods(http.MethodGet))
+	}
 
-		if r.Method == "POST" {
-			var req ServerCreateRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			if req.User == "" {
-				req.User = "root"
-			}
-			var server database.Server
-			database.DB.Where("host_ip = ?", req.HostIP).Assign(database.Server{
-				Name: req.Name,
-				User: req.User,
-			}).FirstOrCreate(&server, database.Server{
-				HostIP: req.HostIP,
-			})
-			sshKey := os.Getenv("SSH_KEY_PATH")
-			ssh.Manager.Start(server.ID, server.Name, server.HostIP, server.User, sshKey)
-			json.NewEncoder(w).Encode(server)
-			return
-		}
+	// Cadastrar servidor entrega acesso SSH como root: é operação de admin.
+	mux.HandleFunc("/api/servers", admin(cfg.serversHandler, http.MethodGet, http.MethodPost, http.MethodDelete))
+	mux.HandleFunc("/api/metrics/live", api(liveMetricsHandler, http.MethodGet))
+	mux.HandleFunc("/api/metrics/history", api(HistoryHandler, http.MethodGet))
 
-		if r.Method == "DELETE" {
-			id := r.URL.Query().Get("id")
-			if id == "" {
-				http.Error(w, "ID required", http.StatusBadRequest)
-				return
-			}
-			ssh.Manager.Stop(id)
-			database.DB.Where("id = ?", id).Delete(&database.Server{})
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
-			return
-		}
+	mux.HandleFunc("/api/stream-ticket", api(cfg.streamTicketHandler, http.MethodPost))
 
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}))
+	mux.HandleFunc("/api/containers/action", globalWriteSelfAudited(cfg.containerActionHandler, http.MethodPost))
+	mux.HandleFunc("/api/containers/logs/stream", stream(cfg.containerLogsStreamHandler))
 
-	mux.HandleFunc("/api/metrics/live", withCORS(func(w http.ResponseWriter, r *http.Request) {
-		var servers []database.Server
-		database.DB.Find(&servers)
+	mux.HandleFunc("/api/security/radar", api(cfg.securityRadarHandler, http.MethodGet))
+	mux.HandleFunc("/api/security/authlog/stream", stream(cfg.authLogStreamHandler))
 
-		var lastServerMetrics []database.MetricServer
-		database.DB.Raw(`
-			SELECT DISTINCT ON (server_id) *
-			FROM metric_servers
-			WHERE timestamp >= NOW() - INTERVAL '30 seconds'
-			ORDER BY server_id, timestamp DESC
-		`).Scan(&lastServerMetrics)
+	mux.HandleFunc("/api/ssl/domains", globalWrite(sslDomainsHandler, http.MethodGet, http.MethodPost, http.MethodDelete))
+	// Descoberta de domínios a partir do access log do Nginx: leitura para
+	// qualquer papel, importação exige operador global como o resto do SSL.
+	mux.HandleFunc("/api/ssl/discover", api(sslDiscoverHandler, http.MethodGet))
+	mux.HandleFunc("/api/ssl/import", globalWrite(sslImportHandler, http.MethodPost))
+	mux.HandleFunc("/api/ssl/recheck", globalWrite(sslRecheckHandler, http.MethodPost))
+	mux.HandleFunc("/api/ssl/recheck-all", globalWrite(sslRecheckAllHandler, http.MethodPost))
 
-		serverMetricsMap := make(map[string]database.MetricServer)
-		for _, m := range lastServerMetrics {
-			serverMetricsMap[m.ServerID] = m
-		}
+	// Inventário da rede local (2o painel).
+	mux.HandleFunc("/api/network/hosts", api(networkHostsHandler, http.MethodGet))
+	mux.HandleFunc("/api/network/scan", globalWrite(networkScanHandler, http.MethodPost))
+	// O PATCH valida o papel na unidade do host dentro do handler.
+	mux.HandleFunc("/api/network/host", api(networkHostUpdateHandler, http.MethodPatch))
 
-		var res LiveResponse
-		for _, s := range servers {
-			lastSrv, ok := serverMetricsMap[s.ID]
-			if ok {
-				res.Servers = append(res.Servers, ServerLiveStat{
-					ID:            s.ID,
-					HostIP:        s.HostIP,
-					Name:          s.Name,
-					Uptime:        lastSrv.UptimeSeconds,
-					DiskUsed:      lastSrv.DiskUsedBytes,
-					DiskTotal:     lastSrv.DiskTotalBytes,
-					CPU:           lastSrv.CPUUsagePercent,
-					MemUsed:       lastSrv.MemUsedBytes,
-					MemTotal:      lastSrv.MemTotalBytes,
-					Load1:         lastSrv.LoadAvg1,
-					Online:        true,
-					PingLatencyMs: lastSrv.PingLatencyMs,
-				})
-			} else {
-				// Sem métrica recente: aparece na UI, mas marcado offline.
-				res.Servers = append(res.Servers, ServerLiveStat{
-					ID:     s.ID,
-					HostIP: s.HostIP,
-					Name:   s.Name,
-					Online: false,
-				})
-			}
-		}
+	mux.HandleFunc("/api/sites", readViewerWriteOperator(sitesHandler, http.MethodGet, http.MethodPost, http.MethodDelete))
 
-		var containers []database.Container
-		database.DB.Order("name ASC").Find(&containers)
+	// Plantas baixas. O sufixo decide o handler porque o ServeMux casa por
+	// prefixo em rotas terminadas em barra.
+	mux.HandleFunc("/api/floorplans", upload(floorPlansHandler, http.MethodGet, http.MethodPost))
+	mux.HandleFunc("/api/floorplans/", readViewerWriteOperator(floorPlanRouter,
+		http.MethodGet, http.MethodPut, http.MethodDelete))
 
-		var lastContainerMetrics []database.MetricContainer
-		database.DB.Raw(`
-			SELECT DISTINCT ON (container_id) *
-			FROM metric_containers
-			WHERE timestamp >= NOW() - INTERVAL '30 seconds'
-			ORDER BY container_id, timestamp DESC
-		`).Scan(&lastContainerMetrics)
+	mux.HandleFunc("/api/alerts/rules", globalWrite(AlertRulesHandler,
+		http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete))
+	mux.HandleFunc("/api/logs/search", api(LogSearchHandler, http.MethodGet))
 
-		containerMetricsMap := make(map[string]database.MetricContainer)
-		for _, m := range lastContainerMetrics {
-			containerMetricsMap[m.ContainerID] = m
-		}
+	// Ingestão do agente push: máquina-a-máquina, autenticada pelo próprio
+	// token de agente (X-Agent-Token), sem CORS de browser. O teto de corpo é o
+	// único middleware daqui, e no inventário ele é o que impede a lista de
+	// hosts de virar memória antes de o teto de maxInventoryHosts ser conferido.
+	//
+	// A auditoria aqui registra SOMENTE a recusa, e isso não é esquecimento:
+	// são milhares de push por minuto num parque de algumas centenas de hosts,
+	// e gravar o sucesso de cada um destruiria a tabela e afogaria o sinal.
+	// Token inválido, ao contrário, é exatamente o que a auditoria existe para
+	// capturar.
+	mux.HandleFunc("/api/ingest/metrics",
+		chain(IngestHandler, cfg.audit(auditOnlyDenied), limitBody(maxFormBodyBytes)))
+	mux.HandleFunc("/api/ingest/inventory",
+		chain(InventoryIngestHandler, cfg.audit(auditOnlyDenied), limitBody(maxIngestBodyBytes)))
 
-		for _, c := range containers {
-			lastMetric, ok := containerMetricsMap[c.ID]
-			if ok {
-				res.Containers = append(res.Containers, ContainerLiveStat{
-					ServerID: c.ServerID,
-					DockerID: c.DockerID,
-					Name:     c.Name,
-					Project:  c.ProjectDir,
-					State:    lastMetric.State,
-					Status:   lastMetric.Status,
-					CPU:      lastMetric.CPUUsagePercent,
-					MemUsed:  lastMetric.MemUsedBytes,
-					MemLimit: lastMetric.MemLimitBytes,
-				})
-			}
-		}
+	// Identidade por dispositivo. Emitir convite é conceder a uma máquina o
+	// direito de escrever métrica e inventário de uma filial inteira, então a
+	// emissão e a revogação são de admin global.
+	mux.HandleFunc("/api/enroll/tokens", admin(cfg.enrollTokensHandler, http.MethodPost))
+	mux.HandleFunc("/api/devices", admin(cfg.devicesHandler, http.MethodGet, http.MethodDelete))
+	// A troca do convite pela credencial é pública porque quem chama ainda não
+	// tem credencial — é o que vem buscar. A proteção é o convite ser de uso
+	// único e de validade curta, com o teto de corpo e o limite de tentativa do
+	// wrapper valendo aqui como em qualquer rota aberta.
+	mux.HandleFunc("/api/enroll", public(cfg.enrollHandler, http.MethodPost))
 
-		database.DB.Raw(`
-			SELECT upstream_addr, server_name, status, SUM(requests_count) as requests_count
-			FROM metric_load_balancers
-			WHERE timestamp >= NOW() - INTERVAL '5 seconds'
-			GROUP BY upstream_addr, server_name, status
-		`).Scan(&res.LoadBalancing)
+	// Autenticação de pessoas.
+	mux.HandleFunc("/api/auth/login", public(cfg.loginHandler, http.MethodPost))
+	mux.HandleFunc("/api/auth/logout", api(logoutHandler, http.MethodPost))
+	mux.HandleFunc("/api/auth/me", api(cfg.meHandler, http.MethodGet))
+	mux.HandleFunc("/api/users", admin(usersHandler,
+		http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete))
 
-		json.NewEncoder(w).Encode(res)
-	}))
+	// Auditoria: admin GLOBAL, porque a tabela mostra ação de todas as unidades.
+	mux.HandleFunc("/api/audit", admin(auditListHandler, http.MethodGet))
 
-	mux.HandleFunc("/api/containers/logs/stream", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		if r.Method == "OPTIONS" {
-			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		serverID := r.URL.Query().Get("server_id")
-		containerName := r.URL.Query().Get("container_name")
-
-		if serverID == "" || containerName == "" {
-			http.Error(w, "server_id e container_name sao obrigatorios", http.StatusBadRequest)
-			return
-		}
-
-		var server database.Server
-		if err := database.DB.Where("id = ?", serverID).First(&server).Error; err != nil {
-			http.Error(w, "Servidor nao encontrado", http.StatusNotFound)
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
-			return
-		}
-
-		sshKey := os.Getenv("SSH_KEY_PATH")
-		ctx := r.Context()
-
-		err := ssh.StreamDockerLogs(ctx, server.ID, server.HostIP, server.User, sshKey, containerName, w, flusher)
-		if err != nil {
-			log.Printf("Erro no stream de logs: %v", err)
-		}
+	// Liveness para o orquestrador; endpoint sem credencial.
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	// Fase 4 — ações de gestão em containers (start/stop/restart) via SSH.
-	mux.HandleFunc("/api/containers/action", withCORS(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		var req struct {
-			ServerID      string `json:"server_id"`
-			ContainerName string `json:"container_name"`
-			Action        string `json:"action"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+	return mux
+}
 
-		var server database.Server
-		if err := database.DB.Where("id = ?", req.ServerID).First(&server).Error; err != nil {
-			http.Error(w, "Servidor nao encontrado", http.StatusNotFound)
-			return
-		}
+// StartServer sobe a API e bloqueia até ctx ser cancelado, aí drena as
+// conexões abertas antes de devolver.
+func StartServer(ctx context.Context, cfg Config) error {
+	srv := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           Routes(cfg),
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		IdleTimeout:       idleTimeout,
+		// WriteTimeout fica zerado de propósito: as rotas de SSE mantêm a
+		// resposta aberta indefinidamente e seriam cortadas no meio.
+	}
 
-		out, err := ssh.RunContainerAction(server.HostIP, server.User, os.Getenv("SSH_KEY_PATH"), req.Action, req.ContainerName)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+	errCh := make(chan error, 1)
+	go func() {
+		log.Printf("[API] escutando em http://localhost%s", cfg.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
 		}
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "output": out})
-	}))
+	}()
 
-	mux.HandleFunc("/api/security/radar", withCORS(func(w http.ResponseWriter, r *http.Request) {
-		serverID := r.URL.Query().Get("server_id")
-		if serverID == "" {
-			http.Error(w, "server_id is required", http.StatusBadRequest)
-			return
-		}
-		var server database.Server
-		if err := database.DB.Where("id = ?", serverID).First(&server).Error; err != nil {
-			http.Error(w, "Servidor nao encontrado", http.StatusNotFound)
-			return
-		}
-
-		ports, err := ssh.GetRadarPorts(server.HostIP, server.User, os.Getenv("SSH_KEY_PATH"))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		json.NewEncoder(w).Encode(ports)
-	}))
-
-	mux.HandleFunc("/api/security/authlog/stream", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		if r.Method == "OPTIONS" {
-			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		serverID := r.URL.Query().Get("server_id")
-		if serverID == "" {
-			http.Error(w, "server_id is required", http.StatusBadRequest)
-			return
-		}
-
-		var server database.Server
-		if err := database.DB.Where("id = ?", serverID).First(&server).Error; err != nil {
-			http.Error(w, "Servidor nao encontrado", http.StatusNotFound)
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
-			return
-		}
-
-		err := ssh.StreamAuthLogs(r.Context(), server.ID, server.HostIP, server.User, os.Getenv("SSH_KEY_PATH"), w, flusher)
-		if err != nil {
-			log.Printf("Erro no stream de auth logs: %v", err)
-		}
-	})
-
-	mux.HandleFunc("/api/ssl/domains", withCORS(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			var domains []database.Domain
-			database.DB.Find(&domains)
-			json.NewEncoder(w).Encode(domains)
-			return
-		}
-		if r.Method == "POST" {
-			var req struct {
-				Domain   string `json:"domain"`
-				ServerID string `json:"server_id"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-				domain := database.Domain{Name: req.Domain, ServerID: req.ServerID}
-				database.DB.Create(&domain)
-				// Checa na hora para o domínio já aparecer com status, sem esperar o worker.
-				go network.CheckAndStore(domain)
-				json.NewEncoder(w).Encode(domain)
-			}
-			return
-		}
-		if r.Method == "DELETE" {
-			id := r.URL.Query().Get("id")
-			database.DB.Where("id = ?", id).Delete(&database.Domain{})
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-	}))
-
-	mux.HandleFunc("/api/ssl/check", withCORS(func(w http.ResponseWriter, r *http.Request) {
-		domain := r.URL.Query().Get("domain")
-		if domain == "" {
-			http.Error(w, "domain is required", http.StatusBadRequest)
-			return
-		}
-
-		info := network.CheckSSL(domain)
-		json.NewEncoder(w).Encode(info)
-	}))
-
-	// Recheca 1 domínio cadastrado agora, persiste e devolve o registro atualizado.
-	mux.HandleFunc("/api/ssl/recheck", withCORS(func(w http.ResponseWriter, r *http.Request) {
-		id := r.URL.Query().Get("id")
-		if id == "" {
-			http.Error(w, "id is required", http.StatusBadRequest)
-			return
-		}
-		var domain database.Domain
-		if err := database.DB.Where("id = ?", id).First(&domain).Error; err != nil {
-			http.Error(w, "Dominio nao encontrado", http.StatusNotFound)
-			return
-		}
-		updated := network.CheckAndStore(domain)
-		json.NewEncoder(w).Encode(updated)
-	}))
-
-	// Dispara a varredura de todos os domínios em background.
-	mux.HandleFunc("/api/ssl/recheck-all", withCORS(func(w http.ResponseWriter, r *http.Request) {
-		go network.CheckAllDomains()
-		w.WriteHeader(http.StatusAccepted)
-		json.NewEncoder(w).Encode(map[string]string{"status": "checking"})
-	}))
-
-	// Fase 6 — paridade com Grafana.
-	mux.HandleFunc("/api/metrics/history", withCORS(HistoryHandler)) // #1 histórico
-	mux.HandleFunc("/api/alerts/rules", withCORS(AlertRulesHandler)) // #2 regras de alerta
-	mux.HandleFunc("/api/ingest/metrics", IngestHandler)             // #3 ingestão do agente push (auth por token)
-	mux.HandleFunc("/api/logs/search", withCORS(LogSearchHandler))   // #4 busca de logs
-
-	log.Printf("[RealTime] Servidor da API rodando em http://localhost%s", port)
-	if err := http.ListenAndServe(port, mux); err != nil {
-		log.Fatalf("Erro crítico na API HTTP: %v", err)
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		log.Println("[API] encerrando, drenando conexões...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
 	}
 }

@@ -1,18 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { API_URL } from '../config';
-import { Lock, Plus, Search, ShieldCheck, ShieldAlert, AlertTriangle, RefreshCw, Trash2, Globe, Clock } from 'lucide-react';
-
-// Espelha o model Domain do backend (estado persistido pelo worker de SSL).
-interface DomainItem {
-  id: number;
-  domain: string;
-  server_id: string;
-  valid: boolean;
-  issuer: string;
-  days_left: number;
-  error_msg: string;
-  last_check: string | null;
-}
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Lock, Plus, Search, ShieldCheck, ShieldAlert, AlertTriangle, RefreshCw, Trash2, Globe, Clock, Download } from 'lucide-react';
+import { api, type DiscoveredDomain, type DomainRecord as DomainItem } from '../lib/api';
+import { relativeTime } from '../lib/format';
+import { useDialog } from './ui/dialog-context';
+import { useRole } from './ui/session-context';
 
 type Status = 'valid' | 'warning' | 'expired' | 'pending';
 
@@ -23,30 +14,45 @@ const statusOf = (d: DomainItem): Status => {
   return 'valid';
 };
 
-const relativeTime = (iso: string | null): string => {
-  if (!iso) return 'nunca';
-  const diff = Date.now() - new Date(iso).getTime();
-  const s = Math.floor(diff / 1000);
-  if (s < 60) return `há ${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `há ${m}min`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `há ${h}h`;
-  return `há ${Math.floor(h / 24)}d`;
+// Rótulos dos motivos que o backend classifica em internal/network/ssl.go. O
+// backend manda o código estável; o texto vive aqui, para ser reescrito sem
+// mexer na comparação que outro código faz.
+const INVALID_REASON_LABELS: Record<string, string> = {
+  expirado: 'Expirado',
+  ainda_nao_valido: 'Ainda não válido',
+  hostname_divergente: 'Hostname divergente',
+  autoassinado: 'Autoassinado',
+  cadeia_nao_confiavel: 'Cadeia não confiável',
+  sem_certificado: 'Sem certificado',
+  handshake: 'Falha no handshake',
 };
 
+// Domínio verificado antes de a coluna invalid_reason existir não tem motivo
+// classificado, e continuar mostrando só "Falha" é melhor que inventar um.
+const invalidReasonLabel = (reason: string): string =>
+  INVALID_REASON_LABELS[reason] ?? 'Inválido';
+
+const invalidReasonOf = (d: DomainItem): string => d.invalid_reason ?? '';
+
+// Janela que o backend leva para refazer os handshakes antes de persistir.
+const RECHECK_SETTLE_MS = 2500;
+
 const SslView = () => {
+  const dialog = useDialog();
+  const { canOperate } = useRole();
+  const timeouts = useRef<number[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [domains, setDomains] = useState<DomainItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<Record<number, boolean>>({});
   const [checkingAll, setCheckingAll] = useState(false);
+  // Domínios que o Nginx atendeu e ainda não estão sob monitoramento.
+  const [discovered, setDiscovered] = useState<DiscoveredDomain[]>([]);
+  const [importing, setImporting] = useState(false);
 
   const fetchDomains = async () => {
     try {
-      const res = await fetch(API_URL + '/api/ssl/domains');
-      const data = await res.json();
-      if (Array.isArray(data)) setDomains(data);
+      setDomains(await api.domains());
     } catch (e) {
       console.error(e);
     } finally {
@@ -54,21 +60,37 @@ const SslView = () => {
     }
   };
 
+  const loadDiscovered = async () => {
+    try {
+      setDiscovered((await api.discoverDomains()).filter(d => !d.monitored));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   // Polling ao vivo: reflete o que o worker vai persistindo em background.
   useEffect(() => {
+    const pending = timeouts.current;
     fetchDomains();
+    loadDiscovered();
     const interval = setInterval(fetchDomains, 10000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      pending.forEach(clearTimeout);
+      pending.length = 0;
+    };
   }, []);
+
+  // Agenda um refetch e mantém o handle para cancelar se a tela desmontar.
+  const scheduleRefetch = (delay: number, task: () => void = fetchDomains) => {
+    timeouts.current.push(window.setTimeout(task, delay));
+  };
 
   const recheckOne = async (id: number) => {
     setBusy(prev => ({ ...prev, [id]: true }));
     try {
-      const res = await fetch(`${API_URL}/api/ssl/recheck?id=${id}`, { method: 'POST' });
-      if (res.ok) {
-        const updated: DomainItem = await res.json();
-        setDomains(prev => prev.map(d => (d.id === id ? updated : d)));
-      }
+      const updated = await api.recheckDomain(id);
+      setDomains(prev => prev.map(d => (d.id === id ? updated : d)));
     } catch (e) {
       console.error(e);
     } finally {
@@ -79,38 +101,71 @@ const SslView = () => {
   const recheckAll = async () => {
     setCheckingAll(true);
     try {
-      await fetch(`${API_URL}/api/ssl/recheck-all`, { method: 'POST' });
-      // Dá tempo do backend fazer os handshakes e busca o resultado persistido.
-      setTimeout(fetchDomains, 2500);
+      await api.recheckAllDomains();
     } catch (e) {
       console.error(e);
+      dialog.notify('Falha ao disparar a revalidação em lote.', 'error');
     } finally {
-      setTimeout(() => setCheckingAll(false), 2500);
+      scheduleRefetch(RECHECK_SETTLE_MS);
+      scheduleRefetch(RECHECK_SETTLE_MS, () => setCheckingAll(false));
     }
   };
 
   const addDomain = async () => {
-    const domainName = window.prompt('Domínio a monitorar (ex: app.empresa.com):');
+    const domainName = await dialog.prompt({
+      title: 'Monitorar novo domínio',
+      message: 'O certificado TLS passa a ser revalidado automaticamente.',
+      placeholder: 'app.empresa.com',
+      confirmLabel: 'Monitorar',
+    });
     if (!domainName) return;
     try {
-      const res = await fetch(API_URL + '/api/ssl/domains', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain: domainName.trim(), server_id: '' }),
-      });
-      if (res.ok) setTimeout(fetchDomains, 1500); // backend checa na hora
+      await api.createDomain(domainName);
+      scheduleRefetch(1500); // backend checa na hora
+      dialog.notify(`${domainName} entrou no monitoramento.`, 'success');
     } catch (e) {
-      alert('Erro ao adicionar domínio');
+      console.error(e);
+      dialog.notify('Erro ao adicionar domínio.', 'error');
     }
   };
 
   const deleteDomain = async (id: number) => {
-    if (!window.confirm('Remover este domínio do monitoramento?')) return;
+    const confirmed = await dialog.confirm({
+      title: 'Remover este domínio do monitoramento?',
+      message: 'O histórico de checagens deixa de ser atualizado.',
+      confirmLabel: 'Remover',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
-      await fetch(`${API_URL}/api/ssl/domains?id=${id}`, { method: 'DELETE' });
+      await api.deleteDomain(id);
       setDomains(prev => prev.filter(d => d.id !== id));
     } catch (e) {
-      alert('Erro ao deletar');
+      console.error(e);
+      dialog.notify('Erro ao remover o domínio.', 'error');
+    }
+  };
+
+  const importAll = async () => {
+    const nomes = discovered.map(d => d.domain);
+    const confirmed = await dialog.confirm({
+      title: `Monitorar ${nomes.length} domínio(s) do Nginx?`,
+      message: nomes.slice(0, 8).join(', ') + (nomes.length > 8 ? '…' : ''),
+      confirmLabel: 'Monitorar',
+    });
+    if (!confirmed) return;
+
+    setImporting(true);
+    try {
+      const { imported } = await api.importDomains(nomes);
+      dialog.notify(`${imported} domínio(s) entraram no monitoramento.`, 'success');
+      // O handshake roda em background no backend; dá tempo de aparecer.
+      scheduleRefetch(RECHECK_SETTLE_MS);
+      await loadDiscovered();
+    } catch (e) {
+      dialog.notify((e as Error).message || 'Falha ao importar os domínios.', 'error');
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -120,8 +175,9 @@ const SslView = () => {
     return acc;
   }, [domains]);
 
-  const filteredDomains = domains.filter(d =>
-    d.domain.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredDomains = useMemo(
+    () => domains.filter(d => d.domain.toLowerCase().includes(searchTerm.toLowerCase())),
+    [domains, searchTerm],
   );
 
   const statusStyle = (s: Status) => ({
@@ -151,10 +207,24 @@ const SslView = () => {
           </h1>
           <p className="text-[#737373] text-sm">Monitoramento contínuo de certificados TLS — revalidação automática a cada 30min.</p>
         </div>
-        <button onClick={addDomain} className="flex items-center gap-2 bg-[#10b981] hover:bg-[#059669] text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-[0_0_15px_rgba(16,185,129,0.2)]">
-          <Plus size={18} />
-          <span>Monitorar Domínio</span>
-        </button>
+        {canOperate && (
+          <div className="flex items-center gap-2">
+            {discovered.length > 0 && (
+              <button
+                onClick={importAll}
+                disabled={importing}
+                className="flex items-center gap-2 border border-[#10b981]/50 bg-[#10b981]/10 hover:bg-[#10b981]/20 text-[#10b981] px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-40"
+              >
+                <Download size={18} />
+                <span>Importar {discovered.length} do Nginx</span>
+              </button>
+            )}
+            <button onClick={addDomain} className="flex items-center gap-2 bg-[#10b981] hover:bg-[#059669] text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+              <Plus size={18} />
+              <span>Monitorar Domínio</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Resumo */}
@@ -192,10 +262,12 @@ const SslView = () => {
               </span>
               Live
             </span>
-            <button onClick={recheckAll} disabled={checkingAll} className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors text-sm px-3 py-1.5 rounded-lg hover:bg-white/5 border border-white/10 disabled:opacity-40">
-              <RefreshCw size={16} className={checkingAll ? 'animate-spin' : ''} />
-              <span>Forçar Handshake SSL</span>
-            </button>
+            {canOperate && (
+              <button onClick={recheckAll} disabled={checkingAll} className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors text-sm px-3 py-1.5 rounded-lg hover:bg-white/5 border border-white/10 disabled:opacity-40">
+                <RefreshCw size={16} className={checkingAll ? 'animate-spin' : ''} />
+                <span>Forçar Handshake SSL</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -208,13 +280,20 @@ const SslView = () => {
                 <th className="py-3 px-4 font-medium text-gray-500">Validade</th>
                 <th className="py-3 px-4 font-medium text-gray-500">Status</th>
                 <th className="py-3 px-4 font-medium text-gray-500">Última checagem</th>
-                <th className="py-3 px-4 font-medium text-gray-500 text-right">Ações</th>
+                {canOperate && <th className="py-3 px-4 font-medium text-gray-500 text-right">Ações</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {loading && <tr><td colSpan={6} className="py-8 text-center text-gray-500">Carregando domínios...</td></tr>}
+              {loading && <tr><td colSpan={canOperate ? 6 : 5} className="py-8 text-center text-gray-500">Carregando domínios...</td></tr>}
               {!loading && filteredDomains.length === 0 && (
-                <tr><td colSpan={6} className="py-8 text-center text-gray-500">Nenhum domínio monitorado. Clique em "Monitorar Domínio".</td></tr>
+                <tr>
+                  <td colSpan={canOperate ? 6 : 5} className="py-8 text-center text-gray-500">
+                    Nenhum domínio monitorado.
+                    {discovered.length > 0
+                      ? ` O Nginx atendeu ${discovered.length} domínio(s) — use "Importar do Nginx" acima.`
+                      : ' Cadastre um domínio ou aguarde o balanceador registrar tráfego.'}
+                  </td>
+                </tr>
               )}
               {filteredDomains.map(domain => {
                 const st = statusOf(domain);
@@ -244,7 +323,19 @@ const SslView = () => {
                           </div>
                         </div>
                       ) : (
-                        <span className="text-rose-400 text-xs" title={domain.error_msg}>{domain.error_msg || 'Falha'}</span>
+                        <div className="w-40 space-y-1">
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium border border-rose-400/20 bg-rose-400/10 text-rose-300">
+                            <ShieldAlert size={12} />
+                            {invalidReasonLabel(invalidReasonOf(domain))}
+                          </span>
+                          {/* O badge mostra só o motivo mais grave; error_msg lista
+                              todos quando o certificado tem mais de um problema. */}
+                          {domain.error_msg && (
+                            <p className="text-rose-400/70 text-[11px] leading-snug" title={domain.error_msg}>
+                              {domain.error_msg}
+                            </p>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td className="py-3 px-4">
@@ -256,16 +347,18 @@ const SslView = () => {
                     <td className="py-3 px-4 text-gray-500 text-xs">
                       <span className="flex items-center gap-1.5"><Clock size={12} /> {relativeTime(domain.last_check)}</span>
                     </td>
-                    <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => recheckOne(domain.id)} disabled={busy[domain.id]} className="p-1.5 text-gray-400 hover:text-emerald-400 hover:bg-emerald-400/10 rounded transition-colors disabled:opacity-40" title="Rechecar agora">
-                          <RefreshCw size={16} className={busy[domain.id] ? 'animate-spin' : ''} />
-                        </button>
-                        <button onClick={() => deleteDomain(domain.id)} className="p-1.5 text-gray-400 hover:text-rose-400 hover:bg-rose-400/10 rounded transition-colors" title="Remover">
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
+                    {canOperate && (
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button onClick={() => recheckOne(domain.id)} disabled={busy[domain.id]} className="p-1.5 text-gray-400 hover:text-emerald-400 hover:bg-emerald-400/10 rounded transition-colors disabled:opacity-40" title="Rechecar agora">
+                            <RefreshCw size={16} className={busy[domain.id] ? 'animate-spin' : ''} />
+                          </button>
+                          <button onClick={() => deleteDomain(domain.id)} className="p-1.5 text-gray-400 hover:text-rose-400 hover:bg-rose-400/10 rounded transition-colors" title="Remover">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 );
               })}

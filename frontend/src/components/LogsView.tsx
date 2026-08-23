@@ -1,23 +1,24 @@
-import { useState, useEffect } from 'react';
-import { API_URL } from '../config';
+import { useState, useEffect, type FormEvent } from 'react';
 import { Search, ScrollText, Server as ServerIcon, ShieldAlert, Box, Loader2 } from 'lucide-react';
+import { api, type LogEntryRecord as LogEntry } from '../lib/api';
+import { formatDateTime } from '../lib/format';
+import Select, { type SelectOption } from './ui/Select';
 
-interface Server {
+interface ServerOption {
   id: string;
   name: string;
 }
 
-interface LogEntry {
-  id: number;
-  server_id: string;
-  source: string;
-  container: string;
-  line: string;
-  timestamp: string;
-}
+const RESULT_LIMIT = 500;
+
+const LOG_SOURCES: SelectOption[] = [
+  { value: '', label: 'Todas' },
+  { value: 'auth', label: 'Autenticação' },
+  { value: 'container', label: 'Container' },
+];
 
 const LogsView = () => {
-  const [servers, setServers] = useState<Server[]>([]);
+  const [servers, setServers] = useState<ServerOption[]>([]);
   const [serverId, setServerId] = useState('');
   const [source, setSource] = useState('');
   const [q, setQ] = useState('');
@@ -27,43 +28,32 @@ const LogsView = () => {
   const [searched, setSearched] = useState(false);
 
   useEffect(() => {
-    fetch(API_URL + '/api/metrics/live')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data && data.servers) {
-          setServers(data.servers.map((s: any) => ({ id: s.id, name: s.name })));
-        }
-      })
+    const controller = new AbortController();
+    api.liveMetrics(controller.signal)
+      .then((data) => setServers(data.servers.map(({ id, name }) => ({ id, name }))))
       .catch(() => {});
+    return () => controller.abort();
   }, []);
 
   const serverName = (id: string) => servers.find((s) => s.id === id)?.name || id.slice(0, 8);
 
-  const handleSearch = async (e?: React.FormEvent) => {
+  const handleSearch = async (e?: FormEvent) => {
     if (e) e.preventDefault();
     setLoading(true);
     setSearched(true);
     try {
-      const params = new URLSearchParams();
-      if (serverId) params.set('server_id', serverId);
-      if (source) params.set('source', source);
-      if (q) params.set('q', q);
-      params.set('limit', '500');
+      const params: Record<string, string> = { limit: String(RESULT_LIMIT) };
+      if (serverId) params.server_id = serverId;
+      if (source) params.source = source;
+      if (q) params.q = q;
 
-      const res = await fetch(`${API_URL}/api/logs/search?${params.toString()}`);
-      const data = await res.json();
-      setLogs(Array.isArray(data) ? data : []);
+      setLogs(await api.searchLogs(params));
     } catch (err) {
       console.error(err);
       setLogs([]);
     } finally {
       setLoading(false);
     }
-  };
-
-  const fmtTime = (ts: string) => {
-    const d = new Date(ts);
-    return isNaN(d.getTime()) ? ts : d.toLocaleString('pt-BR');
   };
 
   return (
@@ -79,33 +69,27 @@ const LogsView = () => {
       <form onSubmit={handleSearch} className="glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02] mb-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
-            <label className="text-xs text-[#737373] block mb-1">Servidor</label>
-            <select
+            <label htmlFor="logs-server" className="text-xs text-[#737373] block mb-1">Servidor</label>
+            <Select
+              id="logs-server"
               value={serverId}
-              onChange={(e) => setServerId(e.target.value)}
-              className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors"
-            >
-              <option value="">Todos</option>
-              {servers.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+              onChange={setServerId}
+              options={[{ value: '', label: 'Todos' }, ...servers.map((s) => ({ value: s.id, label: s.name }))]}
+            />
           </div>
           <div>
-            <label className="text-xs text-[#737373] block mb-1">Origem</label>
-            <select
+            <label htmlFor="logs-source" className="text-xs text-[#737373] block mb-1">Origem</label>
+            <Select
+              id="logs-source"
               value={source}
-              onChange={(e) => setSource(e.target.value)}
-              className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors"
-            >
-              <option value="">Todas</option>
-              <option value="auth">Autenticação</option>
-              <option value="container">Container</option>
-            </select>
+              onChange={setSource}
+              options={LOG_SOURCES}
+            />
           </div>
           <div className="md:col-span-2">
-            <label className="text-xs text-[#737373] block mb-1">Filtro de texto</label>
+            <label htmlFor="logs-query" className="text-xs text-[#737373] block mb-1">Filtro de texto</label>
             <input
+              id="logs-query"
               type="text"
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -149,7 +133,7 @@ const LogsView = () => {
               <tbody>
                 {logs.map((l) => (
                   <tr key={l.id} className="border-b border-white/[0.03] hover:bg-white/[0.05] transition-all align-top">
-                    <td className="py-2 px-4 text-[#737373] whitespace-nowrap">{fmtTime(l.timestamp)}</td>
+                    <td className="py-2 px-4 text-[#737373] whitespace-nowrap">{formatDateTime(l.timestamp)}</td>
                     <td className="py-2 px-4 text-white/70 whitespace-nowrap flex items-center gap-1">
                       <ServerIcon className="w-3 h-3 text-[#737373]" />
                       {serverName(l.server_id)}

@@ -9,16 +9,13 @@ import {
   Tooltip,
 } from 'recharts';
 import { Activity, RefreshCw } from 'lucide-react';
-import { API_URL } from '../config';
+import { api, type HistoryMetric, type HistoryRange } from '../lib/api';
+import { HANDSHAKE_LABEL } from '../lib/metrics';
+import Select from './ui/Select';
 
 interface ServerOption {
   id: string;
   name: string;
-}
-
-interface HistoryPoint {
-  ts: string;
-  value: number;
 }
 
 interface ChartRow {
@@ -27,17 +24,26 @@ interface ChartRow {
   value: number;
 }
 
-const METRICS = [
+const METRICS: { key: HistoryMetric; label: string; unit: string }[] = [
   { key: 'cpu', label: 'CPU', unit: '%' },
   { key: 'mem', label: 'Memória', unit: '%' },
   { key: 'disk', label: 'Disco', unit: '%' },
   { key: 'load', label: 'Load', unit: '' },
-  { key: 'latency', label: 'Latência', unit: 'ms' },
+  // Temperatura só passou a valer no gráfico agora: antes o backend
+  // recusava a métrica e apenas as estações tinham o dado. O stream SSH
+  // passou a ler os sensores do host (achado 5 do QA).
+  { key: 'temperature', label: 'Temperatura', unit: '°C' },
+  // A chave 'latency' continua sendo o que a API espera; renomeá-la quebraria o
+  // endpoint de histórico. O rótulo é que estava errado: o valor é o handshake
+  // SSH completo, não latência de rede.
+  { key: 'latency', label: HANDSHAKE_LABEL, unit: 'ms' },
 ];
 
-const RANGES = ['1h', '6h', '24h', '7d'];
+const RANGES: HistoryRange[] = ['1h', '6h', '24h', '7d'];
 
-const fmtTime = (iso: string, range: string) => {
+const REFRESH_MS = 15000;
+
+const fmtTime = (iso: string, range: HistoryRange) => {
   const d = new Date(iso);
   if (range === '7d' || range === '24h') {
     return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -48,8 +54,8 @@ const fmtTime = (iso: string, range: string) => {
 const MetricsHistoryView = () => {
   const [servers, setServers] = useState<ServerOption[]>([]);
   const [serverId, setServerId] = useState('');
-  const [metric, setMetric] = useState('cpu');
-  const [range, setRange] = useState('1h');
+  const [metric, setMetric] = useState<HistoryMetric>('cpu');
+  const [range, setRange] = useState<HistoryRange>('1h');
   const [data, setData] = useState<ChartRow[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -57,12 +63,8 @@ const MetricsHistoryView = () => {
 
   const fetchServers = useCallback(async () => {
     try {
-      const res = await fetch(API_URL + '/api/metrics/live');
-      const json = await res.json();
-      const opts: ServerOption[] = (json.servers || []).map((s: { id: string; name: string }) => ({
-        id: s.id,
-        name: s.name,
-      }));
+      const data = await api.liveMetrics();
+      const opts = data.servers.map(({ id, name }) => ({ id, name }));
       setServers(opts);
       setServerId((prev) => prev || (opts[0]?.id ?? ''));
     } catch (err) {
@@ -74,15 +76,12 @@ const MetricsHistoryView = () => {
     if (!serverId) return;
     setLoading(true);
     try {
-      const url = `${API_URL}/api/metrics/history?server_id=${serverId}&metric=${metric}&range=${range}`;
-      const res = await fetch(url);
-      const json: HistoryPoint[] = await res.json();
-      const rows: ChartRow[] = (json || []).map((p) => ({
+      const points = await api.history(serverId, metric, range);
+      setData(points.map((p) => ({
         ts: p.ts,
         time: fmtTime(p.ts, range),
-        value: Number(p.value?.toFixed?.(2) ?? p.value),
-      }));
-      setData(rows);
+        value: Number(p.value.toFixed(2)),
+      })));
     } catch (err) {
       console.error(err);
       setData([]);
@@ -97,12 +96,9 @@ const MetricsHistoryView = () => {
 
   useEffect(() => {
     fetchHistory();
-    const interval = setInterval(fetchHistory, 15000);
+    const interval = setInterval(fetchHistory, REFRESH_MS);
     return () => clearInterval(interval);
   }, [fetchHistory]);
-
-  const selectClass =
-    'bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors';
 
   return (
     <div className="p-8">
@@ -119,26 +115,26 @@ const MetricsHistoryView = () => {
       <div className="glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02]">
         <div className="flex flex-wrap items-center gap-4 mb-6">
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-[#737373] uppercase tracking-widest">Servidor</label>
-            <select value={serverId} onChange={(e) => setServerId(e.target.value)} className={selectClass}>
-              {servers.length === 0 && <option value="">Nenhum servidor</option>}
-              {servers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+            <label htmlFor="history-server" className="text-[10px] text-[#737373] uppercase tracking-widest">Servidor</label>
+            <Select
+              id="history-server"
+              value={serverId}
+              onChange={setServerId}
+              className="min-w-[220px]"
+              placeholder="Nenhum servidor"
+              options={servers.map((s) => ({ value: s.id, label: s.name }))}
+            />
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-[#737373] uppercase tracking-widest">Métrica</label>
-            <select value={metric} onChange={(e) => setMetric(e.target.value)} className={selectClass}>
-              {METRICS.map((m) => (
-                <option key={m.key} value={m.key}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+            <label htmlFor="history-metric" className="text-[10px] text-[#737373] uppercase tracking-widest">Métrica</label>
+            <Select
+              id="history-metric"
+              value={metric}
+              onChange={(v) => setMetric(v as HistoryMetric)}
+              className="min-w-[160px]"
+              options={METRICS.map((m) => ({ value: m.key, label: m.label }))}
+            />
           </div>
 
           <div className="flex flex-col gap-1">
@@ -207,7 +203,7 @@ const MetricsHistoryView = () => {
                     fontSize: 12,
                   }}
                   labelStyle={{ color: '#737373' }}
-                  formatter={(value: number) => [`${value}${activeMetric.unit}`, activeMetric.label]}
+                  formatter={(value) => [`${value}${activeMetric.unit}`, activeMetric.label]}
                 />
                 <Area
                   type="monotone"

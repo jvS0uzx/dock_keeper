@@ -17,6 +17,59 @@
     font-family: ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+
+    /* Painel de leitura, não editor: o ponteiro nunca vira barra de texto ("|")
+       sobre rótulos, métricas e badges — isso sugeria campo digitável. */
+    cursor: default;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Dados que o operador precisa copiar (IP, nome de container, linha de log)
+     seguem selecionáveis; só o cursor de digitação é que sai. */
+  td,
+  pre,
+  code,
+  .selectable {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  input,
+  textarea,
+  select,
+  [contenteditable='true'] {
+    cursor: auto;
+    -webkit-user-select: auto;
+    user-select: auto;
+  }
+
+  a,
+  label,
+  summary,
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled='true'] {
+    cursor: not-allowed;
+  }
+
+  /* Rede de segurança para algum <select> nativo que escape do componente
+     ui/Select: o widget da lista é desenhado pelo sistema operacional e não há
+     CSS que o padronize entre browsers, mas cor de fundo e de texto das opções
+     o Chromium e o Firefox respeitam — o suficiente para não abrir um painel
+     branco no meio do tema escuro. */
+  select,
+  select option {
+    background-color: var(--color-vd-800);
+    color: var(--color-vd-text);
+  }
+
+  select option:checked {
+    color: var(--color-vd-green);
   }
 }
 

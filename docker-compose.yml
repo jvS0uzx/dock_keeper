@@ -1,18 +1,75 @@
-version: '3.8'
+# Sem `version:`. A chave é obsoleta desde o Compose v2 e só produz aviso.
+#
+# Nenhum segredo aqui: tudo vem do .env ao lado, que está no .gitignore. A versão
+# anterior deste arquivo trazia POSTGRES_PASSWORD em texto puro e versionado.
 
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: vd_stats_postgres
+    container_name: dockkeeper_postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: secretpassword
-      POSTGRES_DB: vd_stats
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: ${POSTGRES_DB:-vd_stats}
+    # 127.0.0.1 e não 0.0.0.0: a versão anterior publicava o banco em todas as
+    # interfaces da máquina. Quem precisar alcançar de fora que abra o túnel.
     ports:
-      - "5433:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # O backend roda AutoMigrate no boot: subir antes de o banco aceitar
+      # conexão o faz morrer no arranque em vez de esperar.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-vd_stats}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    container_name: dockkeeper_backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "host=postgres user=${POSTGRES_USER:-postgres} password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB:-vd_stats} port=5432 sslmode=disable TimeZone=UTC"
+      API_TOKEN: ${API_TOKEN:?defina API_TOKEN no .env}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8081}
+      SSH_KEY_PATH: /run/secrets/ssh_key
+      SSH_KNOWN_HOSTS: /run/secrets/known_hosts
+      TRUST_PROXY_HEADERS: "true"
+      AGENT_INGEST_TOKEN: ${AGENT_INGEST_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    volumes:
+      # Somente leitura: o painel usa a chave, nunca a reescreve.
+      - ${SSH_KEY_PATH:-~/.ssh/id_ed25519_vps}:/run/secrets/ssh_key:ro
+      - ${SSH_KNOWN_HOSTS:-~/.ssh/known_hosts}:/run/secrets/known_hosts:ro
+      - floorplans:/app/data
+    restart: unless-stopped
+    # LIMITAÇÃO CONHECIDA: o inventário de rede lê /proc/net/arp, e dentro do
+    # container isso é a tabela ARP do namespace, não a do host — a varredura
+    # local enxerga quase nada. Quem depende dela precisa de
+    # `network_mode: host` aqui (o que descarta a rede do compose e o nome
+    # "postgres" como host do banco), ou do coletor remoto vd_collector rodando
+    # fora do container. Deixado assim de propósito: a maioria das instalações
+    # usa o coletor, e network_mode: host por padrão publicaria o backend em
+    # todas as interfaces sem ninguém pedir.
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: dockkeeper_frontend
+    depends_on:
+      - backend
+    ports:
+      - "${PANEL_PORT:-8081}:80"
     restart: unless-stopped
 
 volumes:
   pgdata:
+  floorplans:

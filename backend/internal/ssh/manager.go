@@ -10,6 +10,10 @@ import (
 	"github.com/joaov/vd_stats/internal/alert"
 )
 
+// Pausa antes de reabrir a sessão SSH. Sem ela um retorno sem erro vira loop
+// apertado de reconexão.
+const reconnectDelay = 5 * time.Second
+
 type ServerManager struct {
 	mu          sync.Mutex
 	cancelFuncs map[string]context.CancelFunc
@@ -19,61 +23,30 @@ var Manager = &ServerManager{
 	cancelFuncs: make(map[string]context.CancelFunc),
 }
 
-func (m *ServerManager) Start(id, name, host, user, keyPath string) {
+// Start liga os streams de coleta do alvo, se ainda não estiverem rodando.
+func (m *ServerManager) Start(t Target) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.cancelFuncs[id]; exists {
-		log.Printf("Stream para %s já está rodando", host)
+	if _, exists := m.cancelFuncs[t.ID]; exists {
+		log.Printf("[RealTime] stream de %s já está rodando", t.Host)
 		return
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	m.cancelFuncs[id] = cancel
+	m.cancelFuncs[t.ID] = cancel
 
-	go func() {
-		// Goroutine para métricas gerais (Docker/CPU)
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					log.Printf("[RealTime] Parando stream SSH para a VPS %s...", host)
-					return
-				default:
-					err := StartStream(ctx, id, host, user, keyPath)
-					if err != nil {
-						log.Printf("Erro na VPS %s: %v. Tentando reconectar em 5s...", host, err)
-						alert.Notify("host_unreachable:"+id,
-							fmt.Sprintf("[CRITICO] VPS *%s* (%s) inalcançável: %v", name, host, err))
-					}
-					// Sempre pausa antes de reabrir a sessão; sem isso um retorno
-					// sem erro vira loop apertado de reconexão SSH.
-					time.Sleep(5 * time.Second)
-				}
-			}
-		}()
+	go supervise(ctx, "metricas", t, StartStream, func(err error) {
+		alert.Notify("host_unreachable:"+t.ID,
+			fmt.Sprintf("[CRITICO] VPS %s (%s) inalcançável: %v", t.Name, t.Host, err))
+	})
 
-		// Goroutine para o Nginx Access Log (Apenas para o Load Balancer)
-		if name == "Load Balancer" {
-			go func() {
-				for {
-					select {
-					case <-ctx.Done():
-						log.Printf("[RealTime] Parando stream NGINX para a VPS %s...", host)
-						return
-					default:
-						err := StartNginxStream(ctx, id, host, user, keyPath)
-						if err != nil {
-							log.Printf("Erro no NGINX Stream %s: %v. Tentando reconectar em 5s...", host, err)
-						}
-						time.Sleep(5 * time.Second)
-					}
-				}
-			}()
-		}
-	}()
+	if t.CollectNginx {
+		go supervise(ctx, "nginx", t, StartNginxStream, nil)
+	}
 }
 
+// Stop derruba os streams do servidor e esquece o alvo.
 func (m *ServerManager) Stop(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -81,5 +54,36 @@ func (m *ServerManager) Stop(id string) {
 	if cancel, exists := m.cancelFuncs[id]; exists {
 		cancel()
 		delete(m.cancelFuncs, id)
+	}
+}
+
+// StopAll derruba todos os streams — usado no encerramento do processo.
+func (m *ServerManager) StopAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for id, cancel := range m.cancelFuncs {
+		cancel()
+		delete(m.cancelFuncs, id)
+	}
+}
+
+// supervise mantém um stream vivo: reabre a sessão sempre que ela cai, até o
+// contexto ser cancelado. onError roda apenas quando a queda foi por erro.
+func supervise(ctx context.Context, label string, t Target, run func(context.Context, Target) error, onError func(error)) {
+	for {
+		if err := run(ctx, t); err != nil && ctx.Err() == nil {
+			log.Printf("[RealTime] stream %s de %s caiu: %v. Reconectando em %s...", label, t.Host, err, reconnectDelay)
+			if onError != nil {
+				onError(err)
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			log.Printf("[RealTime] parando stream %s de %s", label, t.Host)
+			return
+		case <-time.After(reconnectDelay):
+		}
 	}
 }

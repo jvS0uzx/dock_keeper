@@ -1,95 +1,112 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { API_URL } from '../config';
-import { ShieldAlert, Activity, Server, AlertOctagon, Terminal, Shield, RefreshCw, XCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ShieldAlert, Activity, Terminal, RefreshCw, XCircle } from 'lucide-react';
+import { api, openStream, type PortInfo, type ServerLiveStat } from '../lib/api';
+import Select from './ui/Select';
 
-interface PortInfo {
-  protocol: string;
-  state: string;
-  port: string;
-  process: string;
-}
+type AuthLogType = 'error' | 'success' | 'info';
 
 interface AuthLog {
+  // A lista é uma janela deslizante: o índice muda de linha a cada evento,
+  // então precisa de id próprio para o React não remontar tudo.
+  id: number;
   time: string;
   raw: string;
-  type: 'error' | 'success' | 'info';
+  type: AuthLogType;
 }
+
+const MAX_AUTH_LINES = 50;
+
+const classifyAuthLine = (line: string): AuthLogType => {
+  if (line.includes('Accepted')) return 'success';
+  if (line.includes('Failed') || line.includes('Invalid') || line.includes('error')) return 'error';
+  return 'info';
+};
 
 const SecurityView = () => {
   const [activeTab, setActiveTab] = useState<'radar' | 'auth'>('radar');
-  const [servers, setServers] = useState<any[]>([]);
+  const [servers, setServers] = useState<ServerLiveStat[]>([]);
   const [selectedServer, setSelectedServer] = useState<string>('');
-  
+
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [loadingPorts, setLoadingPorts] = useState(false);
-  
+
   const [authLogs, setAuthLogs] = useState<AuthLog[]>([]);
   const [streamActive, setStreamActive] = useState(false);
-  const eventSourceRef = useRef<EventSource | null>(null);
 
   // Busca servidores iniciais
   useEffect(() => {
-    fetch(API_URL + '/api/metrics/live')
-      .then(res => res.json())
+    const controller = new AbortController();
+    api.liveMetrics(controller.signal)
       .then(data => {
-        if (data && data.servers && data.servers.length > 0) {
-          // Filtra o Load Balancer, pois queremos VPS reais para SSH
-          const vpsList = data.servers.filter((s: any) => s.name !== 'Load Balancer');
-          setServers(vpsList);
-          if (vpsList.length > 0) {
-            setSelectedServer(vpsList[0].id);
-          }
-        }
+        // Filtra o Load Balancer, pois queremos VPS reais para SSH
+        const vpsList = data.servers.filter(s => s.name !== 'Load Balancer');
+        setServers(vpsList);
+        setSelectedServer(prev => prev || vpsList[0]?.id || '');
       })
-      .catch(console.error);
+      .catch(err => {
+        if (!controller.signal.aborted) console.error(err);
+      });
+    return () => controller.abort();
   }, []);
 
   // Efeito Radar de Portas
   useEffect(() => {
-    if (activeTab === 'radar' && selectedServer) {
-      setLoadingPorts(true);
-      fetch(`${API_URL}/api/security/radar?server_id=${selectedServer}`)
-        .then(res => res.json())
-        .then(data => {
-          setPorts(data || []);
-          setLoadingPorts(false);
-        })
-        .catch(err => {
-          console.error(err);
-          setLoadingPorts(false);
-        });
-    }
+    if (activeTab !== 'radar' || !selectedServer) return;
+
+    const controller = new AbortController();
+    setLoadingPorts(true);
+    api.securityRadar(selectedServer, controller.signal)
+      .then(data => {
+        setPorts(data);
+        setLoadingPorts(false);
+      })
+      .catch(err => {
+        if (controller.signal.aborted) return;
+        console.error(err);
+        setLoadingPorts(false);
+      });
+
+    return () => controller.abort();
   }, [activeTab, selectedServer]);
 
   // Efeito Stream Auth.log
   useEffect(() => {
-    if (activeTab === 'auth' && selectedServer) {
-      setAuthLogs([]);
-      setStreamActive(true);
-      
-      const es = new EventSource(`${API_URL}/api/security/authlog/stream?server_id=${selectedServer}`);
-      eventSourceRef.current = es;
+    if (activeTab !== 'auth' || !selectedServer) return;
 
-      es.onmessage = (event) => {
-        const line = event.data;
-        let type: 'error' | 'success' | 'info' = 'info';
-        if (line.includes('Failed') || line.includes('Invalid') || line.includes('error')) type = 'error';
-        if (line.includes('Accepted')) type = 'success';
-        
-        const now = new Date().toLocaleTimeString('pt-BR');
-        setAuthLogs(prev => [...prev.slice(-49), { time: now, raw: line, type }]);
-      };
+    setAuthLogs([]);
+    setStreamActive(true);
 
-      es.onerror = () => {
-        es.close();
-        setStreamActive(false);
-      };
+    // O ticket é buscado de forma assíncrona: se a aba mudar antes da
+    // resposta, o stream nem chega a ser aberto.
+    let source: EventSource | null = null;
+    let cancelled = false;
+    let lineId = 0;
 
-      return () => {
-        es.close();
-        setStreamActive(false);
-      };
-    }
+    openStream('/api/security/authlog/stream', { server_id: selectedServer })
+      .then(es => {
+        if (cancelled) {
+          es.close();
+          return;
+        }
+        source = es;
+        es.onmessage = (event) => {
+          const raw = event.data;
+          const time = new Date().toLocaleTimeString('pt-BR');
+          const entry = { id: ++lineId, time, raw, type: classifyAuthLine(raw) };
+          setAuthLogs(prev => [...prev, entry].slice(-MAX_AUTH_LINES));
+        };
+        es.onerror = () => {
+          es.close();
+          setStreamActive(false);
+        };
+      })
+      .catch(() => setStreamActive(false));
+
+    return () => {
+      cancelled = true;
+      source?.close();
+      setStreamActive(false);
+    };
   }, [activeTab, selectedServer]);
 
   return (
@@ -103,16 +120,15 @@ const SecurityView = () => {
         </div>
         
         <div className="flex items-center gap-2">
-          <label className="text-gray-400 text-sm">Servidor Alvo:</label>
-          <select 
-            className="bg-[#0c0c0e] border border-white/10 text-white text-sm rounded-lg p-2.5 focus:border-[#10b981] focus:outline-none"
+          <label htmlFor="security-server" className="text-gray-400 text-sm">Servidor Alvo:</label>
+          <Select
+            id="security-server"
             value={selectedServer}
-            onChange={e => setSelectedServer(e.target.value)}
-          >
-            {servers.map(s => (
-              <option key={s.id} value={s.id}>{s.name} ({s.host_ip})</option>
-            ))}
-          </select>
+            onChange={setSelectedServer}
+            className="min-w-[260px]"
+            placeholder="Nenhum servidor"
+            options={servers.map(s => ({ value: s.id, label: `${s.name} (${s.host_ip})` }))}
+          />
         </div>
       </div>
 
@@ -151,8 +167,8 @@ const SecurityView = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {ports.map((port, idx) => (
-                  <tr key={idx} className="hover:bg-white/[0.02] transition-colors">
+                {ports.map((port) => (
+                  <tr key={`${port.protocol}-${port.port}`} className="hover:bg-white/[0.02] transition-colors">
                     <td className="py-3 px-4 font-mono text-gray-300 border-l-2 border-transparent hover:border-emerald-500">{port.port}</td>
                     <td className="py-3 px-4 text-gray-400 uppercase">{port.protocol}</td>
                     <td className="py-3 px-4 text-gray-300">
@@ -173,8 +189,8 @@ const SecurityView = () => {
             )
           ) : (
             <div className="font-mono text-sm bg-[#0c0c0e] rounded-lg p-4 border border-white/5 h-full overflow-y-auto">
-              {authLogs.map((log, idx) => (
-                <div key={idx} className="mb-1.5 flex gap-3 break-all">
+              {authLogs.map((log) => (
+                <div key={log.id} className="mb-1.5 flex gap-3 break-all selectable">
                   <span className="text-gray-600 shrink-0">[{log.time}]</span>
                   <span className={log.type === 'error' ? 'text-rose-400' : log.type === 'success' ? 'text-emerald-400' : 'text-gray-400'}>
                     {log.raw}

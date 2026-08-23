@@ -1,0 +1,9 @@
+# Binário compilado do backend
+dockkeeper
+/vd_stats
+
+# Uploads do painel (plantas baixas)
+data/
+
+# Binarios de cross-compile do agente (make agent-all)
+dist/

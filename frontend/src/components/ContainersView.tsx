@@ -1,79 +1,72 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { API_URL } from '../config';
 import { Box, Search, Play, Square, RefreshCw, Terminal, X, Cpu, MemoryStick, ChevronDown, ChevronRight, Folder } from 'lucide-react';
+import { api, openStream, type ContainerLiveStat } from '../lib/api';
+import { formatBytes } from '../lib/format';
+import { useDialog } from './ui/dialog-context';
+import { useRole } from './ui/session-context';
 
-interface ContainerStat {
-  server_id: string;
-  docker_id: string;
-  name: string;
-  project: string;
-  state: string;
-  status: string;
-  cpu: number;
-  mem_used: number;
-  mem_limit: number;
-}
-
-const formatBytes = (bytes: number) => {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-};
+const MAX_LOG_LINES = 100;
 
 const ContainersView = () => {
-  const [containers, setContainers] = useState<ContainerStat[]>([]);
+  const dialog = useDialog();
+  const { canOperate } = useRole();
+  const [containers, setContainers] = useState<ContainerLiveStat[]>([]);
   const [search, setSearch] = useState('');
-  
-  const [selectedContainer, setSelectedContainer] = useState<ContainerStat | null>(null);
+
+  const [selectedContainer, setSelectedContainer] = useState<ContainerLiveStat | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
-  
+
   const logsEndRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
     const fetchMetrics = () => {
-      fetch(API_URL + '/api/metrics/live')
-        .then(res => res.json())
-        .then(data => {
-          if (data && data.containers) setContainers(data.containers);
-        })
+      api.liveMetrics(controller.signal)
+        .then(data => setContainers(data.containers))
         .catch(() => {});
     };
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 3000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      controller.abort();
+    };
   }, []);
 
   useEffect(() => {
-    if (selectedContainer) {
-      setLogs([]);
-      const url = `${API_URL}/api/containers/logs/stream?server_id=${selectedContainer.server_id}&container_name=${selectedContainer.name}`;
-      const es = new EventSource(url);
-      
-      es.onmessage = (event) => {
-        setLogs(prev => [...prev, event.data].slice(-100)); // mantem ultimas 100 linhas
-      };
-      
-      es.onerror = () => {
-        setLogs(prev => [...prev, "[Conexão de Logs Encerrada]"]);
-        es.close();
-      };
-      
-      eventSourceRef.current = es;
-    } else {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-    }
-    
+    if (!selectedContainer) return;
+
+    setLogs([]);
+
+    // O ticket é buscado de forma assíncrona: se a tela fechar antes da
+    // resposta, o stream nem chega a ser aberto.
+    let source: EventSource | null = null;
+    let cancelled = false;
+
+    openStream('/api/containers/logs/stream', {
+      server_id: selectedContainer.server_id,
+      container_name: selectedContainer.name,
+    })
+      .then(es => {
+        if (cancelled) {
+          es.close();
+          return;
+        }
+        source = es;
+        es.onmessage = (event) => {
+          setLogs(prev => [...prev, event.data].slice(-MAX_LOG_LINES));
+        };
+        es.onerror = () => {
+          setLogs(prev => [...prev, '[Conexão de Logs Encerrada]']);
+          es.close();
+        };
+      })
+      .catch(() => setLogs(['[Falha ao autorizar o stream de logs]']));
+
     return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
+      cancelled = true;
+      source?.close();
     };
   }, [selectedContainer]);
 
@@ -84,26 +77,33 @@ const ContainersView = () => {
   }, [logs]);
 
   const toggleProject = (project: string) => {
-    setExpandedProjects(prev => ({ ...prev, [project]: !prev[project] }));
+    setExpandedProjects(prev => ({
+      // O projeto nasce aberto sem chave no mapa. Inverter `prev[project]`
+      // direto gravava `true` no primeiro clique — que também é aberto — e o
+      // operador precisava clicar duas vezes para fechar.
+      ...prev,
+      [project]: prev[project] === false,
+    }));
   };
 
   const [actionBusy, setActionBusy] = useState<Record<string, boolean>>({});
 
-  const containerAction = async (c: ContainerStat, action: 'start' | 'stop' | 'restart') => {
-    if (action === 'stop' && !confirm(`Parar o container ${c.name}?`)) return;
+  const containerAction = async (c: ContainerLiveStat, action: 'start' | 'stop' | 'restart') => {
+    if (action === 'stop') {
+      const confirmed = await dialog.confirm({
+        title: `Parar o container ${c.name}?`,
+        message: 'O serviço fica indisponível até ser iniciado de novo.',
+        confirmLabel: 'Parar',
+        danger: true,
+      });
+      if (!confirmed) return;
+    }
     setActionBusy(prev => ({ ...prev, [c.docker_id]: true }));
     try {
-      const res = await fetch(API_URL + '/api/containers/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ server_id: c.server_id, container_name: c.name, action }),
-      });
-      if (!res.ok) {
-        const msg = await res.text();
-        alert(`Falha ao ${action} ${c.name}: ${msg}`);
-      }
+      await api.containerAction(c.server_id, c.name, action);
+      dialog.notify(`Comando "${action}" enviado para ${c.name}.`, 'success');
     } catch (err) {
-      alert(`Erro de rede ao ${action} ${c.name}`);
+      dialog.notify(`Falha ao ${action} ${c.name}: ${(err as Error).message}`, 'error');
     } finally {
       setActionBusy(prev => ({ ...prev, [c.docker_id]: false }));
     }
@@ -111,8 +111,8 @@ const ContainersView = () => {
 
   const groupedContainers = useMemo(() => {
     const filtered = containers.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
-    const groups: Record<string, ContainerStat[]> = {};
-    
+    const groups: Record<string, ContainerLiveStat[]> = {};
+
     filtered.forEach(c => {
       const proj = c.project || 'Sem Projeto (Avulsos)';
       if (!groups[proj]) groups[proj] = [];
@@ -197,14 +197,14 @@ const ContainersView = () => {
                       </tr>
                       
                       {/* Container Rows */}
-                      {isExpanded && projContainers.map((c, idx) => {
+                      {isExpanded && projContainers.map((c) => {
                         const memUsedStr = formatBytes(c.mem_used);
                         const memLimitStr = formatBytes(c.mem_limit);
                         const memPercent = c.mem_limit > 0 ? ((c.mem_used / c.mem_limit) * 100).toFixed(1) : '0.0';
                         const isRunning = c.state === 'running';
                         
                         return (
-                          <tr key={`${c.docker_id}-${idx}`} className="border-b border-white/[0.02] hover:bg-white/[0.04] transition-all">
+                          <tr key={c.docker_id} className="border-b border-white/[0.02] hover:bg-white/[0.04] transition-all">
                             <td className="py-4 px-4"></td>
                             <td className="py-4 px-4 font-mono text-[#f59e0b] text-[13px]">
                               <div className="flex items-center gap-3">
@@ -250,7 +250,8 @@ const ContainersView = () => {
                                 <button onClick={() => setSelectedContainer(c)} className="p-1.5 hover:bg-[#10b981]/20 rounded text-[#10b981] transition-colors border border-[#10b981]/30 bg-[#10b981]/10" title="Ver Logs ao Vivo">
                                   <Terminal size={14} />
                                 </button>
-                                {isRunning ? (
+                                {/* Start/stop/restart mudam a infraestrutura: só Suporte TI para cima. */}
+                                {canOperate && (isRunning ? (
                                   <>
                                     <button disabled={actionBusy[c.docker_id]} onClick={() => containerAction(c, 'restart')} className="p-1.5 hover:bg-white/10 rounded text-[#737373] hover:text-white transition-colors disabled:opacity-40" title="Restart">
                                       <RefreshCw size={14} className={actionBusy[c.docker_id] ? 'animate-spin' : ''} />
@@ -263,7 +264,7 @@ const ContainersView = () => {
                                   <button disabled={actionBusy[c.docker_id]} onClick={() => containerAction(c, 'start')} className="p-1.5 hover:bg-white/10 rounded text-[#737373] hover:text-emerald-400 transition-colors disabled:opacity-40" title="Start">
                                     <Play size={14} />
                                   </button>
-                                )}
+                                ))}
                               </div>
                             </td>
                           </tr>
@@ -319,7 +320,7 @@ const ContainersView = () => {
               {logs.length === 0 ? (
                 <div className="text-[#737373] italic">Conectando ao container via SSH e puxando os logs...</div>
               ) : (
-                logs.map((log, i) => <div key={i} className="whitespace-pre-wrap break-all">{log}</div>)
+                logs.map((log, i) => <div key={i} className="whitespace-pre-wrap break-all selectable">{log}</div>)
               )}
               <div ref={logsEndRef} />
             </div>
