@@ -234,13 +234,3 @@ go test ./...
   [`backend/deploy/agent/`](backend/deploy/agent/). Ver
   [`docs/agente.md`](docs/agente.md).
 
----
-
-## Licença
-
-Apache License 2.0 — ver [`LICENSE`](LICENSE). A licença acrescenta concessão
-explícita de patente, o que MIT não faz.
-
-O arquivo `LICENSE` está no texto verbatim da Apache-2.0. **A linha de copyright
-ainda precisa ser definida** pelo dono do projeto: pessoa física ou empresa é
-decisão que a documentação não pode tomar por ele.
