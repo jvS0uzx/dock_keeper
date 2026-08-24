@@ -123,10 +123,12 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
   const { w, h } = size;
   // Âncoras em pixel: borda direita do círculo de entrada, laterais da caixa
   // do LB e borda esquerda do cartão de upstream.
-  const xIn = 62;
-  const xLbIn = w / 2 - 34;
-  const xLbOut = w / 2 + 34;
-  const xUp = w - 206;
+  // 1px por baixo da borda de cada caixa: a linha nasce e morre COLADA no
+  // elemento (as caixas ficam acima do SVG no z-index e cobrem a emenda).
+  const xIn = 55;
+  const xLbIn = w / 2 - 27;
+  const xLbOut = w / 2 + 27;
+  const xUp = w - 199;
   const py = (pct: number) => (pct / 100) * h;
   const curva = (x0: number, y0: number, x1: number, y1: number) => {
     const cx = (x1 - x0) * 0.45;
