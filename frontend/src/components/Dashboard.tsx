@@ -73,6 +73,18 @@ const Gauge = ({ value, title }: { value: number; title: string }) => {
 // alpha e as pontas ficavam mais vibrantes que o meio; opaco não empilha.
 const TRACO_ATIVO = 'color-mix(in srgb, var(--color-accent) 45%, var(--color-ink-900))';
 
+// O Nginx reporta o upstream pelo IP da malha (Tailscale), e o cadastro guarda
+// o IP público — não há igualdade direta. Caso exato primeiro; senão o último
+// octeto, que na convenção desta infra se preserva entre as duas faixas, e só
+// quando aponta para UM servidor. Ambíguo fica sem nome, que é mais honesto.
+const nomeDoUpstream = (host: string, servers: ServerLiveStat[]): string | null => {
+  const exato = servers.find((s) => s.host_ip === host);
+  if (exato) return exato.name;
+  const octeto = host.split('.').pop();
+  const candidatos = servers.filter((s) => s.host_ip.split('.').pop() === octeto);
+  return candidatos.length === 1 ? candidatos[0].name : null;
+};
+
 const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: ServerLiveStat[] }) => {
   // Os nós vêm do que o Nginx reporta, não da lista do .env: se os endereços
   // divergirem (troca de rede, VPN), o diagrama continua mostrando a verdade.
@@ -166,7 +178,7 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
                     id={`path-in-${li}`}
                     d={curva(xIn, py(50), xLbIn, yLb)}
                     fill="none"
-                    stroke={TRACO_ATIVO}
+                    stroke={lb.reqs > 0 ? TRACO_ATIVO : 'var(--color-line)'}
                     strokeWidth="1.25"
                   />
                   {lb.reqs > 0 && (
@@ -186,7 +198,7 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
                           id={`edge-${li}-${ui}`}
                           d={curva(xLbOut, yLb, xUp, yUp)}
                           fill="none"
-                          stroke={TRACO_ATIVO}
+                          stroke={reqs > 0 ? TRACO_ATIVO : 'var(--color-line)'}
                           strokeWidth="1.25"
                         />
                         {reqs > 0 &&
@@ -214,7 +226,7 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
                   key={`idle-${node.addr}`}
                   d={curva(xLbOut, yLb, xUp, yUp)}
                   fill="none"
-                  stroke={TRACO_ATIVO}
+                  stroke="var(--color-line)"
                   strokeWidth="1.25"
                 />
               );
@@ -271,12 +283,15 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
                 className={node.reqs > 0 ? 'text-accent' : 'text-text-faint'}
               />
             </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-[11px] text-text mono-data selectable truncate">{node.addr}</span>
-              <span className={`text-[10px] mono-data ${node.reqs > 0 ? 'text-accent' : 'text-text-faint'}`}>
-                {node.reqs} req
+            <div className="flex flex-col min-w-0 flex-1">
+              <span className="text-xs text-text-hi font-medium truncate">
+                {nomeDoUpstream(node.host, servers) ?? `Node ${ui + 1}`}
               </span>
+              <span className="text-[10px] text-text-faint mono-data selectable truncate">{node.addr}</span>
             </div>
+            <span className={`text-[10px] mono-data shrink-0 ${node.reqs > 0 ? 'text-accent' : 'text-text-faint'}`}>
+              {node.reqs} req
+            </span>
           </div>
         ))}
       </div>
