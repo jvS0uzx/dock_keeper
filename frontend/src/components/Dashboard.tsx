@@ -72,6 +72,11 @@ const Gauge = ({ value, title }: { value: number; title: string }) => {
   );
 };
 
+// Traço aceso da malha: âmbar OPACO pré-misturado com o fundo do painel.
+// Com strokeOpacity translúcido, duas curvas que compartilham âncora somavam
+// alpha e as pontas ficavam mais vibrantes que o meio; opaco não empilha.
+const TRACO_ATIVO = 'color-mix(in srgb, var(--color-accent) 45%, var(--color-ink-900))';
+
 const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: ServerLiveStat[] }) => {
   // Os nós vêm do que o Nginx reporta, não da lista do .env: se os endereços
   // divergirem (troca de rede, VPN), o diagrama continua mostrando a verdade.
@@ -165,8 +170,7 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
                     id={`path-in-${li}`}
                     d={curva(xIn, py(50), xLbIn, yLb)}
                     fill="none"
-                    stroke={lb.reqs > 0 ? 'var(--color-accent)' : 'var(--color-line)'}
-                    strokeOpacity={lb.reqs > 0 ? 0.45 : 1}
+                    stroke={lb.reqs > 0 ? TRACO_ATIVO : 'var(--color-line)'}
                     strokeWidth="1.25"
                   />
                   {lb.reqs > 0 && (
@@ -186,8 +190,7 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
                           id={`edge-${li}-${ui}`}
                           d={curva(xLbOut, yLb, xUp, yUp)}
                           fill="none"
-                          stroke={reqs > 0 ? 'var(--color-accent)' : 'var(--color-line)'}
-                          strokeOpacity={reqs > 0 ? 0.45 : 1}
+                          stroke={reqs > 0 ? TRACO_ATIVO : 'var(--color-line)'}
                           strokeWidth="1.25"
                         />
                         {reqs > 0 &&
