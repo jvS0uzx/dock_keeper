@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# O deploy nas VPS é disparado por merge em main, por outro workflow. Este aqui
+# só verifica; nada nele toca servidor.
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    # Os testes de integração pulam sozinhos sem DATABASE_URL, mas pular é o que
+    # deixa uma regressão de recorte por unidade passar despercebida — metade da
+    # suíte de segurança depende de banco. O serviço garante que ela roda.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: vdstats_test
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: "postgres://postgres:ci@127.0.0.1:5432/vdstats_test?sslmode=disable"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: gofmt
+        # gofmt -l não tem código de saída próprio: lista os arquivos e sai
+        # zero. Sem esta conferência o passo passaria sempre.
+        run: |
+          arquivos=$(gofmt -l .)
+          if [ -n "$arquivos" ]; then
+            echo "gofmt pendente em:"; echo "$arquivos"; exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test -count=1 -race ./...
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      # tsc -b, nao --noEmit: o tsconfig.json da raiz tem "files": [] e so
+      # referencias de projeto, entao --noEmit checa ZERO arquivo e passa
+      # sempre. Um passo de CI que nunca falha e pior que passo nenhum, porque
+      # da a impressao de cobertura.
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: oxlint
+        run: npx oxlint
+
+      - name: vitest
+        run: npx vitest run
+
+      - name: build
+        run: npm run build
+
+      # Regressão do C1: o token de administrador global chegou a ser embutido
+      # no bundle de produção e viajou para todo navegador que abriu o painel.
+      # A correção fez VITE_API_TOKEN ser lido apenas sob import.meta.env.DEV.
+      # Este passo prova que continua assim: injeta um valor reconhecível e
+      # falha se ele aparecer em qualquer arquivo do build.
+      - name: token nao vaza para o bundle
+        env:
+          VITE_API_TOKEN: canario-do-ci-nao-pode-aparecer-no-bundle
+        run: |
+          rm -rf dist
+          npm run build
+          if grep -rl "canario-do-ci-nao-pode-aparecer-no-bundle" dist/; then
+            echo "FALHA: VITE_API_TOKEN foi embutido no build de producao."
+            exit 1
+          fi
+          echo "OK: o token nao aparece em nenhum arquivo de dist/."

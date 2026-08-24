@@ -1,0 +1,11 @@
+# Nada disso entra na imagem. O .env é o mais importante: copiá-lo para dentro
+# do build grava os segredos numa camada, onde ficam para sempre mesmo que um
+# passo seguinte os apague.
+.env
+*.env
+dist/
+data/
+dockkeeper
+vd_stats
+deploy/
+*_test.go

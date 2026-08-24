@@ -1,17 +1,18 @@
-# Configuração local — contém dados sensíveis (IP, chave SSH, usuário)
-vd_stats/config.py
+# Segredos. Sem barra, então casa em qualquer nível: .env, backend/.env,
+# frontend/.env.
+.env
+*.pem
+*.key
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
+# Anotação pessoal de trabalho, não faz parte do projeto.
+notes.txt
+
+# Sistema e editor
+.DS_Store
+.idea/
+*.swp
+
+# Saída de build. Cada subprojeto repete o que é dele em backend/.gitignore e
+# frontend/.gitignore; estas linhas cobrem quem compilar da raiz.
 dist/
 build/
-.venv/
-venv/
-*.egg
-
-# Sistema
-.DS_Store
-.env

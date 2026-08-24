@@ -1,0 +1,50 @@
+# Servico systemd do agente de estacao do vd_stats.
+#
+# Instalar (ou use o install.sh deste diretorio):
+#   sudo cp dist/agent-linux-amd64 /usr/local/bin/vd-agent
+#   sudo cp deploy/agent/vd-agent.service /etc/systemd/system/
+#   sudo cp deploy/agent/agent.env /etc/vd-agent.env   # e edite
+#   sudo chmod 600 /etc/vd-agent.env
+#   sudo systemctl enable --now vd-agent
+
+[Unit]
+Description=vd_stats - agente de metricas da estacao
+Documentation=https://github.com/joaov/vd_stats
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/vd-agent
+EnvironmentFile=/etc/vd-agent.env
+Restart=always
+RestartSec=30
+
+# StateDirectory cria /var/lib/vd-agent com dono do DynamicUser e o mantem entre
+# reinicios. E onde a credencial obtida no enrollment e persistida: ProtectSystem
+# =strict deixa /etc somente-leitura, entao gravar la falharia DEPOIS de o convite
+# ja ter sido queimado no painel — e o convite e de uso unico.
+StateDirectory=vd-agent
+Environment=AGENT_CREDENTIAL_PATH=/var/lib/vd-agent/credential.json
+
+# O agente so LE o sistema: /proc (CPU, memoria, load), /sys/class/hwmon
+# (temperatura), /run/utmp (usuario logado) e statfs do disco. As opcoes de
+# hardening abaixo tornam esses caminhos somente-leitura, o que nao atrapalha —
+# leitura continua permitida. Se numa distro especifica a temperatura vier
+# sempre 0, teste remover ProtectKernelTunables (algumas montagens de /sys
+# fora do padrao ficam inacessiveis com ela); nao afrouxe nada alem disso.
+DynamicUser=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target
