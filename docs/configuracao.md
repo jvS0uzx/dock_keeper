@@ -84,12 +84,21 @@ configuração em execução de comando. Valor recusado cai no padrão com log.
 | `SSL_CHECK_PORT` | `443` | Porta do handshake TLS. Fora de 1-65535 cai no padrão |
 | `SSL_CHECK_TIMEOUT` | `5s` | Timeout do handshake, formato `time.ParseDuration` |
 | `SSL_EXTRA_CA` | — | Bundle PEM com as CAs internas, somado às raízes do sistema |
+| `SSL_FORBID_PRIVATE_TARGETS` | `false` | Recusa domínio que resolva para endereço privado, loopback ou link-local |
 
 `SSL_EXTRA_CA` é a válvula que impede a verificação real de ser revertida na
 primeira madrugada de alerta: a partir do momento em que o painel passou a
 conferir cadeia e hostname de verdade, **todo serviço interno atrás de CA própria
 aparece como `cadeia_nao_confiavel`** e dispara alerta. Arquivo ilegível ou sem
 nenhum certificado válido é registrado no log e ignorado.
+
+`SSL_FORBID_PRIVATE_TARGETS` fica desligada por padrão porque o painel é
+auto-hospedado e monitorar serviço da rede interna é o uso normal da tela de
+SSL. Ligue quando o painel ficar exposto a vários operadores: sem a guarda, o
+cadastro de domínio funciona como sonda da rede onde o painel roda (SSRF). Um
+alvo recusado volta com `invalid_reason` `alvo_privado_bloqueado`, sem abrir
+conexão; quando o alvo passa, o handshake é feito no IP já conferido — não há
+segunda resolução de DNS entre a checagem e a conexão.
 
 ## Alertas
 

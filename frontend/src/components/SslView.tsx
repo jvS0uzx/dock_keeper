@@ -25,6 +25,7 @@ const INVALID_REASON_LABELS: Record<string, string> = {
   cadeia_nao_confiavel: 'Cadeia não confiável',
   sem_certificado: 'Sem certificado',
   handshake: 'Falha no handshake',
+  alvo_privado_bloqueado: 'Alvo privado bloqueado',
 };
 
 // Domínio verificado antes de a coluna invalid_reason existir não tem motivo

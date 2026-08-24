@@ -1,0 +1,46 @@
+# sudoers do usuário dedicado de monitoramento do DockKeeper.
+# Instalação, no HOST MONITORADO:
+#   install -m 440 sudoers-vd-monitor.exemplo /etc/sudoers.d/vd-monitor
+#   visudo -cf /etc/sudoers.d/vd-monitor
+#
+# Leia antes: docs/operacao.md, seção "Usuário de monitoramento com privilégio
+# mínimo". Em Debian/Ubuntu este arquivo costuma ser DESNECESSÁRIO: os grupos
+# `adm` (leitura de /var/log) e `docker` cobrem tudo que o painel executa.
+#
+# Limitação honesta: o código atual envia os comandos por SSH SEM prefixo
+# `sudo`. Estas linhas valem para (a) a família RHEL, onde /var/log/secure é
+# 600 root:root e não há grupo adm de logs; (b) validar à mão, como vd-monitor,
+# os mesmos comandos que o painel roda; (c) a evolução futura em que o painel
+# prefixa `sudo` quando o usuário cadastrado não é root. Enquanto o prefixo não
+# existe, conceder aqui não muda o que o painel consegue fazer — muda o que o
+# operador consegue validar.
+#
+# Regra: argumento exato, caminho absoluto, nenhum wildcard. Wildcard em
+# sudoers vira injeção de argumento com um `-f` a mais.
+
+# tail do log de autenticação — argumentos exatamente como o painel monta
+# (internal/ssh/security.go: authLogTailLines = 20). Se SSH_AUTH_LOG_PATH
+# apontar para outro arquivo, a linha tem de acompanhar.
+vd-monitor ALL=(root) NOPASSWD: /usr/bin/tail -n 20 -f /var/log/auth.log
+
+# Família RHEL: mesmo comando, caminho de lá. Descomente só se o painel usar
+# SSH_AUTH_LOG_PATH=/var/log/secure.
+# vd-monitor ALL=(root) NOPASSWD: /usr/bin/tail -n 20 -f /var/log/secure
+
+# access log do nginx para a tela de load balancer
+# (backend/scripts/stream_nginx.sh: tail -n 0 -F).
+vd-monitor ALL=(root) NOPASSWD: /usr/bin/tail -n 0 -F /var/log/nginx/access.log
+
+# ss roda sem root, mas o nome do processo dono da porta só aparece com
+# privilégio — sem ele a coluna do radar vira "System/Unknown".
+vd-monitor ALL=(root) NOPASSWD: /usr/bin/ss -tulnp
+# Família RHEL, se o binário estiver em /usr/sbin:
+# vd-monitor ALL=(root) NOPASSWD: /usr/sbin/ss -tulnp
+
+# O que NÃO entra aqui, de propósito:
+# - docker (ps/stats/logs/start/stop/restart): grupo `docker`, sem sudo.
+#   Pertencer ao grupo docker equivale a root NAQUELE host; o ganho do setup é
+#   o raio de explosão da frota, não isolamento local.
+# - bash: o stream de métricas roda `bash -s` com o script via stdin. Conceder
+#   bash em sudoers é conceder ALL — e o script só lê /proc, /sys e df, não
+#   precisa de root.

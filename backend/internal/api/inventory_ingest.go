@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -34,6 +35,95 @@ type inventoryPayload struct {
 	Hosts            []inventoryHost `json:"hosts"`
 }
 
+// errTooManyHosts separa o estouro do teto dos demais erros de decode: só ele
+// responde 413, e a mensagem precisa continuar a mesma do contrato antigo.
+var errTooManyHosts = errors.New("inventário grande demais")
+
+// decodeInventoryPayload decodifica o corpo conferindo o teto DURANTE a
+// leitura. O teto já existia, mas só era conferido com o slice inteiro em
+// memória — um envio estourado pagava o custo todo de alocação e parse antes de
+// ser recusado (item N3 do checklist). Aqui a recusa acontece no host 5001, e o
+// resto do corpo nem é lido.
+//
+// site_code e collector_version continuam aceitos em qualquer ordem no JSON,
+// antes ou depois de hosts; campo desconhecido é pulado, como o Decode de
+// struct fazia.
+func decodeInventoryPayload(r io.Reader) (inventoryPayload, error) {
+	var p inventoryPayload
+	dec := json.NewDecoder(r)
+
+	tok, err := dec.Token()
+	if err != nil {
+		return p, err
+	}
+	if tok == nil {
+		// Corpo "null": o Decode antigo deixava o payload zerado sem erro, e a
+		// validação de site_code fazia a recusa. Mantido.
+		return p, nil
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return p, errors.New("corpo não é um objeto JSON")
+	}
+
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return p, err
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			return p, errors.New("chave de objeto inválida")
+		}
+
+		switch key {
+		case "site_code":
+			if err := dec.Decode(&p.SiteCode); err != nil {
+				return p, err
+			}
+		case "collector_version":
+			if err := dec.Decode(&p.CollectorVersion); err != nil {
+				return p, err
+			}
+		case "hosts":
+			// Chave repetida: a última vence, como no json.Unmarshal.
+			p.Hosts = nil
+			tok, err := dec.Token()
+			if err != nil {
+				return p, err
+			}
+			if tok == nil {
+				continue // "hosts": null equivale a lista vazia
+			}
+			if d, ok := tok.(json.Delim); !ok || d != '[' {
+				return p, errors.New("hosts não é uma lista")
+			}
+			for dec.More() {
+				if len(p.Hosts) >= maxInventoryHosts {
+					return p, errTooManyHosts
+				}
+				var h inventoryHost
+				if err := dec.Decode(&h); err != nil {
+					return p, err
+				}
+				p.Hosts = append(p.Hosts, h)
+			}
+			if _, err := dec.Token(); err != nil { // consome o ']'
+				return p, err
+			}
+		default:
+			var skip json.RawMessage
+			if err := dec.Decode(&skip); err != nil {
+				return p, err
+			}
+		}
+	}
+
+	if _, err := dec.Token(); err != nil { // consome o '}'
+		return p, err
+	}
+	return p, nil
+}
+
 // InventoryIngestHandler recebe o inventário varrido por um coletor remoto.
 //
 // É a contraparte do cmd/collector: o painel só enxerga a rede onde roda, então
@@ -53,13 +143,13 @@ func InventoryIngestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var p inventoryPayload
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+	p, err := decodeInventoryPayload(r.Body)
+	if err != nil {
+		if errors.Is(err, errTooManyHosts) {
+			writeError(w, http.StatusRequestEntityTooLarge, "inventário grande demais")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-	if len(p.Hosts) > maxInventoryHosts {
-		writeError(w, http.StatusRequestEntityTooLarge, "inventário grande demais")
 		return
 	}
 

@@ -213,9 +213,11 @@ go test ./...
 - **Não há prober de rede.** O que o painel chama de handshake SSH é o tempo de
   abrir a sessão inteira (TCP + troca de chaves), uma ordem de grandeza acima do
   RTT. Ver [`docs/metricas.md`](docs/metricas.md).
-- **Uma chave SSH única para toda a frota.** `SSH_KEY_PATH` é uma só chave, em
-  geral `root`. Comprometer o host do painel é comprometer a frota. Um usuário
-  dedicado de monitoramento com `sudo` restrito é o caminho, e não existe ainda.
+- **Uma chave SSH única para toda a frota.** `SSH_KEY_PATH` é uma só chave, por
+  padrão `root`. Comprometer o host do painel é comprometer a frota. A redução
+  disponível: usuário dedicado `vd-monitor` com grupos e sudoers mínimos — ver
+  [`docs/operacao.md`](docs/operacao.md) e
+  [`backend/deploy/sudoers-vd-monitor.exemplo`](backend/deploy/sudoers-vd-monitor.exemplo).
 - **Sessões vivem no banco, mas o cooldown de alerta também.** Com o banco
   indisponível o painel recusa login e passa a notificar sem deduplicar — falha
   aberta de propósito, porque alerta duplicado incomoda e alerta perdido mata.
@@ -224,10 +226,9 @@ go test ./...
 
 ## Projetos relacionados
 
-- **`vd_collector`** — coletor de inventário instalado em cada unidade, para o
-  painel enxergar redes onde ele mesmo não roda. Envia para
-  `POST /api/ingest/inventory`. Ver
-  [`docs/inventario-de-rede.md`](docs/inventario-de-rede.md).
+- [vd_collector](https://github.com/jvS0uzx/vd_collector) — coletor de inventário por unidade: varre a rede local da filial e faz push para o painel
+  em `POST /api/ingest/inventory`, para o painel enxergar redes onde ele mesmo
+  não roda. Ver [`docs/inventario-de-rede.md`](docs/inventario-de-rede.md).
 - **`backend/cmd/agent`** — agente de push instalado na estação monitorada, com
   instaladores para Linux, Windows e Ansible em
   [`backend/deploy/agent/`](backend/deploy/agent/). Ver

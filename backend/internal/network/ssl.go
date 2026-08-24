@@ -2,6 +2,7 @@ package network
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -25,6 +26,10 @@ const (
 	ReasonCadeiaNaoConfiavel = "cadeia_nao_confiavel"
 	ReasonSemCertificado     = "sem_certificado"
 	ReasonHandshake          = "handshake"
+	// ReasonAlvoPrivado não fala do certificado: o alvo resolveu para endereço
+	// privado ou local com SSL_FORBID_PRIVATE_TARGETS ativo e o handshake nem
+	// chegou a abrir.
+	ReasonAlvoPrivado = "alvo_privado_bloqueado"
 )
 
 const (
@@ -45,12 +50,46 @@ type SSLInfo struct {
 
 // CheckSSL abre o handshake TLS no domínio e classifica o certificado servido.
 func CheckSSL(domain string) SSLInfo {
-	return checkSSL(domain, sslPort(), sslTimeout(), sslRoots())
+	return checkSSLGuarded(domain, sslPort(), sslTimeout(), sslRoots(), sslForbidPrivate())
+}
+
+// checkSSLGuarded aplica a guarda de alvo privado antes do handshake. Quando a
+// guarda barra o alvo, a conexão nem é aberta: o objetivo é impedir que a tela
+// de SSL vire sonda da rede onde o painel roda (SSRF), não classificar
+// certificado.
+func checkSSLGuarded(host string, port int, timeout time.Duration, roots *x509.CertPool, forbidPrivate bool) SSLInfo {
+	host = strings.TrimSpace(host)
+	if !forbidPrivate || host == "" {
+		return checkSSL(host, port, timeout, roots)
+	}
+	dial, bloqueado, err := resolverAlvo(host, timeout)
+	if err != nil {
+		return SSLInfo{Domain: host, Valid: false, InvalidReason: ReasonHandshake, ErrorMsg: "Falha ao resolver o domínio: " + err.Error()}
+	}
+	if bloqueado != nil {
+		return SSLInfo{
+			Domain:        host,
+			Valid:         false,
+			InvalidReason: ReasonAlvoPrivado,
+			ErrorMsg:      fmt.Sprintf("Alvo bloqueado: %s resolve para endereço privado ou local (%s) e SSL_FORBID_PRIVATE_TARGETS está ativo", host, bloqueado),
+		}
+	}
+	// Disca no IP que acabou de ser validado, não no nome: re-resolver dentro
+	// do handshake abriria a janela para o DNS trocar a resposta (rebinding).
+	return checkSSLAt(host, dial, port, timeout, roots)
 }
 
 // checkSSL recebe as raízes explicitamente para o teste conseguir montar uma
 // cadeia confiável sem depender do truststore da máquina que roda o teste.
 func checkSSL(host string, port int, timeout time.Duration, roots *x509.CertPool) SSLInfo {
+	return checkSSLAt(host, host, port, timeout, roots)
+}
+
+// checkSSLAt separa o nome verificado (host) do endereço discado (dialHost).
+// No fluxo normal os dois são iguais; com a guarda de alvo privado ligada o
+// dial vai no IP já conferido e o nome segue sendo o que o certificado precisa
+// cobrir.
+func checkSSLAt(host, dialHost string, port int, timeout time.Duration, roots *x509.CertPool) SSLInfo {
 	host = strings.TrimSpace(host)
 	if host == "" {
 		return SSLInfo{Valid: false, InvalidReason: ReasonHandshake, ErrorMsg: "Domínio vazio"}
@@ -61,8 +100,9 @@ func checkSSL(host string, port int, timeout time.Duration, roots *x509.CertPool
 	// existe para mostrar o problema, e recusar a conexão esconderia justamente
 	// o certificado que o operador precisa ver.
 	dialer := &net.Dialer{Timeout: timeout}
-	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(host, strconv.Itoa(port)), &tls.Config{
+	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(dialHost, strconv.Itoa(port)), &tls.Config{
 		InsecureSkipVerify: true,
+		ServerName:         host,
 	})
 	if err != nil {
 		return SSLInfo{Domain: host, Valid: false, InvalidReason: ReasonHandshake, ErrorMsg: err.Error()}
@@ -197,4 +237,48 @@ func sslRoots() *x509.CertPool {
 		log.Printf("[SSL] SSL_EXTRA_CA (%s) não contém nenhum certificado PEM válido", path)
 	}
 	return pool
+}
+
+// sslForbidPrivate lê SSL_FORBID_PRIVATE_TARGETS. Desligada por padrão porque
+// o painel é auto-hospedado e monitorar serviço da rede interna é o uso normal
+// da tela de SSL. A guarda existe para quem expõe o painel a vários
+// operadores, cenário em que o cadastro de domínio viraria sonda da rede do
+// servidor.
+func sslForbidPrivate() bool {
+	v, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("SSL_FORBID_PRIVATE_TARGETS")))
+	return v
+}
+
+// ipBloqueado diz se o endereço pertence à máquina ou à rede local: privado
+// (RFC 1918 e fc00::/7), loopback, link-local ou não especificado.
+func ipBloqueado(ip net.IP) bool {
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
+// resolverAlvo resolve o host e aplica a política da guarda: basta UM endereço
+// privado para recusar, porque quem cadastra o nome controla o DNS dele e uma
+// resposta mista é exatamente a forma do ataque.
+func resolverAlvo(host string, timeout time.Duration) (dial string, bloqueado net.IP, err error) {
+	if ip := net.ParseIP(host); ip != nil {
+		if ipBloqueado(ip) {
+			return "", ip, nil
+		}
+		return host, nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(addrs) == 0 {
+		return "", nil, errors.New("nenhum endereço resolvido")
+	}
+	for _, a := range addrs {
+		if ipBloqueado(a.IP) {
+			return "", a.IP, nil
+		}
+	}
+	return addrs[0].IP.String(), nil, nil
 }

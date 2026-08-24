@@ -121,8 +121,68 @@ Reiniciar o painel **não derruba mais os logins** — as sessões vivem em
 `user_sessions`. O reinício serve só para recarregar o ambiente.
 
 `SSH_KEY_PATH` não faz parte dessa rotação: ela é a chave root única de toda a
-frota, e o que ela pede é substituição por usuário dedicado com `sudo` restrito,
-não troca de valor.
+frota, e o que ela pede é substituição por usuário dedicado, não troca de valor
+— o passo a passo está na seção seguinte.
+
+## Usuário de monitoramento com privilégio mínimo
+
+O cadastro de servidor usa `root` como padrão (`internal/database/schema.go`),
+por compatibilidade com instalações existentes — e esse padrão carrega o pior
+risco do modelo agentless: **a chave de `SSH_KEY_PATH` é uma só, e comprometer
+o host do painel é virar root em toda a frota de uma vez.** Um usuário dedicado
+não desfaz a invasão do host do painel, mas troca "root na frota" por "um
+usuário limitado na frota" e permite `PermitRootLogin no` nos hosts monitorados.
+
+### O que o painel executa, e o que cada comando exige
+
+| Comando remoto | Origem no código | Privilégio necessário |
+|---|---|---|
+| `bash -s` + `stream_metrics.sh` — lê `/proc/stat`, `/proc/meminfo`, `/proc/loadavg`, `/proc/uptime`, `/sys/class/hwmon/*/temp*_input`, `df -B1 /` | `internal/ssh/client.go` | nenhum |
+| `docker ps -a --format ...` e `docker stats --no-stream --format ...` | `scripts/stream_metrics.sh` | grupo `docker` |
+| `docker logs -f --tail 100 -- <nome>` | `internal/ssh/client.go` | grupo `docker` |
+| `docker start\|stop\|restart -- <nome>` | `internal/ssh/actions.go` | grupo `docker` |
+| `tail -n 20 -f /var/log/auth.log` | `internal/ssh/security.go` | grupo `adm` (Debian/Ubuntu) |
+| `tail -n 0 -F /var/log/nginx/access.log` | `scripts/stream_nginx.sh` | grupo `adm` (Debian/Ubuntu) |
+| `ss -tulnp \| grep LISTEN` | `internal/ssh/security.go` | roda sem root; o **nome do processo** só aparece com privilégio |
+
+### Passo a passo, no host monitorado
+
+```bash
+useradd --system --create-home --shell /bin/bash vd-monitor
+usermod -aG docker,adm vd-monitor
+
+# A chave pública do painel, com o que o painel não usa desligado.
+install -d -m 700 -o vd-monitor -g vd-monitor /home/vd-monitor/.ssh
+echo 'no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA... painel' \
+  > /home/vd-monitor/.ssh/authorized_keys
+chown vd-monitor:vd-monitor /home/vd-monitor/.ssh/authorized_keys
+chmod 600 /home/vd-monitor/.ssh/authorized_keys
+
+# Opcional — só quando os grupos não bastam (família RHEL) ou para validar à mão.
+install -m 440 sudoers-vd-monitor.exemplo /etc/sudoers.d/vd-monitor
+visudo -cf /etc/sudoers.d/vd-monitor
+```
+
+No painel, cadastre (ou edite) o servidor com `user: vd-monitor`. O padrão do
+cadastro continua `root`: mudá-lo quebraria instalação existente que nunca criou
+o usuário dedicado.
+
+### Limitações, com honestidade
+
+- **Grupo `docker` equivale a root local.** Quem fala com o socket monta volume
+  arbitrário e é root naquele host. O ganho do setup é o raio de explosão — a
+  chave deixa de abrir root direto na frota — não isolamento dentro do host.
+- **O código não prefixa `sudo`.** Os comandos viajam exatamente como estão na
+  tabela acima. O [`sudoers-vd-monitor.exemplo`](../backend/deploy/sudoers-vd-monitor.exemplo)
+  serve à família RHEL, à validação manual e à evolução futura; hoje quem
+  sustenta o setup são os grupos.
+- **Família RHEL:** o log é `/var/log/secure`, `600 root:root`, sem grupo `adm`.
+  Sem `sudo` no código, a tela de Segurança fica vazia para `vd-monitor`. As
+  saídas: ACL (`setfacl -m u:vd-monitor:r /var/log/secure`, reaplicada a cada
+  logrotate) ou manter `root` só nesses hosts.
+- **Radar de portas:** com `vd-monitor`, a coluna de processo mostra
+  `System/Unknown` para processo de outro dono. Porta e protocolo continuam
+  corretos.
 
 ## O que olhar quando quebra
 
