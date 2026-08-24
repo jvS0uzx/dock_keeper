@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
-import { Building2, Trash2, Plus, MonitorSmartphone, Network } from 'lucide-react';
+import { Trash2, Plus, MonitorSmartphone, Network } from 'lucide-react';
 import { api, type Site, type ServerLiveStat, type NetworkHostView } from '../lib/api';
 import { useDialog } from './ui/dialog-context';
 import { useRole } from './ui/session-context';
@@ -78,148 +78,142 @@ const SitesView = () => {
     hosts: hosts.filter(h => h.site_id === siteId).length,
   });
 
-  const inputClass =
-    'w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors';
-
   return (
-    <div className="p-8">
-      <div className="flex items-center gap-3 mb-2">
-        <Building2 size={22} className="text-[#10b981]" />
-        <h1 className="text-2xl font-light text-white">
-          Unidades <span className="font-bold">Monitoradas</span>
-        </h1>
+    <div className="p-8 anim-rise">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Unidades monitoradas</h1>
+          <p className="page-desc">
+            Cada unidade agrupa as máquinas de um local. O agente informa a unidade pelo código,
+            em <code className="mono-data text-accent">AGENT_SITE</code>, e a estação se classifica sozinha.
+          </p>
+        </div>
       </div>
-      <p className="text-[#737373] text-sm mb-8">
-        Cada unidade agrupa as máquinas de um local. O agente informa a unidade pelo código,
-        em <code className="text-amber-300">AGENT_SITE</code>, e a estação se classifica sozinha.
-      </p>
 
       <div className={`grid grid-cols-1 gap-6 ${canOperate ? 'lg:grid-cols-3' : ''}`}>
         {/* Cadastro só para Suporte TI; Visualizador vê as unidades. */}
         {canOperate && (
-        <div className="glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02] col-span-1 h-fit">
-          <h2 className="text-sm font-bold tracking-widest text-[#737373] uppercase mb-6">Nova Unidade</h2>
+        <div className="panel p-5 col-span-1 h-fit">
+          <h2 className="eyebrow mb-5">Nova unidade</h2>
           <form onSubmit={handleCreate} className="flex flex-col gap-4">
             <div>
-              <label htmlFor="site-name" className="text-xs text-[#737373] block mb-1">Nome</label>
+              <label htmlFor="site-name" className="eyebrow block mb-1.5">Nome</label>
               <input
                 id="site-name"
                 type="text"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className={inputClass}
+                className="input-base w-full"
                 placeholder="Ex: Filial Norte"
                 required
               />
             </div>
             <div>
-              <label htmlFor="site-code" className="text-xs text-[#737373] block mb-1">Código</label>
+              <label htmlFor="site-code" className="eyebrow block mb-1.5">Código</label>
               <input
                 id="site-code"
                 type="text"
                 value={form.code}
                 onChange={(e) => setForm({ ...form, code: e.target.value })}
-                className={inputClass}
+                className="input-base w-full"
                 placeholder="Ex: norte"
                 required
               />
-              <p className="text-[10px] text-[#737373] mt-1">
+              <p className="text-[11px] text-text-faint mt-1.5">
                 Valor de AGENT_SITE nas máquinas desta unidade.
               </p>
             </div>
             <div>
-              <label htmlFor="site-address" className="text-xs text-[#737373] block mb-1">Endereço</label>
+              <label htmlFor="site-address" className="eyebrow block mb-1.5">Endereço</label>
               <input
                 id="site-address"
                 type="text"
                 value={form.address}
                 onChange={(e) => setForm({ ...form, address: e.target.value })}
-                className={inputClass}
+                className="input-base w-full"
                 placeholder="Opcional"
               />
             </div>
-            <button
-              type="submit"
-              className="mt-2 flex items-center justify-center gap-2 bg-[#10b981]/20 hover:bg-[#10b981]/30 border border-[#10b981]/50 text-[#10b981] font-bold text-xs uppercase tracking-widest py-3 rounded-lg transition-all"
-            >
-              <Plus size={14} />
-              Criar Unidade
+            <button type="submit" className="btn btn-primary mt-1">
+              <Plus size={16} strokeWidth={1.75} />
+              Criar unidade
             </button>
           </form>
         </div>
         )}
 
-        <div className={`glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02] ${canOperate ? 'col-span-2' : ''}`}>
-          <h2 className="text-sm font-bold tracking-widest text-[#737373] uppercase mb-6">
-            Unidades Cadastradas {sites.length > 0 && <span className="text-[#10b981]">({sites.length})</span>}
+        <div className={canOperate ? 'col-span-2' : ''}>
+          <h2 className="eyebrow mb-4">
+            Unidades cadastradas{sites.length > 0 && <span className="mono-data text-text-mut normal-case tracking-normal"> · {sites.length}</span>}
           </h2>
 
           {loading ? (
-            <p className="text-sm text-[#737373]">Carregando...</p>
+            <p className="text-sm text-text-mut">Carregando...</p>
           ) : sites.length === 0 ? (
-            <p className="text-sm text-[#737373]">
+            <p className="text-sm text-text-mut">
               Nenhuma unidade cadastrada. Crie a primeira para agrupar as máquinas por local.
             </p>
           ) : (
-            <div className="overflow-x-auto custom-scrollbar">
-              <table className="w-full text-sm text-left border-collapse">
-                <thead className="text-[10px] text-[#737373] uppercase tracking-widest bg-[#0c0c0e]">
-                  <tr>
-                    <th className="py-3 px-4 rounded-l">Nome</th>
-                    <th className="py-3 px-4">Código</th>
-                    <th className="py-3 px-4">Endereço</th>
-                    <th className="py-3 px-4 text-right">Estações</th>
-                    <th className="py-3 px-4 text-right">Hosts na rede</th>
-                    {canOperate && <th className="py-3 px-4 text-right rounded-r">Ação</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sites.map(site => {
-                    const counts = countFor(site.id);
-                    return (
-                      <tr
-                        key={site.id}
-                        onClick={() => openSite(site.id)}
-                        className="border-b border-white/[0.03] hover:bg-white/[0.05] transition-all cursor-pointer"
-                      >
-                        <td className="py-4 px-4 font-medium text-white/90">{site.name}</td>
-                        <td className="py-4 px-4">
-                          <code className="text-xs text-amber-300 bg-black/30 px-2 py-0.5 rounded border border-white/5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 stagger">
+              {sites.map(site => {
+                const counts = countFor(site.id);
+                return (
+                  <div
+                    key={site.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openSite(site.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openSite(site.id);
+                      }
+                    }}
+                    className="panel panel-hover p-5 cursor-pointer"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-text-hi truncate">{site.name}</div>
+                        <div className="mt-1 flex items-center gap-2">
+                          <code className="mono-data text-accent bg-ink-850 border border-line rounded px-1.5 py-0.5 text-[11px]">
                             {site.code}
                           </code>
-                        </td>
-                        <td className="py-4 px-4 text-[#737373] text-xs">{site.address || '—'}</td>
-                        <td className="py-4 px-4 text-right">
-                          <span className="inline-flex items-center gap-1 text-white/80">
-                            <MonitorSmartphone size={12} className="text-[#737373]" />
-                            {counts.stations}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4 text-right">
-                          <span className="inline-flex items-center gap-1 text-white/80">
-                            <Network size={12} className="text-[#737373]" />
-                            {counts.hosts}
-                          </span>
-                        </td>
-                        {canOperate && (
-                          <td className="py-4 px-4 text-right">
-                            <button
-                              onClick={(e) => {
-                              e.stopPropagation();
-                              handleDelete(site);
-                            }}
-                              className="inline-flex items-center gap-1 text-xs text-red-400/80 hover:text-red-400 tracking-wider"
-                            >
-                              <Trash2 size={14} />
-                              Remover
-                            </button>
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          {site.address && <span className="text-xs text-text-faint truncate">{site.address}</span>}
+                        </div>
+                      </div>
+                      {canOperate && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(site);
+                          }}
+                          className="btn btn-ghost btn-sm hover:text-crit shrink-0"
+                          title={`Remover ${site.name}`}
+                        >
+                          <Trash2 size={14} strokeWidth={1.75} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-line grid grid-cols-2 gap-3">
+                      <div>
+                        <div className="eyebrow flex items-center gap-1.5">
+                          <MonitorSmartphone size={12} strokeWidth={1.75} />
+                          Estações
+                        </div>
+                        <div className="stat-value text-lg mt-1">{counts.stations}</div>
+                      </div>
+                      <div>
+                        <div className="eyebrow flex items-center gap-1.5">
+                          <Network size={12} strokeWidth={1.75} />
+                          Hosts na rede
+                        </div>
+                        <div className="stat-value text-lg mt-1">{counts.hosts}</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

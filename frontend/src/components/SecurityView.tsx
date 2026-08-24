@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ShieldAlert, Activity, Terminal, RefreshCw, XCircle } from 'lucide-react';
+import { Activity, Terminal, RefreshCw, XCircle } from 'lucide-react';
 import { api, openStream, type PortInfo, type ServerLiveStat } from '../lib/api';
 import Select from './ui/Select';
 
@@ -20,6 +20,12 @@ const classifyAuthLine = (line: string): AuthLogType => {
   if (line.includes('Accepted')) return 'success';
   if (line.includes('Failed') || line.includes('Invalid') || line.includes('error')) return 'error';
   return 'info';
+};
+
+const AUTH_LINE_CLASS: Record<AuthLogType, string> = {
+  error: 'text-crit',
+  success: 'text-ok',
+  info: 'text-text-mut',
 };
 
 const SecurityView = () => {
@@ -110,17 +116,17 @@ const SecurityView = () => {
   }, [activeTab, selectedServer]);
 
   return (
-    <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden">
-      <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden anim-rise">
+      <div className="page-header flex-col md:flex-row md:items-end items-start">
         <div>
-          <h1 className="text-2xl font-light text-white mb-2 flex items-center gap-3">
-            <ShieldAlert className="text-[#10b981]" /> Segurança & <span className="font-bold">Auditoria (Live SSH)</span>
-          </h1>
-          <p className="text-[#737373] text-sm">Monitoramento de portas expostas (ss -tuln) e tentativas de intrusão via syslog em tempo real.</p>
+          <h1 className="page-title">Segurança &amp; Auditoria</h1>
+          <p className="page-desc">
+            Portas expostas (ss -tulnp) e tentativas de intrusão no auth.log, ao vivo por SSH.
+          </p>
         </div>
-        
-        <div className="flex items-center gap-2">
-          <label htmlFor="security-server" className="text-gray-400 text-sm">Servidor Alvo:</label>
+
+        <div className="flex items-center gap-3">
+          <label htmlFor="security-server" className="eyebrow">Servidor</label>
           <Select
             id="security-server"
             value={selectedServer}
@@ -132,20 +138,20 @@ const SecurityView = () => {
         </div>
       </div>
 
-      <div className="glass-panel rounded-xl border border-white/5 bg-white/[0.02] flex flex-col flex-1 min-h-0 overflow-hidden">
+      <div className="panel flex flex-col flex-1 min-h-0 overflow-hidden">
         {/* Tabs */}
-        <div className="flex border-b border-white/5 bg-black/20">
-          <button 
+        <div className="flex border-b border-line bg-ink-950/60">
+          <button
             onClick={() => setActiveTab('radar')}
-            className={`flex-1 py-4 text-sm font-medium transition-colors border-b-2 flex justify-center items-center gap-2 ${activeTab === 'radar' ? 'border-[#10b981] text-[#10b981] bg-[#10b981]/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
+            className={`flex-1 py-3.5 text-sm font-medium transition-colors border-b-2 flex justify-center items-center gap-2 ${activeTab === 'radar' ? 'border-accent text-accent bg-accent/5' : 'border-transparent text-text-faint hover:text-text'}`}
           >
-            <Activity size={16} /> Radar de Portas (ss -tuln)
+            <Activity size={16} strokeWidth={1.75} /> Radar de portas
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('auth')}
-            className={`flex-1 py-4 text-sm font-medium transition-colors border-b-2 flex justify-center items-center gap-2 ${activeTab === 'auth' ? 'border-[#10b981] text-[#10b981] bg-[#10b981]/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
+            className={`flex-1 py-3.5 text-sm font-medium transition-colors border-b-2 flex justify-center items-center gap-2 ${activeTab === 'auth' ? 'border-accent text-accent bg-accent/5' : 'border-transparent text-text-faint hover:text-text'}`}
           >
-            <Terminal size={16} /> Logs de Autenticação (auth.log)
+            <Terminal size={16} strokeWidth={1.75} /> Logs de autenticação
           </button>
         </div>
 
@@ -153,55 +159,57 @@ const SecurityView = () => {
         <div className="flex-1 overflow-auto custom-scrollbar p-4">
           {activeTab === 'radar' ? (
             loadingPorts ? (
-               <div className="flex justify-center items-center h-full text-emerald-400">
-                  <RefreshCw className="animate-spin mr-2" size={20} /> Rodando ss -tuln na VPS...
+               <div className="flex justify-center items-center h-full text-text-mut gap-2 text-sm">
+                  <RefreshCw className="animate-spin text-accent" size={18} strokeWidth={1.75} /> Rodando ss -tulnp na VPS...
                </div>
             ) : (
-            <table className="w-full text-left text-sm whitespace-nowrap">
-              <thead className="text-gray-500">
+            <table className="table-base whitespace-nowrap">
+              <thead>
                 <tr>
-                  <th className="py-2 px-4 font-medium">Porta (0.0.0.0)</th>
-                  <th className="py-2 px-4 font-medium">Protocolo</th>
-                  <th className="py-2 px-4 font-medium">Serviço / Processo</th>
-                  <th className="py-2 px-4 font-medium">Estado</th>
+                  <th>Porta</th>
+                  <th>Protocolo</th>
+                  <th>Serviço / Processo</th>
+                  <th>Exposição</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5">
-                {ports.map((port) => (
-                  <tr key={`${port.protocol}-${port.port}`} className="hover:bg-white/[0.02] transition-colors">
-                    <td className="py-3 px-4 font-mono text-gray-300 border-l-2 border-transparent hover:border-emerald-500">{port.port}</td>
-                    <td className="py-3 px-4 text-gray-400 uppercase">{port.protocol}</td>
-                    <td className="py-3 px-4 text-gray-300">
-                      <span className="bg-white/10 px-2 py-1 rounded text-xs text-amber-300">{port.process}</span>
+              <tbody>
+                {ports.map((port, idx) => (
+                  <tr key={`${port.protocol}-${port.port}-${idx}`}>
+                    <td className="mono-data text-text-hi">{port.port}</td>
+                    <td className="text-text-mut uppercase text-xs">{port.protocol}</td>
+                    <td>
+                      <span className="mono-data text-text bg-ink-800 border border-line px-2 py-0.5 rounded">{port.process}</span>
                     </td>
-                    <td className="py-3 px-4">
-                      <span className="text-emerald-400 text-xs bg-emerald-400/10 px-2 py-1 rounded border border-emerald-400/20">{port.state}</span>
+                    <td>
+                      {/* Porta em LISTEN para 0.0.0.0 é exatamente o achado que
+                          esta tela existe para mostrar — nunca verde. */}
+                      <span className="badge badge-warn">{port.state} 0.0.0.0</span>
                     </td>
                   </tr>
                 ))}
                 {ports.length === 0 && (
                    <tr>
-                     <td colSpan={4} className="py-6 text-center text-gray-500">Nenhuma porta LISTEN exposta encontrada.</td>
+                     <td colSpan={4} className="py-6 text-center text-text-faint">Nenhuma porta LISTEN exposta encontrada.</td>
                    </tr>
                 )}
               </tbody>
             </table>
             )
           ) : (
-            <div className="font-mono text-sm bg-[#0c0c0e] rounded-lg p-4 border border-white/5 h-full overflow-y-auto">
+            <div className="font-mono text-xs bg-ink-950 rounded-ctrl p-4 border border-line h-full overflow-y-auto custom-scrollbar">
               {authLogs.map((log) => (
                 <div key={log.id} className="mb-1.5 flex gap-3 break-all selectable">
-                  <span className="text-gray-600 shrink-0">[{log.time}]</span>
-                  <span className={log.type === 'error' ? 'text-rose-400' : log.type === 'success' ? 'text-emerald-400' : 'text-gray-400'}>
+                  <span className="text-text-faint shrink-0">[{log.time}]</span>
+                  <span className={AUTH_LINE_CLASS[log.type]}>
                     {log.raw}
                   </span>
                 </div>
               ))}
-              <div className="mt-4 flex items-center text-gray-500 gap-2 border-t border-white/5 pt-2">
+              <div className="mt-4 flex items-center text-text-faint gap-2 border-t border-line pt-2">
                 {streamActive ? (
-                  <><RefreshCw size={14} className="animate-spin text-emerald-500" /> <span className="text-emerald-500/70">Túnel SSH Aberto. Escutando /var/log/auth.log...</span></>
+                  <><RefreshCw size={14} className="animate-spin text-ok" /> <span className="text-ok/80">Túnel SSH aberto. Escutando /var/log/auth.log...</span></>
                 ) : (
-                  <><XCircle size={14} className="text-rose-500" /> <span className="text-rose-500/70">Conexão SSE Fechada.</span></>
+                  <><XCircle size={14} className="text-crit" /> <span className="text-crit/80">Conexão SSE fechada.</span></>
                 )}
               </div>
             </div>

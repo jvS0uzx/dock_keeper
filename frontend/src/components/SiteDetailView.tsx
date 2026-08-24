@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ArrowLeft, Building2, MonitorSmartphone, Network, Thermometer, ShieldAlert,
+  ArrowLeft, MonitorSmartphone, Network, Thermometer, ShieldAlert,
   MapPin, ChevronRight, Printer, HardDrive, Router, Monitor, ShieldQuestion,
 } from 'lucide-react';
 import {
@@ -43,12 +43,12 @@ const Stat = ({
   accent: string;
   Icon: typeof Monitor;
 }) => (
-  <div className="glass-panel rounded-xl p-4 border border-white/5 bg-white/[0.02]">
-    <div className="flex items-center justify-between mb-1">
-      <span className={`text-3xl font-bold ${accent}`}>{value}</span>
-      <Icon size={16} className="text-[#737373]" />
+  <div className="stat-card">
+    <div className="flex items-center justify-between mb-1.5">
+      <span className={`stat-value ${accent}`}>{value}</span>
+      <Icon size={16} strokeWidth={1.75} className="text-text-faint" />
     </div>
-    <div className="text-xs text-[#737373] uppercase tracking-widest">{label}</div>
+    <div className="eyebrow">{label}</div>
   </div>
 );
 
@@ -122,77 +122,73 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
   }, [rules, stations, siteId]);
 
   if (loading && !site) {
-    return <div className="p-8 text-sm text-[#737373]">Carregando unidade...</div>;
+    return <div className="p-8 text-sm text-text-mut">Carregando unidade...</div>;
   }
 
   return (
-    <div className="p-4 md:p-8">
-      <button
-        onClick={goBack}
-        className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#737373] hover:text-white transition-colors mb-4"
-      >
-        <ArrowLeft size={14} />
+    <div className="p-4 md:p-8 anim-rise">
+      <button onClick={goBack} className="btn btn-ghost min-h-0 h-8 px-2.5 mb-4 text-text-mut">
+        <ArrowLeft size={14} strokeWidth={1.75} />
         Voltar
       </button>
 
-      <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
+      <div className="page-header flex-col md:flex-row items-start md:items-end">
         <div>
-          <h1 className="text-2xl font-light text-white mb-2 flex items-center gap-3">
-            <Building2 className="text-[#10b981]" />
-            {site ? <span className="font-bold">{site.name}</span> : 'Unidade'}
-          </h1>
-          <p className="text-[#737373] text-sm flex items-center gap-2">
+          <h1 className="page-title">{site ? site.name : 'Unidade'}</h1>
+          <p className="page-desc flex items-center gap-2">
             {site && (
-              <code className="text-amber-300 bg-black/30 px-2 py-0.5 rounded border border-white/5">
+              <code className="mono-data text-accent bg-ink-850 border border-line rounded px-1.5 py-0.5 text-[11px]">
                 {site.code}
               </code>
             )}
-            {site?.address && <span className="flex items-center gap-1"><MapPin size={12} /> {site.address}</span>}
+            {site?.address && (
+              <span className="inline-flex items-center gap-1">
+                <MapPin size={12} strokeWidth={1.75} /> {site.address}
+              </span>
+            )}
           </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <Stat label="Máquinas com agente" value={stations.length} accent="text-white" Icon={MonitorSmartphone} />
-        <Stat label="Online agora" value={online} accent="text-emerald-400" Icon={MonitorSmartphone} />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 stagger">
+        <Stat label="Máquinas com agente" value={stations.length} accent="text-text-hi" Icon={MonitorSmartphone} />
+        <Stat label="Online agora" value={online} accent="text-ok" Icon={MonitorSmartphone} />
         <Stat
           label="Vistas sem agente"
           value={withoutAgent}
-          accent={withoutAgent > 0 ? 'text-amber-400' : 'text-[#737373]'}
+          accent={withoutAgent > 0 ? 'text-warn' : 'text-text-faint'}
           Icon={Network}
         />
         <Stat
           label="Temperatura alta"
           value={hot}
-          accent={hot > 0 ? 'text-rose-400' : 'text-[#737373]'}
+          accent={hot > 0 ? 'text-crit' : 'text-text-faint'}
           Icon={Thermometer}
         />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 glass-panel rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
-          <div className="p-4 border-b border-white/5 bg-black/20">
-            <h2 className="text-xs font-bold tracking-widest text-[#737373] uppercase">
-              Máquinas monitoradas
-            </h2>
+        <div className="lg:col-span-2 panel overflow-hidden">
+          <div className="p-4 border-b border-line bg-ink-850">
+            <h2 className="eyebrow">Máquinas monitoradas</h2>
           </div>
           <div className="overflow-x-auto custom-scrollbar">
-            <table className="w-full text-left text-sm whitespace-nowrap">
-              <thead className="bg-[#0c0c0e]/80">
+            <table className="table-base whitespace-nowrap">
+              <thead>
                 <tr>
-                  <th className="py-3 px-4 font-medium text-gray-500">Estado</th>
-                  <th className="py-3 px-4 font-medium text-gray-500">Máquina</th>
-                  <th className="py-3 px-4 font-medium text-gray-500">Usuário</th>
-                  <th className="py-3 px-4 font-medium text-gray-500 text-right">CPU</th>
-                  <th className="py-3 px-4 font-medium text-gray-500 text-right">Memória</th>
-                  <th className="py-3 px-4 font-medium text-gray-500 text-right">Temp.</th>
-                  <th className="py-3 px-4"></th>
+                  <th>Estado</th>
+                  <th>Máquina</th>
+                  <th>Usuário</th>
+                  <th className="text-right">CPU</th>
+                  <th className="text-right">Memória</th>
+                  <th className="text-right">Temp.</th>
+                  <th></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5">
+              <tbody>
                 {stations.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-gray-500">
+                    <td colSpan={7} className="py-8 text-center text-text-mut">
                       Nenhuma máquina com agente nesta unidade.
                     </td>
                   </tr>
@@ -203,33 +199,36 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
                     <tr
                       key={s.id}
                       onClick={() => openMachine(s.id)}
-                      className="hover:bg-white/[0.04] transition-colors cursor-pointer"
+                      className="cursor-pointer"
                     >
-                      <td className="py-3 px-4">
-                        <span className={`w-2 h-2 rounded-full inline-block ${s.online ? 'bg-[#10b981] animate-pulse' : 'bg-[#737373]'}`} />
+                      <td>
+                        <span
+                          className={`w-2 h-2 rounded-full inline-block ${s.online ? 'bg-ok animate-pulse' : 'bg-text-faint'}`}
+                          title={s.online ? 'Online' : 'Offline'}
+                        />
                       </td>
-                      <td className="py-3 px-4 text-gray-200 font-medium">{s.name}</td>
-                      <td className="py-3 px-4 text-gray-400">{s.last_user || '—'}</td>
-                      <td className={`py-3 px-4 text-right ${s.cpu >= USAGE_WARN ? 'text-amber-400' : 'text-white/90'}`}>
+                      <td className="text-text-hi font-medium">{s.name}</td>
+                      <td className="text-text-mut">{s.last_user || '—'}</td>
+                      <td className={`text-right mono-data ${s.cpu >= USAGE_WARN ? 'text-warn' : 'text-text-hi'}`}>
                         {s.online ? `${s.cpu.toFixed(0)}%` : '—'}
                       </td>
-                      <td className={`py-3 px-4 text-right ${memPct >= USAGE_WARN ? 'text-amber-400' : 'text-white/90'}`}>
+                      <td className={`text-right mono-data ${memPct >= USAGE_WARN ? 'text-warn' : 'text-text-hi'}`}>
                         {s.online && s.mem_total > 0 ? `${memPct.toFixed(0)}%` : '—'}
                       </td>
                       <td
-                        className={`py-3 px-4 text-right ${
+                        className={`text-right mono-data ${
                           s.temperature_c === null
-                            ? 'text-gray-600 text-xs'
+                            ? 'text-text-faint text-xs'
                             : isAbove(s.temperature_c, TEMP_WARN)
-                              ? 'text-rose-400'
-                              : 'text-emerald-400'
+                              ? 'text-crit'
+                              : 'text-ok'
                         }`}
                         title={s.temperature_c === null ? NO_TEMPERATURE_HINT : undefined}
                       >
                         {formatTemperature(s.temperature_c)}
                       </td>
-                      <td className="py-3 px-4 text-right">
-                        <ChevronRight size={14} className="text-[#737373] inline" />
+                      <td className="text-right">
+                        <ChevronRight size={14} strokeWidth={1.75} className="text-text-faint inline" />
                       </td>
                     </tr>
                   );
@@ -240,15 +239,13 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
         </div>
 
         <div className="flex flex-col gap-4">
-          <div className="glass-panel rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
-            <div className="p-4 border-b border-white/5 bg-black/20">
-              <h2 className="text-xs font-bold tracking-widest text-[#737373] uppercase">
-                Vistos na rede sem agente
-              </h2>
+          <div className="panel overflow-hidden">
+            <div className="p-4 border-b border-line bg-ink-850">
+              <h2 className="eyebrow">Vistos na rede sem agente</h2>
             </div>
             <div className="p-2 max-h-64 overflow-y-auto custom-scrollbar">
               {withoutAgent === 0 ? (
-                <p className="text-xs text-[#737373] p-2">
+                <p className="text-xs text-text-mut p-2">
                   Todo equipamento inventariado desta unidade já reporta métricas.
                 </p>
               ) : (
@@ -258,10 +255,10 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
                     const Icon = DEVICE_ICONS[h.device_type] ?? ShieldQuestion;
                     return (
                       <div key={h.ip} className="flex items-center gap-2 px-2 py-1.5 text-xs">
-                        <Icon size={13} className="text-[#737373] shrink-0" />
-                        <span className="font-mono text-gray-300 selectable">{h.ip}</span>
-                        <span className="text-[#737373] truncate">{h.hostname}</span>
-                        <span className="ml-auto text-[10px] text-[#737373] shrink-0">
+                        <Icon size={13} strokeWidth={1.75} className="text-text-faint shrink-0" />
+                        <span className="mono-data text-text selectable">{h.ip}</span>
+                        <span className="text-text-faint truncate">{h.hostname}</span>
+                        <span className="ml-auto text-[11px] text-text-faint shrink-0">
                           {relativeTime(h.last_seen)}
                         </span>
                       </div>
@@ -271,24 +268,25 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
             </div>
           </div>
 
-          <div className="glass-panel rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
-            <div className="p-4 border-b border-white/5 bg-black/20">
-              <h2 className="text-xs font-bold tracking-widest text-[#737373] uppercase flex items-center gap-2">
-                <ShieldAlert size={12} />
+          <div className="panel overflow-hidden">
+            <div className="p-4 border-b border-line bg-ink-850">
+              <h2 className="eyebrow flex items-center gap-2">
+                <ShieldAlert size={12} strokeWidth={1.75} />
                 Regras que cobrem a unidade
               </h2>
             </div>
             <div className="p-2 max-h-64 overflow-y-auto custom-scrollbar">
               {siteRules.length === 0 ? (
-                <p className="text-xs text-[#737373] p-2">Nenhuma regra de alerta cobre esta unidade.</p>
+                <p className="text-xs text-text-mut p-2">Nenhuma regra de alerta cobre esta unidade.</p>
               ) : (
                 siteRules.map((r) => (
                   <div key={r.id} className="flex items-center gap-2 px-2 py-1.5 text-xs">
                     <span
-                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${r.enabled ? 'bg-[#10b981]' : 'bg-[#737373]'}`}
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${r.enabled ? 'bg-ok' : 'bg-text-faint'}`}
+                      title={r.enabled ? 'Regra ativa' : 'Regra desativada'}
                     />
-                    <span className="text-gray-300 truncate">{r.name}</span>
-                    <span className="ml-auto text-[10px] text-[#737373] font-mono shrink-0">
+                    <span className="text-text truncate">{r.name}</span>
+                    <span className="ml-auto text-[11px] text-text-faint mono-data shrink-0">
                       {r.metric} {r.operator} {r.threshold}
                     </span>
                   </div>

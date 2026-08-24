@@ -23,7 +23,7 @@ const TABS: Record<string, { label: string; icon: LucideIcon }> = {
   dashboard: { label: 'Dashboard Geral', icon: LayoutDashboard },
   history: { label: 'Histórico de Métricas', icon: LineChart },
   containers: { label: 'Containers', icon: Box },
-  nginx: { label: 'Nginx & Tráfego (Read Only)', icon: Globe },
+  nginx: { label: 'Nginx & Tráfego', icon: Globe },
   ssl: { label: 'SSL & Domínios', icon: Lock },
   security: { label: 'Segurança & Auditoria', icon: ShieldAlert },
   servers: { label: 'Servidores', icon: Server },
@@ -50,24 +50,24 @@ const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => 
   );
 
   return (
-    <aside className="w-64 glass-panel border-r border-white/5 flex flex-col h-full bg-[#0c0c0e]/95 backdrop-blur-xl">
-      <div className="p-6 border-b border-white/5">
-        <h1 className="text-lg font-bold tracking-widest uppercase text-white drop-shadow-md">
-          VD <span className="text-[#10b981]">Stats</span>
+    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-line bg-ink-900">
+      <div className="border-b border-line p-5">
+        <h1 className="text-lg font-bold tracking-tight text-text-hi">
+          Dock<span className="text-accent">Keeper</span>
         </h1>
-        <p className="text-[10px] text-[#737373] mt-1 tracking-widest uppercase">
-          {PANELS[panel].description}
-        </p>
+        <p className="mt-1 text-xs text-text-mut">{PANELS[panel].description}</p>
       </div>
 
-      <div className="p-3 border-b border-white/5">
-        <div className="grid grid-cols-2 gap-1 bg-black/40 rounded-lg p-1 border border-white/5">
+      <div className="border-b border-line p-3">
+        <div className="grid grid-cols-2 gap-1 rounded-ctrl border border-line bg-ink-850 p-1">
           {PANEL_IDS.map((id) => (
             <button
               key={id}
               onClick={() => setPanel(id)}
-              className={`py-2 rounded-md text-[10px] font-bold tracking-widest uppercase transition-all ${
-                panel === id ? 'bg-[#10b981]/20 text-[#10b981]' : 'text-[#737373] hover:text-white'
+              className={`rounded-[0.4rem] py-1.5 text-xs font-semibold transition-colors ${
+                panel === id
+                  ? 'bg-ink-750 text-text-hi'
+                  : 'text-text-mut hover:text-text-hi'
               }`}
             >
               {PANELS[id].label}
@@ -76,14 +76,11 @@ const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => 
         </div>
       </div>
 
-        {/* O escopo por unidade só faz sentido no painel de campo: as VPS do
+      {/* O escopo por unidade só faz sentido no painel de campo: as VPS do
           painel Dev são infraestrutura e não pertencem a filial nenhuma. */}
       {panel === 'suporte' && (
-        <div className="p-3 border-b border-white/5">
-          <label
-            htmlFor="sidebar-site"
-            className="text-[10px] text-[#737373] uppercase tracking-widest block mb-1.5"
-          >
+        <div className="border-b border-line p-3">
+          <label htmlFor="sidebar-site" className="eyebrow mb-1.5 block">
             Unidade
           </label>
           <Select
@@ -98,8 +95,8 @@ const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => 
         </div>
       )}
 
-    <nav className="flex-1 overflow-y-auto py-4">
-        <ul className="flex flex-col gap-1 px-3">
+      <nav className="flex-1 overflow-y-auto py-3 custom-scrollbar">
+        <ul className="flex flex-col gap-0.5 px-3">
           {visibleTabs.map((id) => {
             const tab = TABS[id];
             if (!tab) return null;
@@ -110,13 +107,23 @@ const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => 
               <li key={id}>
                 <button
                   onClick={() => setActiveTab(id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-300 ${
+                  className={`relative flex w-full items-center gap-2.5 rounded-ctrl px-3 py-2 text-sm transition-colors ${
                     isActive
-                      ? 'bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]'
-                      : 'text-white/60 hover:bg-white/5 hover:text-white border border-transparent'
+                      ? 'bg-ink-850 font-medium text-text-hi'
+                      : 'text-text-mut hover:bg-ink-850 hover:text-text-hi'
                   }`}
                 >
-                  <Icon size={18} className={isActive ? 'text-[#10b981]' : 'text-[#737373]'} />
+                  {isActive && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-accent"
+                    />
+                  )}
+                  <Icon
+                    size={16}
+                    strokeWidth={1.75}
+                    className={isActive ? 'text-accent' : 'text-text-faint'}
+                  />
                   <span className="truncate">{tab.label}</span>
                 </button>
               </li>
@@ -125,14 +132,14 @@ const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => 
         </ul>
       </nav>
 
-      <div className="p-4 border-t border-white/5">
+      <div className="border-t border-line p-4">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-[#10b981]/10 border border-[#10b981]/20 flex items-center justify-center shrink-0">
-            <KeyRound size={14} className="text-[#10b981]" />
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line bg-ink-800">
+            <KeyRound size={14} strokeWidth={1.75} className="text-text-mut" />
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-white/90 font-medium truncate">{session.username}</p>
-            <p className="text-[10px] text-[#737373] tracking-wider uppercase">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-medium text-text-hi">{session.username}</p>
+            <p className="eyebrow mt-0.5">
               {session.isToken ? 'Token de API' : ROLE_LABELS[session.role]}
             </p>
           </div>
@@ -140,16 +147,14 @@ const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => 
             <button
               onClick={session.logout}
               title="Sair"
-              className="p-2 rounded-lg text-[#737373] hover:text-rose-400 hover:bg-rose-400/10 transition-colors"
+              className="rounded-ctrl border border-transparent p-2 text-text-faint transition-colors hover:border-line hover:text-crit"
             >
-              <LogOut size={16} />
+              <LogOut size={16} strokeWidth={1.75} />
               <span className="sr-only">Sair</span>
             </button>
           )}
         </div>
-        <div className="text-[10px] text-center text-[#737373] tracking-wider uppercase mt-3">
-          v2.1.0
-        </div>
+        <div className="eyebrow mt-3 text-center">v2.1.0</div>
       </div>
     </aside>
   );

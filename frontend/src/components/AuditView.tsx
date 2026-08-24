@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   ChevronLeft, ChevronRight, CircleCheck, CircleSlash, Loader2, Search,
-  ShieldAlert, TriangleAlert,
+  TriangleAlert,
 } from 'lucide-react';
 import { api, type AuditEntry, type AuditQuery } from '../lib/api';
 import { formatDateTime } from '../lib/format';
@@ -44,24 +44,22 @@ const ACTIONS: SelectOption[] = [
  * ele ter que ler texto.
  */
 const RESULT_STYLES: Record<string, { label: string; className: string; Icon: typeof CircleCheck }> = {
-  ok: { label: 'Aceito', className: 'text-[#10b981] border-[#10b981]/30 bg-[#10b981]/10', Icon: CircleCheck },
-  denied: { label: 'Recusado', className: 'text-rose-400 border-rose-400/40 bg-rose-400/10', Icon: CircleSlash },
-  error: { label: 'Erro', className: 'text-amber-400 border-amber-400/30 bg-amber-400/10', Icon: TriangleAlert },
-  pending: { label: 'Em execução', className: 'text-sky-400 border-sky-400/30 bg-sky-400/10', Icon: Loader2 },
+  ok: { label: 'Aceito', className: 'badge-ok', Icon: CircleCheck },
+  denied: { label: 'Recusado', className: 'badge-crit', Icon: CircleSlash },
+  error: { label: 'Erro', className: 'badge-warn', Icon: TriangleAlert },
+  pending: { label: 'Em execução', className: 'badge-info', Icon: Loader2 },
 };
 
 const ResultBadge = ({ result }: { result: string }) => {
   const style = RESULT_STYLES[result] ?? {
     label: result || 'desconhecido',
-    className: 'text-[#737373] border-white/10 bg-white/5',
+    className: 'badge-muted',
     Icon: TriangleAlert,
   };
   const { Icon } = style;
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] font-bold uppercase tracking-wider ${style.className}`}
-    >
-      <Icon className="w-3 h-3" />
+    <span className={`badge ${style.className}`}>
+      <Icon size={12} strokeWidth={1.75} />
       {style.label}
     </span>
   );
@@ -76,18 +74,18 @@ const DetailCells = ({ detail }: { detail: string }) => {
   try {
     parsed = JSON.parse(detail || '{}') as Record<string, unknown>;
   } catch {
-    return <span className="text-[#737373] break-all">{detail}</span>;
+    return <span className="text-text-mut break-all">{detail}</span>;
   }
 
   const entries = Object.entries(parsed);
-  if (entries.length === 0) return <span className="text-[#737373]">—</span>;
+  if (entries.length === 0) return <span className="text-text-faint">—</span>;
 
   return (
     <div className="flex flex-wrap gap-x-3 gap-y-1">
       {entries.map(([key, value]) => (
         <span key={key} className="whitespace-nowrap">
-          <span className="text-[#737373]">{key}</span>
-          <span className="text-white/80 ml-1">{String(value)}</span>
+          <span className="text-text-faint">{key}</span>
+          <span className="text-text ml-1">{String(value)}</span>
         </span>
       ))}
     </div>
@@ -167,39 +165,40 @@ const AuditView = () => {
   const temProxima = offset + items.length < total;
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-light text-white mb-2 flex items-center gap-3">
-        <ShieldAlert className="w-6 h-6 text-[#10b981]" />
-        Log de <span className="font-bold">Auditoria</span>
-      </h1>
-      <p className="text-[#737373] text-sm mb-8">
-        Quem fez o quê, em qual alvo e com qual resultado. Registra toda escrita do painel e toda
-        leitura de log remoto feita por SSH.
-      </p>
+    <div className="p-8 anim-rise">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Log de auditoria</h1>
+          <p className="page-desc">
+            Quem fez o quê, em qual alvo e com qual resultado. Registra toda escrita do painel e toda
+            leitura de log remoto feita por SSH.
+          </p>
+        </div>
+      </div>
 
-      <form onSubmit={aplicar} className="glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02] mb-6">
+      <form onSubmit={aplicar} className="panel p-5 mb-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label htmlFor="audit-actor" className="text-xs text-[#737373] block mb-1">Usuário</label>
+            <label htmlFor="audit-actor" className="eyebrow block mb-1.5">Usuário</label>
             <input
               id="audit-actor"
               type="text"
               value={actor}
               onChange={(e) => setActor(e.target.value)}
-              className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors"
+              className="input-base w-full"
               placeholder="Nome exato de quem agiu"
             />
           </div>
           <div>
-            <label htmlFor="audit-action" className="text-xs text-[#737373] block mb-1">Ação</label>
+            <label htmlFor="audit-action" className="eyebrow block mb-1.5">Ação</label>
             <Select id="audit-action" value={action} onChange={setAction} options={ACTIONS} />
           </div>
           <div>
-            <label htmlFor="audit-result" className="text-xs text-[#737373] block mb-1">Resultado</label>
+            <label htmlFor="audit-result" className="eyebrow block mb-1.5">Resultado</label>
             <Select id="audit-result" value={result} onChange={setResult} options={RESULTS} />
           </div>
           <div>
-            <label htmlFor="audit-site" className="text-xs text-[#737373] block mb-1">Unidade</label>
+            <label htmlFor="audit-site" className="eyebrow block mb-1.5">Unidade</label>
             <Select
               id="audit-site"
               value={siteId}
@@ -211,62 +210,58 @@ const AuditView = () => {
             />
           </div>
           <div>
-            <label htmlFor="audit-from" className="text-xs text-[#737373] block mb-1">De</label>
+            <label htmlFor="audit-from" className="eyebrow block mb-1.5">De</label>
             <input
               id="audit-from"
               type="datetime-local"
               value={from}
               onChange={(e) => setFrom(e.target.value)}
-              className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors"
+              className="input-base w-full"
             />
           </div>
           <div>
-            <label htmlFor="audit-to" className="text-xs text-[#737373] block mb-1">Até</label>
+            <label htmlFor="audit-to" className="eyebrow block mb-1.5">Até</label>
             <input
               id="audit-to"
               type="datetime-local"
               value={to}
               onChange={(e) => setTo(e.target.value)}
-              className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors"
+              className="input-base w-full"
             />
           </div>
         </div>
-        <button
-          type="submit"
-          disabled={loading}
-          className="mt-4 flex items-center gap-2 bg-[#10b981]/20 hover:bg-[#10b981]/30 border border-[#10b981]/50 text-[#10b981] font-bold text-xs uppercase tracking-widest py-3 px-6 rounded-lg transition-all disabled:opacity-50"
-        >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+        <button type="submit" disabled={loading} className="btn btn-primary mt-4 disabled:opacity-50">
+          {loading ? <Loader2 size={16} strokeWidth={1.75} className="animate-spin" /> : <Search size={16} strokeWidth={1.75} />}
           Filtrar
         </button>
       </form>
 
-      <div className="glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02]">
-        <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-          <h2 className="text-sm font-bold tracking-widest text-[#737373] uppercase">
-            Registros {total > 0 && <span className="text-[#10b981]">({total})</span>}
+      <div className="panel p-5">
+        <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
+          <h2 className="eyebrow">
+            Registros{total > 0 && <span className="mono-data text-text-mut normal-case tracking-normal"> · {total}</span>}
           </h2>
           {total > 0 && (
             <div className="flex items-center gap-3">
-              <span className="text-xs text-[#737373] tabular-nums">
+              <span className="text-xs text-text-mut tabular">
                 {primeiro}–{ultimo} de {total}
               </span>
               <button
                 type="button"
                 onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
                 disabled={!temAnterior || loading}
-                className="p-2 rounded-lg border border-white/10 text-white/70 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                className="btn btn-ghost min-h-0 h-8 px-2 disabled:opacity-30"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft size={16} strokeWidth={1.75} />
                 <span className="sr-only">Página anterior</span>
               </button>
               <button
                 type="button"
                 onClick={() => setOffset((o) => o + PAGE_SIZE)}
                 disabled={!temProxima || loading}
-                className="p-2 rounded-lg border border-white/10 text-white/70 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                className="btn btn-ghost min-h-0 h-8 px-2 disabled:opacity-30"
               >
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight size={16} strokeWidth={1.75} />
                 <span className="sr-only">Próxima página</span>
               </button>
             </div>
@@ -274,53 +269,53 @@ const AuditView = () => {
         </div>
 
         {erro ? (
-          <p className="text-sm text-rose-400">{erro}</p>
+          <p className="text-sm text-crit">{erro}</p>
         ) : loading ? (
-          <p className="text-sm text-[#737373]">Carregando...</p>
+          <p className="text-sm text-text-mut">Carregando...</p>
         ) : items.length === 0 ? (
-          <p className="text-sm text-[#737373]">Nenhum registro para os filtros informados.</p>
+          <p className="text-sm text-text-mut">Nenhum registro para os filtros informados.</p>
         ) : (
           <div className="overflow-x-auto custom-scrollbar">
-            <table className="w-full text-xs text-left border-collapse">
-              <thead className="text-[10px] text-[#737373] uppercase tracking-widest bg-[#0c0c0e]">
+            <table className="table-base min-w-[880px] text-xs">
+              <thead>
                 <tr>
-                  <th className="py-3 px-4 rounded-l whitespace-nowrap">Quando</th>
-                  <th className="py-3 px-4 whitespace-nowrap">Quem</th>
-                  <th className="py-3 px-4 whitespace-nowrap">Ação</th>
-                  <th className="py-3 px-4 whitespace-nowrap">Alvo</th>
-                  <th className="py-3 px-4 whitespace-nowrap">Unidade</th>
-                  <th className="py-3 px-4 whitespace-nowrap">Resultado</th>
-                  <th className="py-3 px-4 rounded-r">Detalhe</th>
+                  <th className="whitespace-nowrap">Quando</th>
+                  <th className="whitespace-nowrap">Quem</th>
+                  <th className="whitespace-nowrap">Ação</th>
+                  <th className="whitespace-nowrap">Alvo</th>
+                  <th className="whitespace-nowrap">Unidade</th>
+                  <th className="whitespace-nowrap">Resultado</th>
+                  <th>Detalhe</th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((e) => (
-                  <tr key={e.id} className="border-b border-white/[0.03] hover:bg-white/[0.05] transition-all align-top">
-                    <td className="py-2 px-4 text-[#737373] whitespace-nowrap font-mono">
+                  <tr key={e.id} className="align-top">
+                    <td className="mono-data text-text-faint whitespace-nowrap">
                       {formatDateTime(e.at)}
                     </td>
-                    <td className="py-2 px-4 whitespace-nowrap">
-                      <span className="text-white/90">{e.actor_username || 'sem sessão'}</span>
+                    <td className="whitespace-nowrap">
+                      <span className="text-text-hi font-medium">{e.actor_username || 'sem sessão'}</span>
                       {e.source_ip && (
-                        <span className="block text-[10px] text-[#737373] font-mono">{e.source_ip}</span>
+                        <span className="block mono-data text-text-faint text-[11px]">{e.source_ip}</span>
                       )}
                     </td>
-                    <td className="py-2 px-4 text-[#10b981] whitespace-nowrap font-mono">{e.action}</td>
-                    <td className="py-2 px-4 text-white/80">
+                    <td className="mono-data text-text whitespace-nowrap">{e.action}</td>
+                    <td className="text-text-mut">
                       <span className="block">{e.target_label || e.target_id || '—'}</span>
                       {e.target_label && e.target_id && (
-                        <span className="block text-[10px] text-[#737373] font-mono break-all">
+                        <span className="block mono-data text-text-faint text-[11px] break-all">
                           {e.target_id}
                         </span>
                       )}
                     </td>
-                    <td className="py-2 px-4 text-white/70 whitespace-nowrap">
+                    <td className="text-text-mut whitespace-nowrap">
                       {e.site_id === null ? '—' : siteName(e.site_id)}
                     </td>
-                    <td className="py-2 px-4 whitespace-nowrap">
+                    <td className="whitespace-nowrap">
                       <ResultBadge result={e.result} />
                     </td>
-                    <td className="py-2 px-4 font-mono">
+                    <td className="mono-data">
                       <DetailCells detail={e.detail} />
                     </td>
                   </tr>

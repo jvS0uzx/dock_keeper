@@ -8,7 +8,7 @@ import {
   CartesianGrid,
   Tooltip,
 } from 'recharts';
-import { Activity, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { api, type HistoryMetric, type HistoryRange } from '../lib/api';
 import { HANDSHAKE_LABEL } from '../lib/metrics';
 import Select from './ui/Select';
@@ -101,21 +101,20 @@ const MetricsHistoryView = () => {
   }, [fetchHistory]);
 
   return (
-    <div className="p-8">
-      <div className="flex items-center gap-3 mb-2">
-        <Activity size={22} className="text-[#10b981]" />
-        <h1 className="text-2xl font-light text-white">
-          Histórico de <span className="font-bold">Métricas</span>
-        </h1>
+    <div className="p-4 md:p-8 anim-rise">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Histórico de métricas</h1>
+          <p className="page-desc">
+            Séries temporais agregadas por servidor. Atualização automática a cada 15 segundos.
+          </p>
+        </div>
       </div>
-      <p className="text-[#737373] text-sm mb-8">
-        Séries temporais agregadas por servidor. Atualização automática a cada 15 segundos.
-      </p>
 
-      <div className="glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02]">
+      <div className="panel p-6">
         <div className="flex flex-wrap items-center gap-4 mb-6">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="history-server" className="text-[10px] text-[#737373] uppercase tracking-widest">Servidor</label>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="history-server" className="eyebrow">Servidor</label>
             <Select
               id="history-server"
               value={serverId}
@@ -126,8 +125,8 @@ const MetricsHistoryView = () => {
             />
           </div>
 
-          <div className="flex flex-col gap-1">
-            <label htmlFor="history-metric" className="text-[10px] text-[#737373] uppercase tracking-widest">Métrica</label>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="history-metric" className="eyebrow">Métrica</label>
             <Select
               id="history-metric"
               value={metric}
@@ -137,17 +136,17 @@ const MetricsHistoryView = () => {
             />
           </div>
 
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-[#737373] uppercase tracking-widest">Período</label>
+          <div className="flex flex-col gap-1.5">
+            <label className="eyebrow">Período</label>
             <div className="flex gap-1">
               {RANGES.map((r) => (
                 <button
                   key={r}
                   onClick={() => setRange(r)}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold tracking-widest uppercase transition-all border ${
+                  className={`btn text-xs ${
                     range === r
-                      ? 'bg-[#10b981]/20 border-[#10b981]/50 text-[#10b981]'
-                      : 'bg-black/40 border-white/10 text-[#737373] hover:text-white'
+                      ? 'bg-accent/10 border border-accent/40 text-accent'
+                      : 'btn-ghost'
                   }`}
                 >
                   {r}
@@ -158,18 +157,18 @@ const MetricsHistoryView = () => {
 
           <button
             onClick={fetchHistory}
-            className="ml-auto self-end flex items-center gap-2 text-xs text-[#737373] hover:text-[#10b981] transition-colors"
+            className="btn btn-ghost ml-auto self-end text-xs"
           >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={14} strokeWidth={1.75} className={loading ? 'animate-spin' : ''} />
             Atualizar
           </button>
         </div>
 
         <div className="h-[420px] w-full">
           {loading && data.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-sm text-[#737373]">Carregando...</div>
+            <div className="h-full flex items-center justify-center text-sm text-text-faint">Carregando...</div>
           ) : data.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-sm text-[#737373]">
+            <div className="h-full flex items-center justify-center text-sm text-text-faint">
               Sem dados no período selecionado.
             </div>
           ) : (
@@ -177,38 +176,41 @@ const MetricsHistoryView = () => {
               <AreaChart data={data} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="metricFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.12} />
+                    <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-line)" strokeOpacity={0.5} vertical={false} />
                 <XAxis
                   dataKey="time"
-                  tick={{ fill: '#737373', fontSize: 11 }}
-                  stroke="rgba(255,255,255,0.1)"
+                  tick={{ fill: 'var(--color-text-faint)', fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
                   minTickGap={30}
                 />
                 <YAxis
-                  tick={{ fill: '#737373', fontSize: 11 }}
-                  stroke="rgba(255,255,255,0.1)"
+                  tick={{ fill: 'var(--color-text-faint)', fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
                   width={48}
                   unit={activeMetric.unit}
                 />
                 <Tooltip
                   contentStyle={{
-                    background: '#0c0c0e',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: 8,
-                    color: '#fff',
+                    background: 'var(--color-ink-800)',
+                    border: '1px solid var(--color-line-hi)',
+                    borderRadius: 10,
                     fontSize: 12,
+                    fontFamily: 'var(--font-mono)',
                   }}
-                  labelStyle={{ color: '#737373' }}
+                  labelStyle={{ color: 'var(--color-text-mut)' }}
+                  itemStyle={{ color: 'var(--color-text-hi)' }}
                   formatter={(value) => [`${value}${activeMetric.unit}`, activeMetric.label]}
                 />
                 <Area
                   type="monotone"
                   dataKey="value"
-                  stroke="#10b981"
+                  stroke="var(--color-accent)"
                   strokeWidth={2}
                   fill="url(#metricFill)"
                   dot={false}

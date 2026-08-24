@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, type FormEvent } from 'react';
 import {
-  Network, RefreshCw, Search, ShieldQuestion, Router, Printer, Monitor,
+  RefreshCw, Search, ShieldQuestion, Router, Printer, Monitor,
   HardDrive, Pencil, X, Globe, Lock,
 } from 'lucide-react';
 import { api, type HostInventoryPatch, type NetworkHostView, type NetworkInventory, type Site } from '../lib/api';
@@ -62,9 +62,9 @@ const detectedTypeLabel = (host: NetworkHostView) =>
 type Filter = 'all' | 'unmonitored' | 'online';
 
 const StatCard = ({ label, value, accent }: { label: string; value: number | string; accent: string }) => (
-  <div className="glass-panel rounded-xl p-4 border border-white/5 bg-white/[0.02]">
-    <div className={`text-3xl font-bold ${accent}`}>{value}</div>
-    <div className="text-xs text-[#737373] uppercase tracking-widest mt-1">{label}</div>
+  <div className="stat-card">
+    <div className={`stat-value ${accent}`}>{value}</div>
+    <div className="eyebrow mt-1.5">{label}</div>
   </div>
 );
 
@@ -137,32 +137,29 @@ const HostEditModal = ({ host, sites, onClose, onSaved }: HostEditModalProps) =>
     }
   };
 
-  const inputClass =
-    'w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors';
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label={`Cadastro de ${host.ip}`}
-        className="w-full max-w-lg bg-[#0c0c0e] border border-white/10 rounded-xl shadow-2xl overflow-hidden"
+        className="w-full max-w-lg bg-ink-900 border border-line rounded-card shadow-pop overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b border-white/5 bg-[#1a1c23]">
+        <div className="flex items-center justify-between p-4 border-b border-line bg-ink-850">
           <div className="flex items-center gap-3">
-            <Pencil className="text-[#10b981] w-4 h-4" />
-            <h3 className="text-white font-bold font-mono tracking-wider selectable">{host.ip}</h3>
-            {host.hostname && <span className="text-xs text-[#737373]">{host.hostname}</span>}
+            <Pencil className="text-accent" size={15} strokeWidth={1.75} />
+            <h3 className="text-text-hi font-semibold mono-data selectable">{host.ip}</h3>
+            {host.hostname && <span className="text-xs text-text-faint">{host.hostname}</span>}
           </div>
-          <button onClick={onClose} aria-label="Fechar" className="text-[#737373] hover:text-white transition-colors">
-            <X size={18} />
+          <button onClick={onClose} aria-label="Fechar" className="text-text-faint hover:text-text-hi transition-colors">
+            <X size={18} strokeWidth={1.75} />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-4 grid grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto custom-scrollbar">
           <div className="col-span-2">
-            <label htmlFor="host-site" className="text-xs text-[#737373] block mb-1">Unidade</label>
+            <label htmlFor="host-site" className="eyebrow block mb-1.5">Unidade</label>
             <Select
               id="host-site"
               value={form.site_id === null ? '' : String(form.site_id)}
@@ -170,7 +167,7 @@ const HostEditModal = ({ host, sites, onClose, onSaved }: HostEditModalProps) =>
               options={[AUTO_SITE_OPTION, ...sites.map((s) => ({ value: String(s.id), label: s.name }))]}
             />
             {form.site_id === null && (
-              <p className="text-[10px] text-[#737373] mt-1">
+              <p className="text-[10px] text-text-faint mt-1">
                 {currentSiteName
                   ? `Definida agora: ${currentSiteName}. Escolher uma unidade fixa o valor e o coletor deixa de alterá-lo.`
                   : 'Nenhuma unidade definida no momento. Escolher uma fixa o valor.'}
@@ -179,7 +176,7 @@ const HostEditModal = ({ host, sites, onClose, onSaved }: HostEditModalProps) =>
           </div>
 
           <div className="col-span-2">
-            <label htmlFor="host-type" className="text-xs text-[#737373] block mb-1">Tipo de equipamento</label>
+            <label htmlFor="host-type" className="eyebrow block mb-1.5">Tipo de equipamento</label>
             <Select
               id="host-type"
               value={form.device_type}
@@ -187,7 +184,7 @@ const HostEditModal = ({ host, sites, onClose, onSaved }: HostEditModalProps) =>
               options={[AUTO_TYPE_OPTION, ...DEVICE_TYPES]}
             />
             {form.device_type === '' && (
-              <p className="text-[10px] text-[#737373] mt-1">
+              <p className="text-[10px] text-text-faint mt-1">
                 Detectado agora: {detectedTypeLabel(host)}. Escolher um tipo fixa o valor e a varredura deixa de alterá-lo.
               </p>
             )}
@@ -202,41 +199,33 @@ const HostEditModal = ({ host, sites, onClose, onSaved }: HostEditModalProps) =>
             ['host-owner', 'Responsável', 'owner'],
           ] as const).map(([id, label, field]) => (
             <div key={id}>
-              <label htmlFor={id} className="text-xs text-[#737373] block mb-1">{label}</label>
+              <label htmlFor={id} className="eyebrow block mb-1.5">{label}</label>
               <input
                 id={id}
                 type="text"
                 value={form[field]}
                 onChange={(e) => setForm({ ...form, [field]: e.target.value })}
-                className={inputClass}
+                className="input-base w-full"
               />
             </div>
           ))}
 
           <div className="col-span-2">
-            <label htmlFor="host-notes" className="text-xs text-[#737373] block mb-1">Observações</label>
+            <label htmlFor="host-notes" className="eyebrow block mb-1.5">Observações</label>
             <textarea
               id="host-notes"
               value={form.notes}
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
               rows={2}
-              className={inputClass}
+              className="input-base w-full py-2"
             />
           </div>
 
           <div className="col-span-2 flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg border border-white/10 text-xs font-bold uppercase tracking-widest text-[#737373] hover:text-white transition-colors"
-            >
+            <button type="button" onClick={onClose} className="btn btn-ghost">
               Cancelar
             </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-2 rounded-lg border border-[#10b981]/50 bg-[#10b981]/20 hover:bg-[#10b981]/30 text-xs font-bold uppercase tracking-widest text-[#10b981] transition-colors disabled:opacity-40"
-            >
+            <button type="submit" disabled={saving} className="btn btn-primary disabled:opacity-40">
               {saving ? 'Gravando...' : 'Gravar'}
             </button>
           </div>
@@ -330,45 +319,39 @@ const NetworkView = () => {
   const columns = canOperate ? 9 : 8;
 
   return (
-    <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden">
-      <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden anim-rise">
+      <div className="page-header flex-col md:flex-row md:items-end items-start">
         <div>
-          <h1 className="text-2xl font-light text-white mb-2 flex items-center gap-3">
-            <Network className="text-[#10b981]" /> Inventário de <span className="font-bold">Rede</span>
-          </h1>
-          <p className="text-[#737373] text-sm">
+          <h1 className="page-title">Inventário de Rede</h1>
+          <p className="page-desc">
             Máquinas e ativos vistos na rede da seção, cruzados com o que já é monitorado.
           </p>
         </div>
         {canOperate && (
-          <button
-            onClick={runScan}
-            disabled={scanning}
-            className="flex items-center gap-2 bg-[#10b981]/20 hover:bg-[#10b981]/30 border border-[#10b981]/50 text-[#10b981] font-bold text-xs uppercase tracking-widest px-4 py-3 rounded-lg transition-all disabled:opacity-40"
-          >
-            <RefreshCw size={14} className={scanning ? 'animate-spin' : ''} />
+          <button onClick={runScan} disabled={scanning} className="btn btn-primary disabled:opacity-40">
+            <RefreshCw size={15} strokeWidth={1.75} className={scanning ? 'animate-spin' : ''} />
             {scanning ? 'Varrendo...' : 'Varrer agora'}
           </button>
         )}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <StatCard label="Hosts no inventário" value={scoped.length} accent="text-white" />
-        <StatCard label="Online agora" value={onlineCount} accent="text-emerald-400" />
-        <StatCard label="Monitorados" value={monitoredCount} accent="text-[#10b981]" />
-        <StatCard label="Sem agente" value={unmonitored} accent={unmonitored > 0 ? 'text-amber-400' : 'text-[#737373]'} />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 stagger">
+        <StatCard label="Hosts no inventário" value={scoped.length} accent="" />
+        <StatCard label="Online agora" value={onlineCount} accent="text-ok" />
+        <StatCard label="Monitorados" value={monitoredCount} accent="text-info" />
+        <StatCard label="Sem agente" value={unmonitored} accent={unmonitored > 0 ? 'text-warn' : 'text-text-faint'} />
       </div>
 
-      <div className="glass-panel rounded-xl border border-white/5 bg-white/[0.02] flex flex-col flex-1 min-h-0 overflow-hidden">
-        <div className="p-4 border-b border-white/5 flex flex-col md:flex-row gap-4 justify-between items-center bg-black/20">
+      <div className="panel flex flex-col flex-1 min-h-0 overflow-hidden">
+        <div className="p-4 border-b border-line flex flex-col md:flex-row gap-4 justify-between items-center">
           <div className="relative w-full md:w-96">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-faint" size={16} strokeWidth={1.75} />
             <input
               type="text"
               placeholder="Buscar IP, nome ou MAC..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-[#0c0c0e] border border-white/10 rounded-lg pl-10 pr-4 py-2 text-sm text-gray-300 focus:outline-none focus:border-[#10b981]/50 transition-all placeholder:text-gray-600"
+              className="input-base w-full pl-9"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -380,10 +363,10 @@ const NetworkView = () => {
               <button
                 key={key}
                 onClick={() => setFilter(key)}
-                className={`px-3 py-2 rounded-lg text-xs font-bold tracking-widest uppercase transition-all border ${
+                className={`btn text-xs ${
                   filter === key
-                    ? 'bg-[#10b981]/20 border-[#10b981]/50 text-[#10b981]'
-                    : 'bg-black/40 border-white/10 text-[#737373] hover:text-white'
+                    ? 'border border-accent/50 bg-accent/10 text-accent'
+                    : 'btn-ghost text-text-mut'
                 }`}
               >
                 {label}
@@ -393,33 +376,33 @@ const NetworkView = () => {
         </div>
 
         <div className="flex-1 overflow-auto custom-scrollbar">
-          <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead className="bg-[#0c0c0e]/80 sticky top-0 z-10">
+          <table className="table-base whitespace-nowrap">
+            <thead className="bg-ink-900 sticky top-0 z-10">
               <tr>
-                <th className="py-3 px-4 font-medium text-gray-500">Estado</th>
-                <th className="py-3 px-4 font-medium text-gray-500">Endereço</th>
-                <th className="py-3 px-4 font-medium text-gray-500">Nome</th>
-                <th className="py-3 px-4 font-medium text-gray-500">Tipo provável</th>
-                <th className="py-3 px-4 font-medium text-gray-500">Local</th>
-                <th className="py-3 px-4 font-medium text-gray-500">MAC</th>
-                <th className="py-3 px-4 font-medium text-gray-500">Portas abertas</th>
-                <th className="py-3 px-4 font-medium text-gray-500">Monitorado</th>
-                {canOperate && <th className="py-3 px-4 font-medium text-gray-500 text-right">Ações</th>}
+                <th>Estado</th>
+                <th>Endereço</th>
+                <th>Nome</th>
+                <th>Tipo provável</th>
+                <th>Local</th>
+                <th>MAC</th>
+                <th>Portas abertas</th>
+                <th>Monitorado</th>
+                {canOperate && <th className="text-right">Ações</th>}
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody>
               {loading && (
-                <tr><td colSpan={columns} className="py-8 text-center text-gray-500">Carregando inventário...</td></tr>
+                <tr><td colSpan={columns} className="py-8 text-center text-text-faint">Carregando inventário...</td></tr>
               )}
               {!loading && inventory?.scan_active === false && (
                 <tr>
-                  <td colSpan={columns} className="py-8 text-center text-gray-500">
-                    Inventário desligado. Defina <code className="text-amber-300">DISCOVERY_CIDRS</code> no .env do backend.
+                  <td colSpan={columns} className="py-8 text-center text-text-faint">
+                    Inventário desligado. Defina <code className="text-warn">DISCOVERY_CIDRS</code> no .env do backend.
                   </td>
                 </tr>
               )}
               {!loading && inventory?.scan_active && hosts.length === 0 && (
-                <tr><td colSpan={columns} className="py-8 text-center text-gray-500">Nenhum host para os filtros informados.</td></tr>
+                <tr><td colSpan={columns} className="py-8 text-center text-text-faint">Nenhum host para os filtros informados.</td></tr>
               )}
               {hosts.map(host => {
                 const { label, Icon } = identify(host);
@@ -427,63 +410,60 @@ const NetworkView = () => {
                   .filter(Boolean)
                   .join(' · ');
                 return (
-                  <tr key={host.ip} className="hover:bg-white/[0.02] transition-colors">
-                    <td className="py-3 px-4">
-                      <span className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${host.online ? 'bg-[#10b981] animate-pulse' : 'bg-[#737373]'}`} />
-                        <span className={`text-[10px] font-bold tracking-widest uppercase ${host.online ? 'text-[#10b981]' : 'text-[#737373]'}`}>
-                          {host.online ? 'Online' : 'Offline'}
-                        </span>
+                  <tr key={host.ip}>
+                    <td>
+                      <span className={`badge ${host.online ? 'badge-ok' : 'badge-muted'}`}>
+                        {host.online ? 'Online' : 'Offline'}
                       </span>
                     </td>
-                    <td className="py-3 px-4 font-mono text-gray-200 selectable">{host.ip}</td>
-                    <td className="py-3 px-4 text-gray-300">{host.hostname || <span className="text-gray-600">—</span>}</td>
-                    <td className="py-3 px-4">
-                      <span className="inline-flex items-center gap-2 text-xs text-gray-400">
-                        <Icon size={14} className="text-[#737373]" />
+                    <td className="mono-data text-text-hi selectable">{host.ip}</td>
+                    <td className="text-text">{host.hostname || <span className="text-text-faint">—</span>}</td>
+                    <td>
+                      <span className="inline-flex items-center gap-2 text-xs text-text-mut">
+                        <Icon size={14} strokeWidth={1.75} className="text-text-faint" />
                         {DEVICE_TYPES.find((t) => t.value === host.device_type)?.label ?? label}
                         {host.device_type_locked && (
                           <span
                             title="Tipo fixado manualmente; a varredura não altera"
-                            className="inline-flex text-[#10b981]/70"
+                            className="inline-flex text-accent/80"
                           >
                             <Lock size={11} aria-label="Tipo fixado manualmente" />
                           </span>
                         )}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-xs text-gray-400">
-                      {local || <span className="text-gray-600">—</span>}
+                    <td className="text-xs text-text-mut">
+                      {local || <span className="text-text-faint">—</span>}
                     </td>
-                    <td className="py-3 px-4 font-mono text-xs text-gray-500 selectable">{host.mac || '—'}</td>
-                    <td className="py-3 px-4">
+                    <td className="mono-data text-xs text-text-faint selectable">{host.mac || '—'}</td>
+                    <td>
                       <div className="flex gap-1 flex-wrap">
                         {host.open_ports.map(port => (
-                          <span key={port} className="bg-white/5 text-gray-400 px-1.5 py-0.5 rounded text-[10px] font-mono border border-white/5">
+                          <span key={port} className="mono-data bg-ink-800 text-text-mut px-1.5 py-0.5 rounded text-[10px] border border-line">
                             {port}
                           </span>
                         ))}
                       </div>
                     </td>
-                    <td className="py-3 px-4">
+                    <td>
                       {host.monitored ? (
-                        <span className="text-emerald-400 text-xs bg-emerald-400/10 px-2 py-1 rounded border border-emerald-400/20">
+                        <span className="badge badge-ok">
                           {host.kind === 'agent' ? 'Agente' : 'SSH'}
                         </span>
                       ) : (
-                        <span className="text-amber-400/80 text-xs bg-amber-400/10 px-2 py-1 rounded border border-amber-400/20">
+                        <span className="badge badge-warn">
                           Sem agente
                         </span>
                       )}
                     </td>
                     {canOperate && (
-                      <td className="py-3 px-4 text-right">
+                      <td className="text-right">
                         <button
                           onClick={() => setEditing(host)}
                           title="Editar cadastro"
-                          className="p-1.5 text-gray-400 hover:text-[#10b981] hover:bg-[#10b981]/10 rounded transition-colors"
+                          className="p-1.5 text-text-mut hover:text-accent hover:bg-accent/10 rounded-ctrl transition-colors"
                         >
-                          <Pencil size={14} />
+                          <Pencil size={14} strokeWidth={1.75} />
                         </button>
                       </td>
                     )}
@@ -494,10 +474,10 @@ const NetworkView = () => {
           </table>
         </div>
 
-        <div className="px-4 py-2 border-t border-white/5 text-[10px] text-[#737373] uppercase tracking-widest flex items-center gap-4">
-          {inventory?.last_scan && <span>Última varredura {relativeTime(inventory.last_scan)}</span>}
+        <div className="px-4 py-2.5 border-t border-line flex items-center gap-4">
+          {inventory?.last_scan && <span className="eyebrow">Última varredura {relativeTime(inventory.last_scan)}</span>}
           {sites.length > 0 && (
-            <span className="flex items-center gap-1">
+            <span className="eyebrow flex items-center gap-1.5">
               <Globe size={10} />
               {sites.length} unidade(s)
             </span>

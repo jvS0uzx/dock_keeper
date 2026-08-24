@@ -57,6 +57,9 @@ type LbStat struct {
 	ServerName    string `json:"server_name"`
 	Status        string `json:"status"`
 	RequestsCount int    `json:"requests_count"`
+	// Qual balanceador reportou a linha. Vazio em métrica anterior à coluna
+	// server_id; o frontend agrupa por este campo para desenhar um nó por LB.
+	ServerID string `json:"server_id"`
 }
 
 type LiveResponse struct {
@@ -184,9 +187,9 @@ func liveMetricsHandler(w http.ResponseWriter, r *http.Request) {
 	// unidade, a única saída era negar o agregado inteiro a quem é restrito — as
 	// duas telas contavam histórias diferentes sobre o mesmo parque.
 	lbTx := scope.apply(database.DB.Model(&database.MetricLoadBalancer{})).
-		Select("upstream_addr, server_name, status, SUM(requests_count) AS requests_count").
+		Select("upstream_addr, server_name, status, SUM(requests_count) AS requests_count, COALESCE(server_id::text, '') AS server_id").
 		Where("timestamp >= NOW() - INTERVAL '" + lbWindow + "'").
-		Group("upstream_addr, server_name, status")
+		Group("upstream_addr, server_name, status, COALESCE(server_id::text, '')")
 	if err := lbTx.Scan(&res.LoadBalancing).Error; err != nil {
 		log.Printf("[API] erro ao agregar load balancer: %v", err)
 	}
