@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Clock, Filter, Globe, Server, Database, Activity, HardDrive } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Clock, Filter, Globe, Server, Database, Activity, ArrowRight, HardDrive } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { api, type ContainerLiveStat, type HistoryRange, type LbStat, type ServerLiveStat } from '../lib/api';
 import { formatBytes, formatGB } from '../lib/format';
@@ -78,7 +78,7 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
   const nodes = useMemo(() => deriveUpstreams(stats, TARGET_IPS), [stats]);
   const total = totalRequests(stats);
 
-  // Um nó por balanceador que reportou métrica na janela. server_id zero é
+  // Um nó por balanceador que reportou métrica na janela. server_id vazio é
   // métrica anterior à coluna e cai num LB único — a topologia com N
   // balanceadores e M upstreams se desenha sozinha a partir do dado.
   const lbs = useMemo(() => {
@@ -100,11 +100,38 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
       .map((lb) => ({ ...lb, label: name(lb.id) }));
   }, [stats, servers]);
 
-  // Linhas e caixas usam a MESMA distribuição vertical: a aresta termina no
-  // centro exato da caixa, com qualquer quantidade de nós de cada lado.
+  // O SVG desenha em pixels medidos do container — nada de viewBox esticado,
+  // que transformava o ponto de luz numa elipse borrada. Linhas e caixas usam
+  // a MESMA distribuição vertical, então a aresta termina no centro exato da
+  // caixa com qualquer quantidade de nós de cada lado.
+  const areaRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() =>
+      setSize({ w: el.clientWidth, h: el.clientHeight }),
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   const rowY = (i: number, n: number) => ((i + 1) / (n + 1)) * 100;
   const upIndex = new Map(nodes.map((n, i) => [n.addr, i]));
   const height = Math.max(208, Math.max(lbs.length, nodes.length, 1) * 76);
+
+  const { w, h } = size;
+  // Âncoras em pixel: borda direita do círculo de entrada, laterais da caixa
+  // do LB e borda esquerda do cartão de upstream.
+  const xIn = 62;
+  const xLbIn = w / 2 - 34;
+  const xLbOut = w / 2 + 34;
+  const xUp = w - 206;
+  const py = (pct: number) => (pct / 100) * h;
+  const curva = (x0: number, y0: number, x1: number, y1: number) => {
+    const cx = (x1 - x0) * 0.45;
+    return `M ${x0},${y0} C ${x0 + cx},${y0} ${x1 - cx},${y1} ${x1},${y1}`;
+  };
 
   return (
     <div className="panel p-6 mb-6 overflow-hidden relative">
@@ -119,77 +146,84 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
         </span>
       </div>
 
-      <div className="relative w-full max-w-4xl mx-auto" style={{ height }}>
-        <svg
-          className="absolute inset-0 w-full h-full overflow-visible z-0"
-          viewBox="0 0 100 100"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          {lbs.map((lb, li) => {
-            const yLb = rowY(li, lbs.length);
-            return (
-              <g key={`lb-${lb.id}`}>
+      <div ref={areaRef} className="relative w-full max-w-4xl mx-auto" style={{ height }}>
+        {w > 0 && (
+          <svg
+            className="absolute inset-0 z-0 overflow-visible"
+            width={w}
+            height={h}
+            viewBox={`0 0 ${w} ${h}`}
+            aria-hidden="true"
+          >
+            {lbs.map((lb, li) => {
+              const yLb = py(rowY(li, lbs.length));
+              return (
+                <g key={`lb-${lb.id}`}>
+                  <path
+                    id={`path-in-${li}`}
+                    d={curva(xIn, py(50), xLbIn, yLb)}
+                    fill="none"
+                    stroke={lb.reqs > 0 ? 'var(--color-accent)' : 'var(--color-line)'}
+                    strokeOpacity={lb.reqs > 0 ? 0.45 : 1}
+                    strokeWidth="1.25"
+                  />
+                  {lb.reqs > 0 && (
+                    <circle r="3" fill="var(--color-accent)">
+                      <animateMotion dur="1.1s" repeatCount="indefinite">
+                        <mpath href={`#path-in-${li}`} />
+                      </animateMotion>
+                    </circle>
+                  )}
+                  {[...lb.ups.entries()].map(([addr, reqs]) => {
+                    const ui = upIndex.get(addr);
+                    if (ui === undefined) return null;
+                    const yUp = py(rowY(ui, nodes.length));
+                    return (
+                      <g key={`edge-${lb.id}-${addr}`}>
+                        <path
+                          id={`edge-${li}-${ui}`}
+                          d={curva(xLbOut, yLb, xUp, yUp)}
+                          fill="none"
+                          stroke={reqs > 0 ? 'var(--color-accent)' : 'var(--color-line)'}
+                          strokeOpacity={reqs > 0 ? 0.45 : 1}
+                          strokeWidth="1.25"
+                        />
+                        {reqs > 0 &&
+                          Array.from({ length: Math.min(reqs, 5) }).map((_, i) => (
+                            <circle key={`p-${li}-${ui}-${i}`} r="3" fill="var(--color-accent)">
+                              <animateMotion dur="1.5s" begin={`${i * 0.3}s`} repeatCount="indefinite">
+                                <mpath href={`#edge-${li}-${ui}`} />
+                              </animateMotion>
+                            </circle>
+                          ))}
+                      </g>
+                    );
+                  })}
+                </g>
+              );
+            })}
+            {nodes.map((node, ui) => {
+              // Upstream conhecido sem aresta na janela: linha apagada até o
+              // primeiro LB, para o caminho ocioso continuar visível.
+              if (lbs.some((lb) => lb.ups.has(node.addr))) return null;
+              const yUp = py(rowY(ui, nodes.length));
+              const yLb = py(rowY(0, lbs.length));
+              return (
                 <path
-                  id={`path-in-${lb.id}`}
-                  d={`M 8,50 C 22,50 26,${yLb} 44,${yLb}`}
+                  key={`idle-${node.addr}`}
+                  d={curva(xLbOut, yLb, xUp, yUp)}
                   fill="none"
-                  stroke={lb.reqs > 0 ? 'var(--color-accent)' : 'var(--color-line)'}
-                  strokeOpacity={lb.reqs > 0 ? 0.35 : 1}
-                  strokeWidth="1"
+                  stroke="var(--color-line)"
+                  strokeWidth="1.25"
                 />
-                {lb.reqs > 0 && (
-                  <circle r="2" fill="var(--color-accent)">
-                    <animateMotion dur="1.2s" repeatCount="indefinite">
-                      <mpath href={`#path-in-${lb.id}`} />
-                    </animateMotion>
-                  </circle>
-                )}
-                {[...lb.ups.entries()].map(([addr, reqs]) => {
-                  const ui = upIndex.get(addr);
-                  if (ui === undefined) return null;
-                  const yUp = rowY(ui, nodes.length);
-                  return (
-                    <g key={`edge-${lb.id}-${addr}`}>
-                      <path
-                        id={`edge-${lb.id}-${ui}`}
-                        d={`M 56,${yLb} C 66,${yLb} 68,${yUp} 76,${yUp}`}
-                        fill="none"
-                        stroke={reqs > 0 ? 'var(--color-accent)' : 'var(--color-line)'}
-                        strokeOpacity={reqs > 0 ? 0.35 : 1}
-                        strokeWidth="1"
-                      />
-                      {reqs > 0 &&
-                        Array.from({ length: Math.min(reqs, 4) }).map((_, i) => (
-                          <circle key={`p-${lb.id}-${ui}-${i}`} r="2" fill="var(--color-accent)">
-                            <animateMotion dur="1.5s" begin={`${i * 0.35}s`} repeatCount="indefinite">
-                              <mpath href={`#edge-${lb.id}-${ui}`} />
-                            </animateMotion>
-                          </circle>
-                        ))}
-                    </g>
-                  );
-                })}
-              </g>
-            );
-          })}
-          {nodes.map((node, ui) => {
-            // Upstream conhecido sem aresta na janela: linha apagada até o
-            // primeiro LB, para o caminho ocioso continuar visível.
-            if (lbs.some((lb) => lb.ups.has(node.addr))) return null;
-            const yUp = rowY(ui, nodes.length);
-            const yLb = rowY(0, lbs.length);
-            return (
-              <path
-                key={`idle-${node.addr}`}
-                d={`M 56,${yLb} C 66,${yLb} 68,${yUp} 76,${yUp}`}
-                fill="none"
-                stroke="var(--color-line)"
-                strokeWidth="1"
-              />
-            );
-          })}
-        </svg>
+              );
+            })}
+          </svg>
+        )}
+
+        <div className="absolute left-1/4 -translate-x-1/2 top-0 z-10 bg-ink-950 px-2 py-0.5 rounded-full border border-line text-[10px] text-text-mut mono-data flex items-center gap-1">
+          {total} <ArrowRight size={12} strokeWidth={1.75} className="text-accent" />
+        </div>
 
         <div
           className="absolute z-10 flex flex-col items-center left-0"
