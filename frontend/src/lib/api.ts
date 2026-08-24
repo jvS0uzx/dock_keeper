@@ -59,6 +59,8 @@ export interface LbStat {
   server_name: string;
   status: string;
   requests_count: number;
+  /** UUID do balanceador que reportou a linha; vazio em métrica antiga. */
+  server_id?: string;
 }
 
 export interface LiveMetrics {

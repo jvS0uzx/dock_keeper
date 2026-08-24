@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Clock, Filter, Globe, Server, Database, Activity, ArrowRight, HardDrive } from 'lucide-react';
+import { Clock, Filter, Globe, Server, Database, Activity, HardDrive } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { api, type ContainerLiveStat, type HistoryRange, type LbStat, type ServerLiveStat } from '../lib/api';
 import { formatBytes, formatGB } from '../lib/format';
@@ -25,7 +25,6 @@ const TARGET_IPS: string[] = (import.meta.env.VITE_TARGET_VPS_IPS || '')
 const LB_IP: string = import.meta.env.VITE_LB_IP || '';
 
 // Distribui os nós de upstream verticalmente no diagrama de fluxo (em %).
-const nodeY = (index: number, total: number) => (total === 1 ? 50 : 15 + index * (70 / (total - 1)));
 
 const gaugeVar = (value: number) => {
   if (value >= USAGE_CRITICAL) return 'var(--color-crit)';
@@ -73,11 +72,39 @@ const Gauge = ({ value, title }: { value: number; title: string }) => {
   );
 };
 
-const LoadBalancerFlow = ({ stats }: { stats: LbStat[] }) => {
+const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: ServerLiveStat[] }) => {
   // Os nós vêm do que o Nginx reporta, não da lista do .env: se os endereços
   // divergirem (troca de rede, VPN), o diagrama continua mostrando a verdade.
   const nodes = useMemo(() => deriveUpstreams(stats, TARGET_IPS), [stats]);
   const total = totalRequests(stats);
+
+  // Um nó por balanceador que reportou métrica na janela. server_id zero é
+  // métrica anterior à coluna e cai num LB único — a topologia com N
+  // balanceadores e M upstreams se desenha sozinha a partir do dado.
+  const lbs = useMemo(() => {
+    const byId = new Map<string, { id: string; reqs: number; ups: Map<string, number> }>();
+    for (const stat of stats) {
+      const id = stat.server_id ?? '';
+      const lb = byId.get(id) ?? { id, reqs: 0, ups: new Map<string, number>() };
+      lb.reqs += stat.requests_count;
+      for (const addr of splitUpstreams(stat.upstream_addr)) {
+        lb.ups.set(addr, (lb.ups.get(addr) ?? 0) + stat.requests_count);
+      }
+      byId.set(id, lb);
+    }
+    if (byId.size === 0) byId.set('', { id: '', reqs: 0, ups: new Map() });
+    const name = (id: string) =>
+      id === '' ? 'Load Balancer' : (servers.find((s) => s.id === id)?.name ?? 'Balanceador');
+    return [...byId.values()]
+      .sort((a, b) => b.reqs - a.reqs || a.id.localeCompare(b.id))
+      .map((lb) => ({ ...lb, label: name(lb.id) }));
+  }, [stats, servers]);
+
+  // Linhas e caixas usam a MESMA distribuição vertical: a aresta termina no
+  // centro exato da caixa, com qualquer quantidade de nós de cada lado.
+  const rowY = (i: number, n: number) => ((i + 1) / (n + 1)) * 100;
+  const upIndex = new Map(nodes.map((n, i) => [n.addr, i]));
+  const height = Math.max(208, Math.max(lbs.length, nodes.length, 1) * 76);
 
   return (
     <div className="panel p-6 mb-6 overflow-hidden relative">
@@ -92,104 +119,131 @@ const LoadBalancerFlow = ({ stats }: { stats: LbStat[] }) => {
         </span>
       </div>
 
-      <div className="relative w-full max-w-4xl mx-auto flex items-center justify-between min-h-[192px] md:px-4">
-        <div className="z-10 flex flex-col items-center justify-center min-w-[80px]">
-          <div className="w-14 h-14 rounded-full bg-ink-800 border border-line flex items-center justify-center transition-colors hover:border-line-hi">
+      <div className="relative w-full max-w-4xl mx-auto" style={{ height }}>
+        <svg
+          className="absolute inset-0 w-full h-full overflow-visible z-0"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          {lbs.map((lb, li) => {
+            const yLb = rowY(li, lbs.length);
+            return (
+              <g key={`lb-${lb.id}`}>
+                <path
+                  id={`path-in-${lb.id}`}
+                  d={`M 8,50 C 22,50 26,${yLb} 44,${yLb}`}
+                  fill="none"
+                  stroke={lb.reqs > 0 ? 'var(--color-accent)' : 'var(--color-line)'}
+                  strokeOpacity={lb.reqs > 0 ? 0.35 : 1}
+                  strokeWidth="1"
+                />
+                {lb.reqs > 0 && (
+                  <circle r="2" fill="var(--color-accent)">
+                    <animateMotion dur="1.2s" repeatCount="indefinite">
+                      <mpath href={`#path-in-${lb.id}`} />
+                    </animateMotion>
+                  </circle>
+                )}
+                {[...lb.ups.entries()].map(([addr, reqs]) => {
+                  const ui = upIndex.get(addr);
+                  if (ui === undefined) return null;
+                  const yUp = rowY(ui, nodes.length);
+                  return (
+                    <g key={`edge-${lb.id}-${addr}`}>
+                      <path
+                        id={`edge-${lb.id}-${ui}`}
+                        d={`M 56,${yLb} C 66,${yLb} 68,${yUp} 76,${yUp}`}
+                        fill="none"
+                        stroke={reqs > 0 ? 'var(--color-accent)' : 'var(--color-line)'}
+                        strokeOpacity={reqs > 0 ? 0.35 : 1}
+                        strokeWidth="1"
+                      />
+                      {reqs > 0 &&
+                        Array.from({ length: Math.min(reqs, 4) }).map((_, i) => (
+                          <circle key={`p-${lb.id}-${ui}-${i}`} r="2" fill="var(--color-accent)">
+                            <animateMotion dur="1.5s" begin={`${i * 0.35}s`} repeatCount="indefinite">
+                              <mpath href={`#edge-${lb.id}-${ui}`} />
+                            </animateMotion>
+                          </circle>
+                        ))}
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          })}
+          {nodes.map((node, ui) => {
+            // Upstream conhecido sem aresta na janela: linha apagada até o
+            // primeiro LB, para o caminho ocioso continuar visível.
+            if (lbs.some((lb) => lb.ups.has(node.addr))) return null;
+            const yUp = rowY(ui, nodes.length);
+            const yLb = rowY(0, lbs.length);
+            return (
+              <path
+                key={`idle-${node.addr}`}
+                d={`M 56,${yLb} C 66,${yLb} 68,${yUp} 76,${yUp}`}
+                fill="none"
+                stroke="var(--color-line)"
+                strokeWidth="1"
+              />
+            );
+          })}
+        </svg>
+
+        <div
+          className="absolute z-10 flex flex-col items-center left-0"
+          style={{ top: '50%', transform: 'translateY(-50%)' }}
+        >
+          <div className="w-14 h-14 rounded-full bg-ink-800 border border-line flex items-center justify-center">
             <Globe size={22} strokeWidth={1.75} className="text-text-mut" />
           </div>
-          <span className="eyebrow mt-3">Cloudflare</span>
+          <span className="eyebrow mt-2">Internet</span>
         </div>
 
-        <div className="flex-1 relative flex items-center -mx-4 z-0">
-          <svg className="w-full h-12 overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            <path id="path-in" d="M 0,50 L 100,50" fill="none" stroke="var(--color-line)" strokeWidth="1" />
-            {total > 0 && (
-              <circle r="2" fill="var(--color-accent)">
-                <animateMotion dur="1s" repeatCount="indefinite">
-                  <mpath href="#path-in" />
-                </animateMotion>
-              </circle>
-            )}
-          </svg>
-          <div className="absolute left-1/2 -translate-x-1/2 -top-4 bg-ink-950 px-2 py-0.5 rounded-full border border-line text-[10px] text-text-mut mono-data flex items-center gap-1">
-            {total} <ArrowRight size={12} strokeWidth={1.75} className="text-accent" />
-          </div>
-        </div>
-
-        <div className="z-10 flex flex-col items-center justify-center min-w-[80px]">
+        {lbs.map((lb, li) => (
           <div
-            className={`w-16 h-16 rounded-card bg-ink-800 border flex items-center justify-center transition-colors ${
-              total > 0 ? 'border-accent/40' : 'border-line'
-            }`}
+            key={`lb-box-${lb.id}`}
+            className="absolute z-10 left-1/2 flex flex-col items-center"
+            style={{ top: `${rowY(li, lbs.length)}%`, transform: 'translate(-50%, -50%)' }}
           >
-            <Server size={26} strokeWidth={1.75} className={total > 0 ? 'text-accent' : 'text-text-mut'} />
+            <div
+              className={`w-14 h-14 rounded-card bg-ink-800 border flex items-center justify-center transition-colors ${
+                lb.reqs > 0 ? 'border-accent/40' : 'border-line'
+              }`}
+            >
+              <Server size={24} strokeWidth={1.75} className={lb.reqs > 0 ? 'text-accent' : 'text-text-mut'} />
+            </div>
+            <span className="eyebrow mt-2 max-w-[150px] truncate" title={lb.label}>
+              {lb.label}
+            </span>
           </div>
-          <span className="eyebrow mt-3">Load Balancer</span>
-        </div>
+        ))}
 
-        <div className="flex-1 relative -mx-4 h-full z-0 min-h-[192px]">
-          <svg className="absolute inset-0 w-full h-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            {nodes.map((node, idx) => {
-              const y = nodeY(idx, nodes.length);
-              return (
-                <g key={`path-${node.addr}`}>
-                  <path
-                    id={`path-v-${idx}`}
-                    d={`M 0,50 C 40,50 40,${y} 100,${y}`}
-                    fill="none"
-                    stroke={node.reqs > 0 ? 'var(--color-accent)' : 'var(--color-line)'}
-                    strokeOpacity={node.reqs > 0 ? 0.35 : 1}
-                    strokeWidth="1"
-                  />
-                  {node.reqs > 0 &&
-                    Array.from({ length: Math.min(node.reqs, 5) }).map((_, i) => (
-                      <circle key={`v-${idx}-${i}`} r="2" fill="var(--color-accent)">
-                        <animateMotion dur="1.5s" begin={`${i * 0.3}s`} repeatCount="indefinite">
-                          <mpath href={`#path-v-${idx}`} />
-                        </animateMotion>
-                      </circle>
-                    ))}
-                </g>
-              );
-            })}
-          </svg>
-
-          {nodes.map((node, idx) => (
-            <div
-              key={`badge-${node.addr}`}
-              className={`absolute right-[15%] bg-ink-950 px-2 py-0.5 rounded-full border text-[10px] mono-data translate-y-[-50%] ${
-                node.reqs > 0 ? 'border-accent/30 text-accent' : 'border-line text-text-faint'
-              }`}
-              style={{ top: `${nodeY(idx, nodes.length)}%` }}
-            >
-              {node.reqs} req
+        {nodes.map((node, ui) => (
+          <div
+            key={node.addr}
+            className={`absolute z-10 right-0 w-[200px] panel panel-hover p-3 flex items-center gap-3 h-[60px] ${
+              node.reqs > 0 ? 'border-accent/30' : ''
+            }`}
+            style={{ top: `${rowY(ui, nodes.length)}%`, transform: 'translateY(-50%)' }}
+            title={node.reqs > 0 ? `${node.reqs} req / 5s` : 'Sem tráfego na janela'}
+          >
+            <div className="w-9 h-9 rounded-ctrl bg-ink-800 flex items-center justify-center flex-shrink-0">
+              <Database
+                size={16}
+                strokeWidth={1.75}
+                className={node.reqs > 0 ? 'text-accent' : 'text-text-faint'}
+              />
             </div>
-          ))}
-        </div>
-
-        <div className="z-10 flex flex-col justify-around h-full py-[12px] min-w-[160px] md:min-w-[200px] gap-3">
-          {nodes.map((node, idx) => (
-            <div
-              key={node.addr}
-              className={`panel panel-hover w-full p-3 flex items-center gap-4 h-[64px] ${
-                node.reqs > 0 ? 'border-accent/30' : ''
-              }`}
-              title={node.reqs > 0 ? `${node.reqs} req / 5s` : 'Sem tráfego na janela'}
-            >
-              <div className="w-10 h-10 rounded-ctrl bg-ink-800 flex items-center justify-center flex-shrink-0">
-                <Database
-                  size={18}
-                  strokeWidth={1.75}
-                  className={node.reqs > 0 ? 'text-accent' : 'text-text-faint'}
-                />
-              </div>
-              <div className="flex flex-col">
-                <span className="eyebrow">Node {idx + 1}</span>
-                <span className="text-[11px] text-text mono-data mt-0.5 selectable">{node.addr}</span>
-              </div>
+            <div className="flex flex-col min-w-0">
+              <span className="text-[11px] text-text mono-data selectable truncate">{node.addr}</span>
+              <span className={`text-[10px] mono-data ${node.reqs > 0 ? 'text-accent' : 'text-text-faint'}`}>
+                {node.reqs} req
+              </span>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -501,7 +555,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {selectedServerId === 'all' && <LoadBalancerFlow stats={loadBalancing} />}
+          {selectedServerId === 'all' && <LoadBalancerFlow stats={loadBalancing} servers={servers} />}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-6 h-56 stagger">
             <Gauge value={cpuPercent} title="CPU do host" />
