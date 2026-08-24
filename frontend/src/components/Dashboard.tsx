@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Clock, Filter, Globe, Server, Database, Activity, ArrowRight, HardDrive } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { api, type ContainerLiveStat, type HistoryRange, type LbStat, type ServerLiveStat } from '../lib/api';
 import { formatBytes, formatGB } from '../lib/format';
 import { deriveUpstreams, splitUpstreams, totalRequests, type UpstreamNode } from '../lib/upstream';
@@ -11,10 +11,6 @@ const HISTORY_POLL_MS = 30000;
 
 const ERROR_STATUSES = ['500', '502', '503', '504', '400', '404'];
 
-// Mesmos limiares das telas de estação e detalhe, para o dashboard não pintar
-// de verde o que a lista pinta de âmbar.
-const USAGE_WARN = 75;
-const USAGE_CRITICAL = 90;
 
 // IPs das VPS de destino do Load Balancer. Vem do .env porque muda por ambiente.
 const TARGET_IPS: string[] = (import.meta.env.VITE_TARGET_VPS_IPS || '')
@@ -24,47 +20,47 @@ const TARGET_IPS: string[] = (import.meta.env.VITE_TARGET_VPS_IPS || '')
 
 const LB_IP: string = import.meta.env.VITE_LB_IP || '';
 
-// Distribui os nós de upstream verticalmente no diagrama de fluxo (em %).
-
-const gaugeVar = (value: number) => {
-  if (value >= USAGE_CRITICAL) return 'var(--color-crit)';
-  if (value >= USAGE_WARN) return 'var(--color-warn)';
-  return 'var(--color-ok)';
-};
-
 const Gauge = ({ value, title }: { value: number; title: string }) => {
   const clamped = Math.max(0, Math.min(value, 100));
-  const color = gaugeVar(clamped);
-  const data = [
-    { name: 'value', value: clamped },
-    { name: 'empty', value: 100 - clamped },
-  ];
+  // Arco SVG com um único degradê verde -> amarelo -> vermelho ao longo do
+  // percurso: o preenchimento revela a faixa por strokeDashoffset, então o
+  // ponteiro "viaja" pelas cores com transição suave em vez de trocar de cor
+  // por degrau de limiar.
+  const R = 78;
+  const comprimento = Math.PI * R;
+  const off = comprimento * (1 - clamped / 100);
+  const gradId = `gauge-grad-${title.replace(/\W+/g, '-')}`;
   return (
     <div className="stat-card flex flex-col items-center justify-center relative h-full">
       <span className="eyebrow absolute top-4">{title}</span>
-      <div className="w-full h-32 mt-6 relative">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={data}
-              cx="50%"
-              cy="100%"
-              startAngle={180}
-              endAngle={0}
-              innerRadius={65}
-              outerRadius={85}
-              paddingAngle={0}
-              dataKey="value"
-              stroke="none"
-              animationDuration={500}
-              cornerRadius={4}
-            >
-              <Cell fill={color} />
-              <Cell fill="var(--color-ink-750)" />
-            </Pie>
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="absolute bottom-0 w-full flex justify-center">
+      <div className="relative mt-6">
+        <svg width="200" height="110" viewBox="0 0 200 110" aria-hidden="true">
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="var(--color-ok)" />
+              <stop offset="55%" stopColor="var(--color-warn)" />
+              <stop offset="100%" stopColor="var(--color-crit)" />
+            </linearGradient>
+          </defs>
+          <path
+            d={`M ${100 - R},96 A ${R},${R} 0 0 1 ${100 + R},96`}
+            fill="none"
+            stroke="var(--color-ink-750)"
+            strokeWidth="14"
+            strokeLinecap="round"
+          />
+          <path
+            d={`M ${100 - R},96 A ${R},${R} 0 0 1 ${100 + R},96`}
+            fill="none"
+            stroke={`url(#${gradId})`}
+            strokeWidth="14"
+            strokeLinecap="round"
+            strokeDasharray={comprimento}
+            strokeDashoffset={off}
+            style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.4, 0, 0.2, 1)' }}
+          />
+        </svg>
+        <div className="absolute inset-x-0 bottom-0 flex justify-center">
           <span className="stat-value text-3xl">{value.toFixed(1)}%</span>
         </div>
       </div>
@@ -170,7 +166,7 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
                     id={`path-in-${li}`}
                     d={curva(xIn, py(50), xLbIn, yLb)}
                     fill="none"
-                    stroke={lb.reqs > 0 ? TRACO_ATIVO : 'var(--color-line)'}
+                    stroke={TRACO_ATIVO}
                     strokeWidth="1.25"
                   />
                   {lb.reqs > 0 && (
@@ -190,7 +186,7 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
                           id={`edge-${li}-${ui}`}
                           d={curva(xLbOut, yLb, xUp, yUp)}
                           fill="none"
-                          stroke={reqs > 0 ? TRACO_ATIVO : 'var(--color-line)'}
+                          stroke={TRACO_ATIVO}
                           strokeWidth="1.25"
                         />
                         {reqs > 0 &&
@@ -218,7 +214,7 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
                   key={`idle-${node.addr}`}
                   d={curva(xLbOut, yLb, xUp, yUp)}
                   fill="none"
-                  stroke="var(--color-line)"
+                  stroke={TRACO_ATIVO}
                   strokeWidth="1.25"
                 />
               );
