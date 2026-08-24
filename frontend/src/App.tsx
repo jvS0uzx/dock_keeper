@@ -206,11 +206,14 @@ function App() {
       <SessionContext.Provider value={sessionState}>
         <SiteScopeContext.Provider value={siteScope}>
           <NavigationContext.Provider value={navigation}>
-            <div className="flex h-screen w-screen overflow-hidden bg-[#050505] font-sans text-white">
+            <div className="flex h-screen w-screen overflow-hidden bg-ink-950 font-sans text-text">
               <Sidebar activeTab={detail ? '' : effectiveTab} setActiveTab={openTab} panel={panel} setPanel={setPanel} />
-              <main className="relative flex-1 overflow-y-auto bg-[#050505]">
-                <Suspense fallback={<div className="p-8 text-sm text-[#737373]">Carregando tela...</div>}>
-                  {content}
+              <main className="relative flex-1 overflow-y-auto bg-ink-950">
+                <Suspense fallback={<div className="p-8 text-sm text-text-mut">Carregando tela...</div>}>
+                  {/* A key reinicia a animação de entrada a cada troca de tela. */}
+                  <div key={detail ? `${detail.kind}-${detail.id}` : effectiveTab} className="anim-rise">
+                    {content}
+                  </div>
                 </Suspense>
               </main>
             </div>

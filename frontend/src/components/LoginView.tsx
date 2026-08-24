@@ -47,29 +47,27 @@ const LoginView = ({ onLogin, notice }: LoginViewProps) => {
   };
 
   return (
-    <div className="h-screen w-screen flex items-center justify-center bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1a1c23] via-[#050505] to-[#000000] text-white font-sans p-4">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#10b981]/10 to-[#0c0c0e] border border-[#10b981]/40 flex items-center justify-center shadow-[0_0_30px_rgba(16,185,129,0.15)] mb-4">
-            <Activity className="w-7 h-7 text-[#10b981]" strokeWidth={1.5} />
+    <div className="flex h-screen w-screen items-center justify-center bg-ink-950 p-4 text-text">
+      <div className="anim-rise w-full max-w-sm">
+        <div className="mb-8 flex flex-col items-center">
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-card border border-line bg-ink-800 shadow-panel">
+            <Activity size={22} strokeWidth={1.75} className="text-accent" />
           </div>
-          <h1 className="text-2xl font-bold tracking-widest uppercase drop-shadow-md">
-            VD <span className="text-[#10b981]">Stats</span>
+          <h1 className="text-xl font-bold tracking-tight text-text-hi">
+            Dock<span className="text-accent">Keeper</span>
           </h1>
-          <p className="text-[10px] text-[#737373] mt-1 tracking-widest uppercase">
-            Monitoramento de infraestrutura
-          </p>
+          <p className="mt-1 text-xs text-text-mut">Monitoramento de infraestrutura</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="glass-panel rounded-xl p-6 flex flex-col gap-4">
+        <form onSubmit={handleSubmit} className="panel flex flex-col gap-4 p-6">
           {notice && (
-            <p className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">
+            <p className="rounded-ctrl border border-warn/25 bg-warn/10 px-3 py-2 text-xs text-warn">
               {notice}
             </p>
           )}
 
           <div>
-            <label htmlFor="login-username" className="text-xs text-[#737373] block mb-1">
+            <label htmlFor="login-username" className="eyebrow mb-1.5 block">
               Usuário
             </label>
             <input
@@ -80,12 +78,12 @@ const LoginView = ({ onLogin, notice }: LoginViewProps) => {
               autoComplete="username"
               autoFocus
               required
-              className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors"
+              className="input-base w-full"
             />
           </div>
 
           <div>
-            <label htmlFor="login-password" className="text-xs text-[#737373] block mb-1">
+            <label htmlFor="login-password" className="eyebrow mb-1.5 block">
               Senha
             </label>
             <input
@@ -95,12 +93,15 @@ const LoginView = ({ onLogin, notice }: LoginViewProps) => {
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
               required
-              className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors"
+              className="input-base w-full"
             />
           </div>
 
           {error && (
-            <p role="alert" className="text-xs text-rose-400 bg-rose-400/10 border border-rose-400/20 rounded-lg px-3 py-2">
+            <p
+              role="alert"
+              className="rounded-ctrl border border-crit/25 bg-crit/10 px-3 py-2 text-xs text-crit"
+            >
               {error}
             </p>
           )}
@@ -108,14 +109,18 @@ const LoginView = ({ onLogin, notice }: LoginViewProps) => {
           <button
             type="submit"
             disabled={sending || !username.trim() || !password}
-            className="mt-2 flex items-center justify-center gap-2 bg-[#10b981]/20 hover:bg-[#10b981]/30 border border-[#10b981]/50 text-[#10b981] font-bold text-xs uppercase tracking-widest py-3 rounded-lg transition-all disabled:opacity-40"
+            className="btn btn-primary mt-2 w-full disabled:opacity-40"
           >
-            {sending ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
+            {sending ? (
+              <Loader2 size={14} strokeWidth={1.75} className="animate-spin" />
+            ) : (
+              <LogIn size={14} strokeWidth={1.75} />
+            )}
             {sending ? 'Entrando...' : 'Entrar'}
           </button>
         </form>
 
-        <p className="text-[10px] text-center text-[#737373] mt-6 tracking-wider uppercase">
+        <p className="mt-6 text-center text-xs text-text-faint">
           Acesso restrito. Fale com o administrador para obter uma conta.
         </p>
       </div>

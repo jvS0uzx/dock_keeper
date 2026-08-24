@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
-import { BellRing, Trash2, Plus } from 'lucide-react';
+import { Trash2, Plus } from 'lucide-react';
 import { api, type AlertRuleRecord as AlertRule } from '../lib/api';
 import { relativeTime } from '../lib/format';
 import Select, { type SelectOption } from './ui/Select';
@@ -157,41 +157,37 @@ const AlertRulesView = () => {
     return servers.find((s) => s.id === rule.target)?.name ?? rule.target;
   };
 
-  const inputClass =
-    'w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors';
-
   return (
-    <div className="p-8">
-      <div className="flex items-center gap-3 mb-2">
-        <BellRing size={22} className="text-[#10b981]" />
-        <h1 className="text-2xl font-light text-white">
-          Regras de <span className="font-bold">Alerta</span>
-        </h1>
+    <div className="p-4 md:p-8 anim-rise">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Regras de Alerta</h1>
+          <p className="page-desc">
+            Limiar por métrica, com histerese. O motor avalia periodicamente e notifica quando a condição persiste.
+          </p>
+        </div>
       </div>
-      <p className="text-[#737373] text-sm mb-8">
-        Defina limiares por métrica. O motor avalia periodicamente e dispara notificações quando violados.
-      </p>
 
       <div className={`grid grid-cols-1 gap-6 ${canOperate ? 'lg:grid-cols-3' : ''}`}>
         {/* O formulário só existe para Suporte TI; Visualizador vê a lista. */}
         {canOperate && (
-        <div className="glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02] col-span-1 h-fit">
-          <h2 className="text-sm font-bold tracking-widest text-[#737373] uppercase mb-6">Nova Regra</h2>
+        <div className="panel p-5 col-span-1 h-fit">
+          <h2 className="eyebrow mb-5">Nova regra</h2>
           <form onSubmit={handleCreate} className="flex flex-col gap-4">
             <div>
-              <label htmlFor="rule-name" className="text-xs text-[#737373] block mb-1">Nome</label>
+              <label htmlFor="rule-name" className="eyebrow block mb-1.5">Nome</label>
               <input
                 id="rule-name"
                 type="text"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className={inputClass}
+                className="input-base w-full"
                 placeholder="Ex: CPU alta produção"
                 required
               />
             </div>
             <div>
-              <label htmlFor="rule-target" className="text-xs text-[#737373] block mb-1">Alvo</label>
+              <label htmlFor="rule-target" className="eyebrow block mb-1.5">Alvo</label>
               <Select
                 id="rule-target"
                 value={form.target}
@@ -202,12 +198,12 @@ const AlertRulesView = () => {
                   ...servers.map((s) => ({ value: s.id, label: s.name })),
                 ]}
               />
-              <p className="text-[10px] text-[#737373] mt-1">
+              <p className="text-[10px] text-text-faint mt-1">
                 Escolher uma unidade cobre todas as máquinas dela, inclusive as que entrarem depois.
               </p>
             </div>
             <div>
-              <label htmlFor="rule-metric" className="text-xs text-[#737373] block mb-1">Métrica</label>
+              <label htmlFor="rule-metric" className="eyebrow block mb-1.5">Métrica</label>
               <Select
                 id="rule-metric"
                 value={form.metric}
@@ -216,8 +212,8 @@ const AlertRulesView = () => {
               />
             </div>
             <div className="flex gap-3">
-              <div className="w-24">
-                <label htmlFor="rule-operator" className="text-xs text-[#737373] block mb-1">Operador</label>
+              <div className="w-28">
+                <label htmlFor="rule-operator" className="eyebrow block mb-1.5">Operador</label>
                 <Select
                   id="rule-operator"
                   value={form.operator}
@@ -226,20 +222,20 @@ const AlertRulesView = () => {
                 />
               </div>
               <div className="flex-1">
-                <label htmlFor="rule-threshold" className="text-xs text-[#737373] block mb-1">Limiar</label>
+                <label htmlFor="rule-threshold" className="eyebrow block mb-1.5">Limiar</label>
                 <input
                   id="rule-threshold"
                   type="number"
                   step="any"
                   value={form.threshold}
                   onChange={(e) => setForm({ ...form, threshold: Number(e.target.value) })}
-                  className={inputClass}
+                  className="input-base w-full"
                   required
                 />
               </div>
             </div>
             <div>
-              <label htmlFor="rule-duration" className="text-xs text-[#737373] block mb-1">
+              <label htmlFor="rule-duration" className="eyebrow block mb-1.5">
                 Só alertar se persistir
               </label>
               <Select
@@ -248,88 +244,76 @@ const AlertRulesView = () => {
                 onChange={(v) => setForm({ ...form, for_duration_sec: Number(v) })}
                 options={DURATIONS}
               />
-              <p className="text-[10px] text-[#737373] mt-1">
+              <p className="text-[10px] text-text-faint mt-1">
                 A condição precisa se manter sem interrupção. Uma leitura dentro do limite reinicia a contagem.
               </p>
             </div>
-            <label className="flex items-center gap-2 text-xs text-[#737373] cursor-pointer">
+            <label className="flex items-center gap-2 text-xs text-text-mut cursor-pointer">
               <input
                 type="checkbox"
                 checked={form.enabled}
                 onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-                className="accent-[#10b981]"
+                className="accent-accent"
               />
               Ativar imediatamente
             </label>
-            <button
-              type="submit"
-              className="mt-2 flex items-center justify-center gap-2 bg-[#10b981]/20 hover:bg-[#10b981]/30 border border-[#10b981]/50 text-[#10b981] font-bold text-xs uppercase tracking-widest py-3 rounded-lg transition-all"
-            >
-              <Plus size={14} />
-              Criar Regra
+            <button type="submit" className="btn btn-primary mt-2 w-full">
+              <Plus size={15} strokeWidth={1.75} />
+              Criar regra
             </button>
           </form>
         </div>
         )}
 
-        <div className={`glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02] ${canOperate ? 'col-span-2' : ''}`}>
-          <h2 className="text-sm font-bold tracking-widest text-[#737373] uppercase mb-6">Regras Configuradas</h2>
+        <div className={`panel p-5 ${canOperate ? 'col-span-2' : ''}`}>
+          <h2 className="eyebrow mb-5">Regras configuradas</h2>
           {loading ? (
-            <p className="text-sm text-[#737373]">Carregando...</p>
+            <p className="text-sm text-text-faint">Carregando...</p>
           ) : rules.length === 0 ? (
-            <p className="text-sm text-[#737373]">Nenhuma regra cadastrada.</p>
+            <p className="text-sm text-text-faint">Nenhuma regra cadastrada.</p>
           ) : (
             <div className="overflow-x-auto custom-scrollbar">
-              <table className="w-full text-sm text-left border-collapse">
-                <thead className="text-[10px] text-[#737373] uppercase tracking-widest bg-[#0c0c0e]">
+              <table className="table-base">
+                <thead>
                   <tr>
-                    <th className="py-3 px-4 rounded-l">Status</th>
-                    <th className="py-3 px-4">Nome</th>
-                    <th className="py-3 px-4">Alvo</th>
-                    <th className="py-3 px-4">Condição</th>
-                    <th className="py-3 px-4">Último disparo</th>
-                    {canOperate && <th className="py-3 px-4 text-right rounded-r">Ação</th>}
+                    <th>Status</th>
+                    <th>Nome</th>
+                    <th>Alvo</th>
+                    <th>Condição</th>
+                    <th>Último disparo</th>
+                    {canOperate && <th className="text-right">Ação</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {rules.map((rule) => (
-                    <tr key={rule.id} className="border-b border-white/[0.03] hover:bg-white/[0.05] transition-all">
-                      <td className="py-4 px-4">
+                    <tr key={rule.id}>
+                      <td>
                         {/* Alternar dispara escrita: Visualizador só vê o estado. */}
                         <button
                           onClick={() => canOperate && handleToggle(rule)}
-                          className={`flex items-center gap-2 ${canOperate ? '' : 'cursor-default'}`}
+                          className={canOperate ? '' : 'cursor-default'}
                           title={canOperate ? 'Alternar ativação' : undefined}
                           disabled={!canOperate}
                         >
-                          <span
-                            className={`w-2 h-2 rounded-full ${
-                              rule.enabled ? 'bg-[#10b981] animate-pulse' : 'bg-[#737373]'
-                            }`}
-                          ></span>
-                          <span
-                            className={`text-[10px] font-bold tracking-widest uppercase ${
-                              rule.enabled ? 'text-[#10b981]' : 'text-[#737373]'
-                            }`}
-                          >
+                          <span className={`badge ${rule.enabled ? 'badge-ok' : 'badge-muted'}`}>
                             {rule.enabled ? 'Ativa' : 'Inativa'}
                           </span>
                         </button>
                       </td>
-                      <td className="py-4 px-4 font-medium text-white/90">{rule.name}</td>
-                      <td className="py-4 px-4 text-[#737373]">{targetName(rule)}</td>
-                      <td className="py-4 px-4 text-white/90 font-mono text-xs">
+                      <td className={rule.enabled ? 'font-medium text-text-hi' : 'font-medium text-text-faint'}>{rule.name}</td>
+                      <td className="text-text-mut">{targetName(rule)}</td>
+                      <td className={`mono-data text-xs ${rule.enabled ? 'text-text-hi' : 'text-text-faint'}`}>
                         {METRIC_LABELS[rule.metric] ?? rule.metric} {rule.operator} {rule.threshold}
-                        <span className="text-[#737373]">{durationLabel(durationOf(rule))}</span>
+                        <span className="text-text-faint">{durationLabel(durationOf(rule))}</span>
                       </td>
-                      <td className="py-4 px-4 text-[#737373] text-xs">{relativeTime(rule.last_fired)}</td>
+                      <td className="text-text-faint text-xs">{relativeTime(rule.last_fired)}</td>
                       {canOperate && (
-                        <td className="py-4 px-4 text-right">
+                        <td className="text-right">
                           <button
                             onClick={() => handleDelete(rule)}
-                            className="inline-flex items-center gap-1 text-xs text-red-400/80 hover:text-red-400 tracking-wider"
+                            className="inline-flex items-center gap-1.5 text-xs text-crit/80 hover:text-crit transition-colors"
                           >
-                            <Trash2 size={14} />
+                            <Trash2 size={14} strokeWidth={1.75} />
                             Remover
                           </button>
                         </td>

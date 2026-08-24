@@ -11,6 +11,11 @@ const HISTORY_POLL_MS = 30000;
 
 const ERROR_STATUSES = ['500', '502', '503', '504', '400', '404'];
 
+// Mesmos limiares das telas de estação e detalhe, para o dashboard não pintar
+// de verde o que a lista pinta de âmbar.
+const USAGE_WARN = 75;
+const USAGE_CRITICAL = 90;
+
 // IPs das VPS de destino do Load Balancer. Vem do .env porque muda por ambiente.
 const TARGET_IPS: string[] = (import.meta.env.VITE_TARGET_VPS_IPS || '')
   .split(',')
@@ -22,16 +27,23 @@ const LB_IP: string = import.meta.env.VITE_LB_IP || '';
 // Distribui os nós de upstream verticalmente no diagrama de fluxo (em %).
 const nodeY = (index: number, total: number) => (total === 1 ? 50 : 15 + index * (70 / (total - 1)));
 
-const Gauge = ({ value, title, color }: { value: number; title: string; color: string }) => {
+const gaugeVar = (value: number) => {
+  if (value >= USAGE_CRITICAL) return 'var(--color-crit)';
+  if (value >= USAGE_WARN) return 'var(--color-warn)';
+  return 'var(--color-ok)';
+};
+
+const Gauge = ({ value, title }: { value: number; title: string }) => {
   const clamped = Math.max(0, Math.min(value, 100));
+  const color = gaugeVar(clamped);
   const data = [
     { name: 'value', value: clamped },
     { name: 'empty', value: 100 - clamped },
   ];
   return (
-    <div className="glass-panel rounded-xl flex flex-col items-center justify-center relative p-6 h-full transition-all duration-300 hover:bg-white/[0.02] group">
-      <span className="text-[#737373] text-[11px] font-bold absolute top-5 uppercase tracking-widest">{title}</span>
-      <div className="w-full h-32 mt-6 relative transition-all duration-500" style={{ filter: `drop-shadow(0px 4px 8px ${color}1a)` }}>
+    <div className="stat-card flex flex-col items-center justify-center relative h-full">
+      <span className="eyebrow absolute top-4">{title}</span>
+      <div className="w-full h-32 mt-6 relative">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
@@ -49,35 +61,13 @@ const Gauge = ({ value, title, color }: { value: number; title: string; color: s
               cornerRadius={4}
             >
               <Cell fill={color} />
-              <Cell fill="rgba(255,255,255,0.03)" />
+              <Cell fill="var(--color-ink-750)" />
             </Pie>
           </PieChart>
         </ResponsiveContainer>
         <div className="absolute bottom-0 w-full flex justify-center">
-          <span className="text-3xl font-bold text-white tracking-tight" style={{ textShadow: `0 0 10px ${color}33` }}>
-            {value.toFixed(1)}%
-          </span>
+          <span className="stat-value text-3xl">{value.toFixed(1)}%</span>
         </div>
-      </div>
-    </div>
-  );
-};
-
-const TopWidget = ({ title, value, unit, type = 'success' }: { title: string; value: string | number; unit: string; type?: 'success' | 'danger' | 'warning' }) => {
-  const colors = {
-    success: { text: 'text-[#10b981]', glow: 'text-glow-green', bg: 'bg-[#10b981]', shadow: 'shadow-[0_0_8px_rgba(16,185,129,0.3)]' },
-    danger: { text: 'text-[#ef4444]', glow: 'text-glow-red', bg: 'bg-[#ef4444]', shadow: 'shadow-[0_0_8px_rgba(239,68,68,0.3)]' },
-    warning: { text: 'text-[#f59e0b]', glow: 'text-glow-yellow', bg: 'bg-[#f59e0b]', shadow: 'shadow-[0_0_8px_rgba(245,158,11,0.3)]' },
-  };
-  const theme = colors[type];
-
-  return (
-    <div className="glass-panel rounded-xl p-6 flex flex-col items-center justify-center relative overflow-hidden transition-all duration-300">
-      <div className={`absolute top-0 left-0 w-full h-[2px] ${theme.bg} opacity-40 ${theme.shadow}`} />
-      <span className="text-[#737373] mb-2 text-center tracking-widest font-bold uppercase text-[11px]">{title}</span>
-      <div className="flex items-baseline gap-1">
-        <span className={`text-5xl font-bold tracking-tight ${theme.text} ${theme.glow}`}>{value}</span>
-        {unit && <span className={`text-xl font-bold ${theme.text} opacity-80`}>{unit}</span>}
       </div>
     </div>
   );
@@ -90,50 +80,51 @@ const LoadBalancerFlow = ({ stats }: { stats: LbStat[] }) => {
   const total = totalRequests(stats);
 
   return (
-    <div className="glass-panel rounded-xl p-6 mb-6 overflow-hidden relative">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#10b981]/[0.03] to-transparent pointer-events-none" />
-
-      <div className="flex items-center justify-between mb-8 pb-3 border-b border-white/[0.03] relative z-10">
-        <span className="uppercase tracking-widest text-[11px] font-bold text-[#737373] flex items-center gap-2">
-          <Activity className="w-4 h-4 text-[#10b981]" />
-          Malha de Roteamento (NGINX Cluster)
+    <div className="panel p-6 mb-6 overflow-hidden relative">
+      <div className="flex items-center justify-between mb-8 pb-3 border-b border-line">
+        <span className="eyebrow flex items-center gap-2">
+          <Activity size={16} strokeWidth={1.75} className="text-accent" />
+          Malha de roteamento (cluster NGINX)
         </span>
-        <div className="flex gap-2 items-center bg-[#10b981]/5 px-3 py-1.5 rounded border border-[#10b981]/20 backdrop-blur-sm">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse shadow-[0_0_8px_#10b981]" />
-          <span className="text-[10px] text-[#10b981] font-bold tracking-widest uppercase">{total} Req / 5s</span>
-        </div>
+        <span className={`badge ${total > 0 ? 'badge-ok' : 'badge-muted'}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${total > 0 ? 'bg-ok animate-pulse' : 'bg-text-faint'}`} />
+          {total} req / 5s
+        </span>
       </div>
 
       <div className="relative w-full max-w-4xl mx-auto flex items-center justify-between min-h-[192px] md:px-4">
         <div className="z-10 flex flex-col items-center justify-center min-w-[80px]">
-          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#1a1c23] to-[#0c0c0e] border border-white/10 flex items-center justify-center shadow-lg relative group transition-all duration-500 hover:border-[#10b981]/50 hover:shadow-[0_0_20px_rgba(16,185,129,0.1)]">
-            <Globe className="w-6 h-6 text-white/50 group-hover:text-white/80 transition-colors" strokeWidth={1.5} />
+          <div className="w-14 h-14 rounded-full bg-ink-800 border border-line flex items-center justify-center transition-colors hover:border-line-hi">
+            <Globe size={22} strokeWidth={1.75} className="text-text-mut" />
           </div>
-          <span className="text-[10px] text-[#737373] mt-3 font-bold tracking-widest uppercase">Cloudflare</span>
+          <span className="eyebrow mt-3">Cloudflare</span>
         </div>
 
         <div className="flex-1 relative flex items-center -mx-4 z-0">
           <svg className="w-full h-12 overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            <path id="path-in" d="M 0,50 L 100,50" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+            <path id="path-in" d="M 0,50 L 100,50" fill="none" stroke="var(--color-line)" strokeWidth="1" />
             {total > 0 && (
-              <circle r="2" fill="#10b981" filter="drop-shadow(0 0 3px #10b981)">
+              <circle r="2" fill="var(--color-accent)">
                 <animateMotion dur="1s" repeatCount="indefinite">
                   <mpath href="#path-in" />
                 </animateMotion>
               </circle>
             )}
           </svg>
-          <div className="absolute left-1/2 -translate-x-1/2 -top-4 bg-[#0c0c0e] px-2 py-0.5 rounded-full border border-white/5 text-[10px] text-white/60 font-mono flex items-center gap-1 shadow-md">
-            {total} <ArrowRight className="w-3 h-3 text-[#10b981]" />
+          <div className="absolute left-1/2 -translate-x-1/2 -top-4 bg-ink-950 px-2 py-0.5 rounded-full border border-line text-[10px] text-text-mut mono-data flex items-center gap-1">
+            {total} <ArrowRight size={12} strokeWidth={1.75} className="text-accent" />
           </div>
         </div>
 
         <div className="z-10 flex flex-col items-center justify-center min-w-[80px]">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#10b981]/10 to-[#0c0c0e] border border-[#10b981]/40 flex items-center justify-center shadow-[0_0_30px_rgba(16,185,129,0.15)] relative backdrop-blur-sm group transition-all duration-500 hover:scale-105 hover:border-[#10b981]">
-            <div className="absolute inset-0 rounded-2xl bg-[#10b981]/5 blur-xl group-hover:bg-[#10b981]/10 transition-colors" />
-            <Server className="w-7 h-7 text-[#10b981] relative z-10" strokeWidth={1.5} />
+          <div
+            className={`w-16 h-16 rounded-card bg-ink-800 border flex items-center justify-center transition-colors ${
+              total > 0 ? 'border-accent/40' : 'border-line'
+            }`}
+          >
+            <Server size={26} strokeWidth={1.75} className={total > 0 ? 'text-accent' : 'text-text-mut'} />
           </div>
-          <span className="text-[10px] text-[#10b981] mt-3 font-bold tracking-widest uppercase">Load Balancer</span>
+          <span className="eyebrow mt-3">Load Balancer</span>
         </div>
 
         <div className="flex-1 relative -mx-4 h-full z-0 min-h-[192px]">
@@ -146,12 +137,13 @@ const LoadBalancerFlow = ({ stats }: { stats: LbStat[] }) => {
                     id={`path-v-${idx}`}
                     d={`M 0,50 C 40,50 40,${y} 100,${y}`}
                     fill="none"
-                    stroke={node.reqs > 0 ? 'rgba(16,185,129,0.25)' : 'rgba(255,255,255,0.05)'}
+                    stroke={node.reqs > 0 ? 'var(--color-accent)' : 'var(--color-line)'}
+                    strokeOpacity={node.reqs > 0 ? 0.35 : 1}
                     strokeWidth="1"
                   />
                   {node.reqs > 0 &&
                     Array.from({ length: Math.min(node.reqs, 5) }).map((_, i) => (
-                      <circle key={`v-${idx}-${i}`} r="2" fill="#10b981" filter="drop-shadow(0 0 3px #10b981)">
+                      <circle key={`v-${idx}-${i}`} r="2" fill="var(--color-accent)">
                         <animateMotion dur="1.5s" begin={`${i * 0.3}s`} repeatCount="indefinite">
                           <mpath href={`#path-v-${idx}`} />
                         </animateMotion>
@@ -165,8 +157,8 @@ const LoadBalancerFlow = ({ stats }: { stats: LbStat[] }) => {
           {nodes.map((node, idx) => (
             <div
               key={`badge-${node.addr}`}
-              className={`absolute right-[15%] bg-[#0c0c0e] px-2 py-0.5 rounded-full border text-[10px] font-mono shadow-md translate-y-[-50%] ${
-                node.reqs > 0 ? 'border-[#10b981]/20 text-[#10b981]' : 'border-white/5 text-[#737373]'
+              className={`absolute right-[15%] bg-ink-950 px-2 py-0.5 rounded-full border text-[10px] mono-data translate-y-[-50%] ${
+                node.reqs > 0 ? 'border-accent/30 text-accent' : 'border-line text-text-faint'
               }`}
               style={{ top: `${nodeY(idx, nodes.length)}%` }}
             >
@@ -179,21 +171,21 @@ const LoadBalancerFlow = ({ stats }: { stats: LbStat[] }) => {
           {nodes.map((node, idx) => (
             <div
               key={node.addr}
-              className={`w-full bg-gradient-to-r from-[#0c0c0e] to-[#1a1c23] border transition-colors rounded-xl p-3 flex items-center gap-4 shadow-lg group relative h-[64px] ${
-                node.reqs > 0 ? 'border-[#10b981]/30' : 'border-white/5 hover:border-white/20'
+              className={`panel panel-hover w-full p-3 flex items-center gap-4 h-[64px] ${
+                node.reqs > 0 ? 'border-accent/30' : ''
               }`}
               title={node.reqs > 0 ? `${node.reqs} req / 5s` : 'Sem tráfego na janela'}
             >
-              <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+              <div className="w-10 h-10 rounded-ctrl bg-ink-800 flex items-center justify-center flex-shrink-0">
                 <Database
-                  className={`w-5 h-5 transition-colors ${
-                    node.reqs > 0 ? 'text-[#10b981]' : 'text-white/40 group-hover:text-[#10b981]'
-                  }`}
+                  size={18}
+                  strokeWidth={1.75}
+                  className={node.reqs > 0 ? 'text-accent' : 'text-text-faint'}
                 />
               </div>
               <div className="flex flex-col">
-                <span className="text-[10px] text-[#737373] font-bold tracking-widest uppercase">Node {idx + 1}</span>
-                <span className="text-[11px] text-white/80 font-mono mt-0.5 selectable">{node.addr}</span>
+                <span className="eyebrow">Node {idx + 1}</span>
+                <span className="text-[11px] text-text mono-data mt-0.5 selectable">{node.addr}</span>
               </div>
             </div>
           ))}
@@ -255,74 +247,76 @@ const LoadBalancerDashboard = ({ stats }: { stats: LbStat[] }) => {
   const totalErrors = projects.reduce((acc, p) => acc + p.errors, 0);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 anim-rise">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-        <div className="glass-panel rounded-xl p-6 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-[2px] bg-red-500 opacity-40 shadow-[0_0_8px_rgba(239,68,68,0.3)]" />
-          <span className="text-[#737373] text-[11px] font-bold tracking-widest uppercase mb-2 block">Alertas Críticos (5s)</span>
-          <div className="flex items-baseline gap-2">
-            <span className={`text-5xl font-bold tracking-tight ${totalErrors > 0 ? 'text-red-500 text-glow-red' : 'text-[#10b981]'}`}>{totalErrors}</span>
-            <span className="text-sm font-bold text-white/50">ERROS HTTP 5xx/4xx</span>
+        <div className="stat-card">
+          <span className="eyebrow">Erros HTTP na janela (5s)</span>
+          <div className="flex items-baseline gap-3 mt-2">
+            <span className={`stat-value text-4xl ${totalErrors > 0 ? 'text-crit' : 'text-ok'}`}>{totalErrors}</span>
+            <span className="text-xs text-text-mut">respostas 5xx/4xx</span>
           </div>
-          {totalErrors > 0 && <span className="text-xs text-red-400 mt-2 block">Verifique a tela de Logs para o detalhe das falhas.</span>}
+          {totalErrors > 0 && (
+            <span className="text-xs text-crit mt-2 block">Verifique a tela de Logs para o detalhe das falhas.</span>
+          )}
         </div>
 
-        <div className="glass-panel rounded-xl p-6 relative overflow-hidden flex flex-col justify-center">
-          <div className="absolute top-0 left-0 w-full h-[2px] bg-[#10b981] opacity-40 shadow-[0_0_8px_#10b981]" />
-          <span className="text-[#737373] text-[11px] font-bold tracking-widest uppercase mb-2 block">Algoritmos Ativos (NGINX)</span>
+        <div className="stat-card flex flex-col justify-center">
+          <span className="eyebrow mb-3">Algoritmos ativos (NGINX)</span>
           <div className="flex flex-col gap-2">
-            <div className="flex justify-between items-center bg-[#0c0c0e] px-3 py-1.5 rounded border border-white/5">
-              <span className="text-xs font-bold text-white/80">Tráfego HTTP/API</span>
-              <span className="text-xs font-mono text-[#10b981]">LEAST_CONN</span>
+            <div className="flex justify-between items-center bg-ink-950 px-3 py-1.5 rounded-ctrl border border-line">
+              <span className="text-xs text-text">Tráfego HTTP/API</span>
+              <span className="text-xs mono-data text-text-mut">LEAST_CONN</span>
             </div>
-            <div className="flex justify-between items-center bg-[#0c0c0e] px-3 py-1.5 rounded border border-white/5">
-              <span className="text-xs font-bold text-white/80">WebSockets (Kanban)</span>
-              <span className="text-xs font-mono text-[#10b981]">IP_HASH</span>
+            <div className="flex justify-between items-center bg-ink-950 px-3 py-1.5 rounded-ctrl border border-line">
+              <span className="text-xs text-text">WebSockets (Kanban)</span>
+              <span className="text-xs mono-data text-text-mut">IP_HASH</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="glass-panel rounded-xl p-6 overflow-hidden">
-        <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
-          <span className="uppercase tracking-widest text-[11px] font-bold text-[#737373] flex items-center gap-2">
-            <Server className="w-4 h-4 text-[#10b981]" />
-            Comportamento por Sistema (Projetos)
+      <div className="panel p-6 overflow-hidden">
+        <div className="flex items-center justify-between mb-4 border-b border-line pb-3">
+          <span className="eyebrow flex items-center gap-2">
+            <Server size={16} strokeWidth={1.75} className="text-accent" />
+            Comportamento por sistema (projetos)
           </span>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left border-collapse">
-            <thead className="text-[10px] text-[#737373] uppercase tracking-widest bg-[#0c0c0e]">
+          <table className="table-base">
+            <thead>
               <tr>
-                <th className="py-3 px-3 rounded-l">Domínio / Sistema</th>
-                <th className="py-3 px-3">Algoritmo</th>
+                <th>Domínio / Sistema</th>
+                <th>Algoritmo</th>
                 {nodes.map((node, idx) => (
-                  <th key={node.addr} className="py-3 px-3 text-right" title={node.addr}>Node {idx + 1}</th>
+                  <th key={node.addr} className="text-right" title={node.addr}>Node {idx + 1}</th>
                 ))}
-                <th className="py-3 px-3 text-right text-[#10b981]/80">Local/Cache</th>
-                <th className="py-3 px-3 text-right">Total Req/5s</th>
-                <th className="py-3 px-3 text-right rounded-r">Erros</th>
+                <th className="text-right">Local/Cache</th>
+                <th className="text-right">Total req/5s</th>
+                <th className="text-right">Erros</th>
               </tr>
             </thead>
             <tbody>
               {projects.length === 0 && (
                 <tr>
-                  <td colSpan={5 + nodes.length} className="text-center py-8 text-[#737373] text-xs">Sem tráfego nos últimos 5 segundos...</td>
+                  <td colSpan={5 + nodes.length} className="text-center py-8 text-text-faint text-xs">
+                    Sem tráfego nos últimos 5 segundos.
+                  </td>
                 </tr>
               )}
               {projects.map((p) => (
-                <tr key={p.name} className="border-b border-white/[0.03] hover:bg-white/[0.05] transition-all duration-300">
-                  <td className="py-3 px-3 text-white/90 font-medium">{p.name}</td>
-                  <td className="py-3 px-3">
-                    <span className="bg-[#10b981]/10 text-[#10b981] px-2 py-0.5 rounded text-[10px] font-mono border border-[#10b981]/20">{p.algo}</span>
+                <tr key={p.name}>
+                  <td className="text-text-hi font-medium">{p.name}</td>
+                  <td>
+                    <span className="badge badge-muted mono-data">{p.algo}</span>
                   </td>
                   {nodes.map((node) => (
-                    <td key={node.addr} className="py-3 px-3 text-right font-mono text-[#737373]">{p.vpsCounts[node.addr] || 0}</td>
+                    <td key={node.addr} className="text-right mono-data text-text-mut">{p.vpsCounts[node.addr] || 0}</td>
                   ))}
-                  <td className="py-3 px-3 text-right font-mono text-[#10b981]/80">{p.local > 0 ? p.local : '-'}</td>
-                  <td className="py-3 px-3 text-right font-bold text-[#10b981]">{p.total}</td>
-                  <td className={`py-3 px-3 text-right font-bold ${p.errors > 0 ? 'text-red-500' : 'text-[#737373]'}`}>{p.errors}</td>
+                  <td className="text-right mono-data text-text-mut">{p.local > 0 ? p.local : '-'}</td>
+                  <td className="text-right mono-data text-text-hi font-semibold">{p.total}</td>
+                  <td className={`text-right mono-data font-semibold ${p.errors > 0 ? 'text-crit' : 'text-text-faint'}`}>{p.errors}</td>
                 </tr>
               ))}
             </tbody>
@@ -427,6 +421,7 @@ export default function Dashboard() {
   const diskPercent = diskTotal > 0 ? (diskUsed / diskTotal) * 100 : 0;
 
   const isUp = onlineServers.length > 0;
+  const offlineCount = scopedServers.length - onlineServers.length;
 
   // Um host pode aparecer por mais de um registro; o filtro é por IP.
   const uniqueServers = useMemo(() => {
@@ -445,19 +440,19 @@ export default function Dashboard() {
   const isLoadBalancerSelected = activeServer?.host_ip === LB_IP;
 
   return (
-    <div className="min-h-full bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1a1c23] via-[#050505] to-[#000000] text-white font-sans px-4 pb-4 pt-2 md:px-6 md:pb-6 md:pt-3 lg:px-8 lg:pb-8 lg:pt-4">
-      <div className="glass-panel p-4 rounded-xl flex flex-wrap items-center gap-6 mb-6 relative z-50">
+    <div className="min-h-full px-4 pb-4 pt-2 md:px-6 md:pb-6 md:pt-3 lg:px-8 lg:pb-8 lg:pt-4 anim-rise">
+      <div className="panel p-4 flex flex-wrap items-center gap-6 mb-6 relative z-50">
         <div className="flex items-center gap-3">
-          <Filter className="text-[#737373] w-4 h-4" />
-          <span className="text-[11px] font-bold tracking-widest text-[#737373] uppercase">Filtro IP:</span>
+          <Filter size={16} strokeWidth={1.75} className="text-text-faint" />
+          <span className="eyebrow">Filtro IP</span>
           <Select ariaLabel="Filtrar por IP" options={vpsOptions} value={selectedServerId} onChange={setSelectedServerId} />
         </div>
 
-        <div className="h-6 w-px bg-white/10" />
+        <div className="h-6 w-px bg-line" />
 
         <div className="flex items-center gap-3">
-          <Clock className="text-[#737373] w-4 h-4" />
-          <span className="text-[11px] font-bold tracking-widest text-[#737373] uppercase">Histórico:</span>
+          <Clock size={16} strokeWidth={1.75} className="text-text-faint" />
+          <span className="eyebrow">Histórico</span>
           <Select
             ariaLabel="Janela do histórico de disco"
             options={RANGE_OPTIONS}
@@ -471,59 +466,78 @@ export default function Dashboard() {
         <LoadBalancerDashboard stats={loadBalancing} />
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-6">
-            <div className="glass-panel rounded-xl p-6 flex flex-col items-center justify-center h-32 md:h-auto relative overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
-              <span className="text-[#737373] text-[11px] mb-2 font-bold tracking-widest uppercase">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 mb-6 stagger">
+            <div className="stat-card lg:col-span-2 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="eyebrow">Estado do cluster</span>
+                <span className={`badge ${isUp ? 'badge-ok' : 'badge-crit'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${isUp ? 'bg-ok animate-pulse' : 'bg-crit'}`} />
+                  {isUp ? 'Operacional' : 'Indisponível'}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-4 mt-4">
+                <div>
+                  <div className={`stat-value ${isUp ? '' : 'text-crit'}`}>{onlineServers.length}</div>
+                  <div className="text-xs text-text-mut mt-1">hosts online</div>
+                </div>
+                <div>
+                  <div className={`stat-value ${offlineCount > 0 ? 'text-crit' : 'text-text-faint'}`}>{offlineCount}</div>
+                  <div className="text-xs text-text-mut mt-1">hosts offline</div>
+                </div>
+                <div>
+                  <div className="stat-value">{filteredContainers.length}</div>
+                  <div className="text-xs text-text-mut mt-1">containers ativos</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="stat-card flex flex-col items-center justify-center">
+              <span className="eyebrow">
                 {now ? now.toLocaleDateString('pt-BR').replace(/\//g, '-') : 'Carregando...'}
               </span>
-              <span className="text-5xl md:text-6xl font-light tracking-tight text-white/90 drop-shadow-md">
+              <span className="stat-value text-4xl mt-2">
                 {now ? now.toLocaleTimeString('pt-BR') : '00:00:00'}
               </span>
             </div>
-
-            <TopWidget title="Disponibilidade Global" value={isUp ? 'UP' : 'DOWN'} unit="" type={isUp ? 'success' : 'danger'} />
-
-            <TopWidget title="Containers em Execução" value={filteredContainers.length} unit="Ativos" type="warning" />
           </div>
 
           {selectedServerId === 'all' && <LoadBalancerFlow stats={loadBalancing} />}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-6 h-56">
-            <Gauge value={cpuPercent} title="CPU do Host %" color="#10b981" />
-            <Gauge value={memPercent} title="Memória %" color="#10b981" />
-            <Gauge value={diskPercent} title="Disco %" color="#10b981" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-6 h-56 stagger">
+            <Gauge value={cpuPercent} title="CPU do host" />
+            <Gauge value={memPercent} title="Memória" />
+            <Gauge value={diskPercent} title="Disco" />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-            <div className="glass-panel rounded-xl p-6 flex flex-col relative h-80 overflow-hidden">
-              <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
-                <span className="uppercase tracking-widest text-[11px] font-bold text-[#737373]">Consumo (Ao Vivo)</span>
-                <div className="flex gap-2 items-center bg-[#10b981]/10 px-2 py-1 rounded border border-[#10b981]/20">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse" />
-                  <span className="text-[10px] text-[#10b981] font-bold tracking-widest uppercase">Live</span>
-                </div>
+            <div className="panel p-6 flex flex-col relative h-80 overflow-hidden">
+              <div className="flex items-center justify-between mb-4 border-b border-line pb-3">
+                <span className="eyebrow">Consumo (ao vivo)</span>
+                <span className="badge badge-ok">
+                  <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse" />
+                  Live
+                </span>
               </div>
               <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                <table className="w-full text-sm text-left border-collapse">
-                  <thead className="text-[10px] text-[#737373] uppercase tracking-widest sticky top-0 bg-[#0c0c0e] shadow-[0_4px_10px_rgba(0,0,0,0.5)] z-10">
+                <table className="table-base">
+                  <thead className="sticky top-0 bg-ink-900 z-10">
                     <tr>
-                      <th className="py-3 px-2 rounded-l">Container</th>
-                      <th className="py-3 px-2 text-right">CPU</th>
-                      <th className="py-3 px-2 text-right rounded-r">Memória</th>
+                      <th>Container</th>
+                      <th className="text-right">CPU</th>
+                      <th className="text-right">Memória</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredContainers.length === 0 && (
                       <tr>
-                        <td colSpan={3} className="text-center py-8 text-[#737373] text-xs">Buscando dados no motor Go...</td>
+                        <td colSpan={3} className="text-center py-8 text-text-faint text-xs">Buscando dados no motor Go...</td>
                       </tr>
                     )}
                     {filteredContainers.map((c) => (
-                      <tr key={c.docker_id} className="border-b border-white/[0.03] hover:bg-white/[0.05] transition-all duration-300">
-                        <td className="py-3 px-2 text-[#f59e0b] font-mono text-[12px]">{c.name}</td>
-                        <td className="py-3 px-2 text-right font-medium text-white/90">{c.cpu.toFixed(2)}%</td>
-                        <td className="py-3 px-2 text-right font-medium text-white/90">{formatBytes(c.mem_used)}</td>
+                      <tr key={c.docker_id}>
+                        <td className="mono-data text-text selectable">{c.name}</td>
+                        <td className="text-right mono-data text-text-hi">{c.cpu.toFixed(2)}%</td>
+                        <td className="text-right mono-data text-text-hi">{formatBytes(c.mem_used)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -531,10 +545,10 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="glass-panel rounded-xl p-6 flex flex-col relative h-80 overflow-hidden">
-              <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
-                <span className="uppercase tracking-widest text-[11px] font-bold text-[#737373]">Espaço de Disco Ocupado</span>
-                <span className="text-[10px] text-[#737373] tracking-widest uppercase">
+            <div className="panel p-6 flex flex-col relative h-80 overflow-hidden">
+              <div className="flex items-center justify-between mb-4 border-b border-line pb-3">
+                <span className="eyebrow">Espaço de disco ocupado</span>
+                <span className="text-[11px] text-text-faint mono-data">
                   {activeServer ? `${activeServer.host_ip} · ${historyRange}` : 'Cluster'}
                 </span>
               </div>
@@ -542,47 +556,80 @@ export default function Dashboard() {
               {activeServer ? (
                 <div className="flex-1 mt-2">
                   {diskHistory.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-xs text-[#737373]">Sem histórico de disco na janela selecionada.</div>
+                    <div className="h-full flex items-center justify-center text-xs text-text-faint">
+                      Sem histórico de disco na janela selecionada.
+                    </div>
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={diskHistory} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
                         <defs>
                           <linearGradient id="colorDisk" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.5} />
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
+                            <stop offset="5%" stopColor="var(--color-accent)" stopOpacity={0.12} />
+                            <stop offset="95%" stopColor="var(--color-accent)" stopOpacity={0} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
-                        <XAxis dataKey="time" stroke="#404040" fontSize={10} tickLine={false} axisLine={false} minTickGap={30} />
-                        <YAxis stroke="#404040" fontSize={10} tickLine={false} axisLine={false} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-line)" strokeOpacity={0.5} vertical={false} />
+                        <XAxis
+                          dataKey="time"
+                          tick={{ fill: 'var(--color-text-faint)', fontSize: 11 }}
+                          tickLine={false}
+                          axisLine={false}
+                          minTickGap={30}
+                        />
+                        <YAxis
+                          tick={{ fill: 'var(--color-text-faint)', fontSize: 11 }}
+                          tickLine={false}
+                          axisLine={false}
+                          domain={[0, 100]}
+                          tickFormatter={(v) => `${v}%`}
+                        />
                         <Tooltip
-                          contentStyle={{ backgroundColor: 'rgba(12,12,14,0.9)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '8px', backdropFilter: 'blur(10px)' }}
-                          itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
+                          contentStyle={{
+                            backgroundColor: 'var(--color-ink-800)',
+                            border: '1px solid var(--color-line-hi)',
+                            borderRadius: 10,
+                            fontSize: 12,
+                            fontFamily: 'var(--font-mono)',
+                          }}
+                          labelStyle={{ color: 'var(--color-text-mut)' }}
+                          itemStyle={{ color: 'var(--color-text-hi)' }}
                           formatter={(value) => [`${value}%`, 'Disco']}
                         />
-                        <Area type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} fill="url(#colorDisk)" isAnimationActive={false} />
+                        <Area
+                          type="monotone"
+                          dataKey="value"
+                          stroke="var(--color-accent)"
+                          strokeWidth={2}
+                          fill="url(#colorDisk)"
+                          isAnimationActive={false}
+                        />
                       </AreaChart>
                     </ResponsiveContainer>
                   )}
                 </div>
               ) : (
                 <div className="flex-1 mt-2 overflow-y-auto custom-scrollbar flex flex-col gap-3">
-                  {onlineServers.length === 0 && <div className="text-xs text-[#737373]">Nenhum host online reportando disco.</div>}
+                  {onlineServers.length === 0 && (
+                    <div className="text-xs text-text-faint">Nenhum host online reportando disco.</div>
+                  )}
                   {onlineServers.map((s) => {
                     const pct = s.disk_total > 0 ? (s.disk_used / s.disk_total) * 100 : 0;
                     return (
                       <div key={s.id} className="flex flex-col gap-1">
                         <div className="flex items-center justify-between text-[11px]">
-                          <span className="flex items-center gap-2 text-white/80">
-                            <HardDrive className="w-3 h-3 text-[#10b981]" />
-                            <span className="font-mono selectable">{s.host_ip}</span>
+                          <span className="flex items-center gap-2 text-text">
+                            <HardDrive size={12} strokeWidth={1.75} className="text-text-faint" />
+                            <span className="mono-data selectable">{s.host_ip}</span>
                           </span>
-                          <span className="font-mono text-[#10b981]">
+                          <span className="mono-data text-text-mut">
                             {formatGB(s.disk_used)} / {formatGB(s.disk_total)} GB
                           </span>
                         </div>
-                        <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-                          <div className={`h-full ${pct > 85 ? 'bg-red-500' : 'bg-[#10b981]'}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                        <div className="w-full h-1.5 bg-ink-750 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${pct > 85 ? 'bg-crit' : 'bg-ok'}`}
+                            style={{ width: `${Math.min(pct, 100)}%` }}
+                          />
                         </div>
                       </div>
                     );

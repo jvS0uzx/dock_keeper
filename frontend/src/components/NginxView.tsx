@@ -24,8 +24,9 @@ const aggregateUpstreams = (rows: LbStat[]): UpstreamAgg[] => {
   return Object.values(map).sort((a, b) => b.reqs - a.reqs).slice(0, 6);
 };
 
+// Severidade referencia os tokens semânticos do tema — o SVG aceita var().
 const sevColor = (s: UpstreamAgg['severity']) =>
-  s === 'error' ? '#f43f5e' : s === 'warn' ? '#f59e0b' : '#10b981';
+  s === 'error' ? 'var(--color-crit)' : s === 'warn' ? 'var(--color-warn)' : 'var(--color-ok)';
 
 // Diagrama SVG: Load Balancer à esquerda, upstreams à direita, com "pacotes"
 // animados cuja quantidade e velocidade refletem as reqs/5s de cada upstream.
@@ -40,13 +41,13 @@ const TrafficFlow = ({ upstreams }: { upstreams: UpstreamAgg[] }) => {
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
       {/* nó do Load Balancer */}
       <g>
-        <circle cx={lbX} cy={lbY} r="34" fill="#10b981" fillOpacity="0.08" stroke="#10b981" strokeOpacity="0.4" />
-        <circle cx={lbX} cy={lbY} r="34" fill="none" stroke="#10b981" strokeOpacity="0.25">
+        <circle cx={lbX} cy={lbY} r="34" fill="var(--color-accent)" fillOpacity="0.08" stroke="var(--color-accent)" strokeOpacity="0.4" />
+        <circle cx={lbX} cy={lbY} r="34" fill="none" stroke="var(--color-accent)" strokeOpacity="0.25">
           <animate attributeName="r" values="34;46;34" dur="2.5s" repeatCount="indefinite" />
           <animate attributeName="stroke-opacity" values="0.35;0;0.35" dur="2.5s" repeatCount="indefinite" />
         </circle>
-        <text x={lbX} y={lbY - 44} textAnchor="middle" fill="#10b981" fontSize="11" fontWeight="bold" letterSpacing="1">LOAD BALANCER</text>
-        <text x={lbX} y={lbY + 5} textAnchor="middle" fill="#e5e7eb" fontSize="10">{totalReqs} req/5s</text>
+        <text x={lbX} y={lbY - 44} textAnchor="middle" fill="var(--color-text-faint)" fontSize="11" fontWeight="600" letterSpacing="1">LOAD BALANCER</text>
+        <text x={lbX} y={lbY + 5} textAnchor="middle" fill="var(--color-text-hi)" fontSize="10" fontFamily="var(--font-mono)">{totalReqs} req/5s</text>
       </g>
 
       {upstreams.map((u, i) => {
@@ -70,8 +71,8 @@ const TrafficFlow = ({ upstreams }: { upstreams: UpstreamAgg[] }) => {
             {/* nó do upstream */}
             <circle cx={upX} cy={y} r="9" fill={color} fillOpacity="0.15" stroke={color} strokeOpacity="0.6" />
             <circle cx={upX} cy={y} r="3.5" fill={color} />
-            <text x={upX + 16} y={y - 4} fill="#e5e7eb" fontSize="10" fontFamily="monospace">{u.addr}</text>
-            <text x={upX + 16} y={y + 9} fill="#737373" fontSize="9">{u.reqs} reqs · {u.severity === 'ok' ? '200' : u.severity}</text>
+            <text x={upX + 16} y={y - 4} fill="var(--color-text-hi)" fontSize="10" fontFamily="var(--font-mono)">{u.addr}</text>
+            <text x={upX + 16} y={y + 9} fill="var(--color-text-mut)" fontSize="9">{u.reqs} reqs · {u.severity === 'ok' ? '200' : u.severity}</text>
           </g>
         );
       })}
@@ -102,25 +103,24 @@ const NginxView = () => {
   }, []);
 
   return (
-    <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden">
-      <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden anim-rise">
+      <div className="page-header flex-col md:flex-row items-start md:items-end">
         <div>
-          <h1 className="text-2xl font-light text-white mb-2 flex items-center gap-3">
-            <Globe className="text-[#10b981]" /> Nginx & <span className="font-bold">Tráfego (Ao Vivo)</span>
-          </h1>
-          <p className="text-[#737373] text-sm">Monitoramento de tráfego de rede e roteamento reverso.</p>
+          <h1 className="page-title">Nginx e tráfego</h1>
+          <p className="page-desc">Monitoramento de tráfego de rede e roteamento reverso do Load Balancer.</p>
         </div>
+        <span className="badge badge-muted" title="Esta tela não executa ação nenhuma no Nginx">somente leitura</span>
       </div>
 
       {/* Fluxo de requisições em tempo real: LB para os upstreams */}
-      <div className="glass-panel rounded-xl border border-white/5 bg-white/[0.02] mb-6 p-4">
+      <div className="panel mb-6 p-4">
         <div className="flex items-center gap-2 mb-2">
-          <Server className="text-[#10b981]" size={16} />
-          <h2 className="text-white font-medium text-sm">Fluxo de Roteamento (Ao Vivo)</h2>
+          <Server size={16} strokeWidth={1.75} className="text-text-faint" />
+          <h2 className="eyebrow">Fluxo de roteamento ao vivo</h2>
         </div>
         <div className="h-[260px]">
           {upstreams.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-gray-500 text-sm">
+            <div className="h-full flex items-center justify-center text-text-mut text-sm">
               Aguardando tráfego no Load Balancer...
             </div>
           ) : (
@@ -129,37 +129,34 @@ const NginxView = () => {
         </div>
       </div>
 
-      <div className="glass-panel rounded-xl border border-white/5 bg-white/[0.02] flex flex-col flex-1 min-h-0 overflow-hidden">
+      <div className="panel flex flex-col flex-1 min-h-0 overflow-hidden">
         {/* Toolbar */}
-        <div className="p-4 border-b border-white/5 bg-black/20 flex items-center justify-between gap-2">
+        <div className="p-4 border-b border-line bg-ink-850 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Network className="text-[#10b981]" size={18} />
-            <h2 className="text-white font-medium">Virtual Hosts (Nginx)</h2>
+            <Network size={18} strokeWidth={1.75} className="text-text-faint" />
+            <h2 className="text-text-hi font-semibold text-sm">Virtual hosts (Nginx)</h2>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-            </span>
-            <span className="text-xs text-emerald-400 uppercase tracking-wider font-medium">Conectado (Live Sync)</span>
-          </div>
+          <span className="badge badge-ok">
+            <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse"></span>
+            ao vivo
+          </span>
         </div>
 
-        {/* Table */}
+        {/* Tabela */}
         <div className="flex-1 overflow-auto custom-scrollbar p-4">
-          <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead className="text-gray-500">
+          <table className="table-base whitespace-nowrap">
+            <thead>
               <tr>
-                <th className="py-2 px-4 font-medium">Domínio / Host</th>
-                <th className="py-2 px-4 font-medium">Upstream (Proxy Pass)</th>
-                <th className="py-2 px-4 font-medium">Requisições (5s)</th>
-                <th className="py-2 px-4 font-medium">Status Health</th>
+                <th>Domínio / host</th>
+                <th>Upstream (proxy pass)</th>
+                <th>Requisições (5s)</th>
+                <th>Saúde</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody>
               {loadBalancing.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="py-8 text-center text-gray-500">
+                  <td colSpan={4} className="py-8 text-center text-text-mut">
                     Aguardando tráfego ou nenhum log do Nginx encontrado.
                   </td>
                 </tr>
@@ -169,27 +166,24 @@ const NginxView = () => {
                 const isWarn = WARN_STATUSES.includes(host.status);
 
                 return (
-                  <tr
-                    key={`${host.server_name}-${host.upstream_addr}-${host.status}`}
-                    className="hover:bg-white/[0.02] transition-colors"
-                  >
-                    <td className="py-3 px-4">
+                  <tr key={`${host.server_name}-${host.upstream_addr}-${host.status}`}>
+                    <td>
                       <div className="flex items-center gap-2">
-                        <Globe size={14} className={isError ? 'text-rose-500' : 'text-[#10b981]'} />
-                        <span className="text-gray-200 font-medium">{host.server_name || "Desconhecido"}</span>
+                        <Globe size={14} strokeWidth={1.75} className={isError ? 'text-crit' : 'text-text-faint'} />
+                        <span className="mono-data text-text-hi">{host.server_name || 'Desconhecido'}</span>
                       </div>
                     </td>
-                    <td className="py-3 px-4 font-mono text-gray-400">{host.upstream_addr}</td>
-                    <td className="py-3 px-4">
-                      <span className="text-gray-300 bg-white/5 px-2 py-1 rounded text-xs">{host.requests_count} reqs</span>
+                    <td className="mono-data text-text-mut">{host.upstream_addr}</td>
+                    <td>
+                      <span className="badge badge-muted mono-data">{host.requests_count} reqs</span>
                     </td>
-                    <td className="py-3 px-4">
+                    <td>
                       {isError ? (
-                        <span className="text-rose-400 text-xs bg-rose-400/10 px-2 py-1 rounded border border-rose-400/20">Erro {host.status}</span>
+                        <span className="badge badge-crit">Erro {host.status}</span>
                       ) : isWarn ? (
-                        <span className="text-amber-400 text-xs bg-amber-400/10 px-2 py-1 rounded border border-amber-400/20">Aviso {host.status}</span>
+                        <span className="badge badge-warn">Aviso {host.status}</span>
                       ) : (
-                        <span className="text-emerald-400 text-xs bg-emerald-400/10 px-2 py-1 rounded border border-emerald-400/20">Saudável 200</span>
+                        <span className="badge badge-ok">Saudável 200</span>
                       )}
                     </td>
                   </tr>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Box, Search, Play, Square, RefreshCw, Terminal, X, Cpu, MemoryStick, ChevronDown, ChevronRight, Folder } from 'lucide-react';
+import { Search, Play, Square, RefreshCw, Terminal, X, Cpu, MemoryStick, ChevronDown, ChevronRight, Folder } from 'lucide-react';
 import { api, openStream, type ContainerLiveStat } from '../lib/api';
 import { formatBytes } from '../lib/format';
 import { useDialog } from './ui/dialog-context';
@@ -118,151 +118,163 @@ const ContainersView = () => {
       if (!groups[proj]) groups[proj] = [];
       groups[proj].push(c);
     });
-    
+
     return groups;
   }, [containers, search]);
 
   const liveSelected = selectedContainer ? containers.find(c => c.docker_id === selectedContainer.docker_id) || selectedContainer : null;
 
   return (
-    <div className="p-4 md:p-8 min-h-full relative">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4">
+    <div className="p-4 md:p-8 min-h-full relative anim-rise">
+      <div className="page-header flex-col md:flex-row items-start md:items-end">
         <div>
-          <h1 className="text-2xl font-light text-white mb-2 flex items-center gap-3">
-            <Box className="text-[#10b981]" /> Gestão de <span className="font-bold">Containers</span>
-          </h1>
-          <p className="text-[#737373] text-sm">Visualize o consumo em tempo real de todos os containers distribuídos na sua infraestrutura.</p>
+          <h1 className="page-title">Containers</h1>
+          <p className="page-desc">Consumo em tempo real de todos os containers distribuídos na infraestrutura.</p>
         </div>
         <div className="relative w-full md:w-64">
-          <Search className="w-4 h-4 text-[#737373] absolute left-3 top-1/2 -translate-y-1/2" />
-          <input 
-            type="text" 
-            placeholder="Buscar container..." 
+          <Search size={16} strokeWidth={1.75} className="text-text-faint absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            placeholder="Buscar container..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-[#0c0c0e] border border-white/10 rounded-lg pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors"
+            className="input-base w-full pl-9"
           />
         </div>
       </div>
 
-      <div className="glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02]">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-sm font-bold tracking-widest text-[#737373] uppercase">Projetos & Containers ({containers.length})</h2>
-          <div className="flex gap-2 items-center bg-[#10b981]/10 px-2 py-1 rounded border border-[#10b981]/20">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse"></span>
-            <span className="text-[10px] text-[#10b981] font-bold tracking-widest uppercase">Live Sync</span>
-          </div>
+      <div className="panel p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="eyebrow">Projetos e containers · {containers.length}</h2>
+          <span className="badge badge-ok">
+            <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse"></span>
+            ao vivo
+          </span>
         </div>
 
         <div className="overflow-x-auto custom-scrollbar">
-          <table className="w-full text-sm text-left border-collapse min-w-[800px]">
-            <thead className="text-[10px] text-[#737373] uppercase tracking-widest bg-[#0c0c0e]">
+          <table className="table-base min-w-[800px]">
+            <thead>
               <tr>
-                <th className="py-3 px-4 rounded-l w-8"></th>
-                <th className="py-3 px-4">Nome</th>
-                <th className="py-3 px-4">Status / Uptime</th>
-                <th className="py-3 px-4 text-right">CPU Usage</th>
-                <th className="py-3 px-4 text-right">Memória (RAM)</th>
-                <th className="py-3 px-4 text-center rounded-r">Ações</th>
+                <th className="w-8"></th>
+                <th>Nome</th>
+                <th>Estado / uptime</th>
+                <th className="text-right">CPU</th>
+                <th className="text-right">Memória (RAM)</th>
+                <th className="text-center">Ações</th>
               </tr>
             </thead>
             <tbody>
               {Object.keys(groupedContainers).length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-[#737373]">Nenhum container encontrado.</td>
+                  <td colSpan={6} className="py-8 text-center text-text-mut">Nenhum container encontrado.</td>
                 </tr>
               ) : (
                 Object.entries(groupedContainers).map(([project, projContainers]) => {
                   const isExpanded = expandedProjects[project] !== false; // default true
-                  
+
                   return (
                     <React.Fragment key={project}>
-                      {/* Project Header Row */}
-                      <tr 
-                        className="border-b border-white/[0.05] bg-white/[0.01] hover:bg-white/[0.03] transition-colors cursor-pointer"
+                      {/* Linha do projeto */}
+                      <tr
+                        className="bg-ink-900 cursor-pointer"
                         onClick={() => toggleProject(project)}
                       >
-                        <td className="py-3 px-4 text-[#737373]">
-                          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        <td className="text-text-faint">
+                          {isExpanded ? <ChevronDown size={16} strokeWidth={1.75} /> : <ChevronRight size={16} strokeWidth={1.75} />}
                         </td>
-                        <td colSpan={5} className="py-3 px-4">
-                          <div className="flex items-center gap-2">
-                            <Folder size={14} className="text-[#10b981]" />
-                            <span className="font-bold text-white/90">{project}</span>
-                            <span className="text-xs text-[#737373] bg-black/20 px-2 py-0.5 rounded border border-white/5">
-                              {projContainers.length} containers
-                            </span>
+                        <td colSpan={5}>
+                          <div className="flex items-center gap-2.5">
+                            <Folder size={14} strokeWidth={1.75} className="text-text-faint" />
+                            <span className="font-semibold text-text-hi">{project}</span>
+                            <span className="badge badge-muted">{projContainers.length} containers</span>
                           </div>
                         </td>
                       </tr>
-                      
-                      {/* Container Rows */}
+
+                      {/* Linhas dos containers */}
                       {isExpanded && projContainers.map((c) => {
                         const memUsedStr = formatBytes(c.mem_used);
                         const memLimitStr = formatBytes(c.mem_limit);
                         const memPercent = c.mem_limit > 0 ? ((c.mem_used / c.mem_limit) * 100).toFixed(1) : '0.0';
                         const isRunning = c.state === 'running';
-                        
+
                         return (
-                          <tr key={c.docker_id} className="border-b border-white/[0.02] hover:bg-white/[0.04] transition-all">
-                            <td className="py-4 px-4"></td>
-                            <td className="py-4 px-4 font-mono text-[#f59e0b] text-[13px]">
+                          <tr key={c.docker_id}>
+                            <td></td>
+                            <td>
                               <div className="flex items-center gap-3">
-                                <div className="w-6 h-px bg-white/10" />
-                                {c.name}
+                                <div className="w-5 h-px bg-line" />
+                                <span className="mono-data text-text-hi">{c.name}</span>
                               </div>
                             </td>
-                            <td className="py-4 px-4">
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2">
-                                  <span className={`w-2 h-2 rounded-full shadow-[0_0_5px_currentColor] ${isRunning ? 'bg-[#10b981] text-[#10b981]' : 'bg-red-500 text-red-500'}`}></span>
-                                  <span className={`text-[10px] font-bold tracking-widest uppercase ${isRunning ? 'text-[#10b981]' : 'text-red-500'}`}>
-                                    {c.state || 'Unknown'}
-                                  </span>
-                                </div>
-                                <span className="text-xs text-[#737373] whitespace-nowrap" title={c.status}>{c.status}</span>
+                            <td>
+                              <div className="flex flex-col gap-1 items-start">
+                                <span className={`badge ${!c.state ? 'badge-muted' : isRunning ? 'badge-ok' : 'badge-crit'}`}>
+                                  {c.state || 'desconhecido'}
+                                </span>
+                                <span className="text-xs text-text-faint whitespace-nowrap" title={c.status}>{c.status}</span>
                               </div>
                             </td>
-                            <td className="py-4 px-4 text-right font-medium text-white/90">
+                            <td className="text-right">
                               {isRunning ? (
                                 <div className="flex flex-col items-end">
-                                  <span>{c.cpu.toFixed(2)}%</span>
-                                  <div className="w-16 h-1 bg-white/10 rounded-full mt-1 overflow-hidden">
-                                    <div className="h-full bg-[#10b981]" style={{ width: `${Math.min(c.cpu, 100)}%` }}></div>
+                                  <span className="mono-data text-text-hi">{c.cpu.toFixed(2)}%</span>
+                                  <div className="w-16 h-1 bg-ink-750 rounded-full mt-1.5 overflow-hidden">
+                                    <div className="h-full bg-accent/80" style={{ width: `${Math.min(c.cpu, 100)}%` }}></div>
                                   </div>
                                 </div>
                               ) : (
-                                <span className="text-[#737373] text-xs">-</span>
+                                <span className="text-text-faint text-xs">-</span>
                               )}
                             </td>
-                            <td className="py-4 px-4 text-right font-medium text-white/90">
+                            <td className="text-right">
                               {isRunning ? (
                                 <div className="flex flex-col items-end">
-                                  <span>{memUsedStr} <span className="text-[#737373] text-xs">/ {memLimitStr}</span></span>
-                                  <span className="text-[10px] text-[#10b981] mt-0.5">{memPercent}%</span>
+                                  <span className="mono-data text-text-hi">{memUsedStr} <span className="text-text-faint">/ {memLimitStr}</span></span>
+                                  <span className="text-[11px] text-text-faint mt-0.5 tabular">{memPercent}%</span>
                                 </div>
                               ) : (
-                                <span className="text-[#737373] text-xs">-</span>
+                                <span className="text-text-faint text-xs">-</span>
                               )}
                             </td>
-                            <td className="py-4 px-4 text-center">
-                              <div className="flex items-center justify-center gap-2">
-                                <button onClick={() => setSelectedContainer(c)} className="p-1.5 hover:bg-[#10b981]/20 rounded text-[#10b981] transition-colors border border-[#10b981]/30 bg-[#10b981]/10" title="Ver Logs ao Vivo">
-                                  <Terminal size={14} />
+                            <td className="text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  onClick={() => setSelectedContainer(c)}
+                                  className="btn btn-ghost btn-sm text-accent"
+                                  title="Ver logs ao vivo"
+                                >
+                                  <Terminal size={16} strokeWidth={1.75} />
                                 </button>
                                 {/* Start/stop/restart mudam a infraestrutura: só Suporte TI para cima. */}
                                 {canOperate && (isRunning ? (
                                   <>
-                                    <button disabled={actionBusy[c.docker_id]} onClick={() => containerAction(c, 'restart')} className="p-1.5 hover:bg-white/10 rounded text-[#737373] hover:text-white transition-colors disabled:opacity-40" title="Restart">
-                                      <RefreshCw size={14} className={actionBusy[c.docker_id] ? 'animate-spin' : ''} />
+                                    <button
+                                      disabled={actionBusy[c.docker_id]}
+                                      onClick={() => containerAction(c, 'restart')}
+                                      className="btn btn-ghost btn-sm disabled:opacity-40"
+                                      title="Reiniciar"
+                                    >
+                                      <RefreshCw size={16} strokeWidth={1.75} className={actionBusy[c.docker_id] ? 'animate-spin' : ''} />
                                     </button>
-                                    <button disabled={actionBusy[c.docker_id]} onClick={() => containerAction(c, 'stop')} className="p-1.5 hover:bg-white/10 rounded text-[#737373] hover:text-red-400 transition-colors disabled:opacity-40" title="Stop">
-                                      <Square size={14} />
+                                    <button
+                                      disabled={actionBusy[c.docker_id]}
+                                      onClick={() => containerAction(c, 'stop')}
+                                      className="btn btn-ghost btn-sm hover:text-crit disabled:opacity-40"
+                                      title="Parar"
+                                    >
+                                      <Square size={16} strokeWidth={1.75} />
                                     </button>
                                   </>
                                 ) : (
-                                  <button disabled={actionBusy[c.docker_id]} onClick={() => containerAction(c, 'start')} className="p-1.5 hover:bg-white/10 rounded text-[#737373] hover:text-emerald-400 transition-colors disabled:opacity-40" title="Start">
-                                    <Play size={14} />
+                                  <button
+                                    disabled={actionBusy[c.docker_id]}
+                                    onClick={() => containerAction(c, 'start')}
+                                    className="btn btn-ghost btn-sm hover:text-ok disabled:opacity-40"
+                                    title="Iniciar"
+                                  >
+                                    <Play size={16} strokeWidth={1.75} />
                                   </button>
                                 ))}
                               </div>
@@ -279,46 +291,50 @@ const ContainersView = () => {
         </div>
       </div>
 
-      {/* Modal de Logs */}
+      {/* Modal de logs */}
       {selectedContainer && liveSelected && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-4xl h-[80vh] flex flex-col bg-[#0c0c0e] border border-white/10 rounded-xl shadow-2xl overflow-hidden">
-            {/* Header Modal */}
-            <div className="flex items-center justify-between p-4 border-b border-white/5 bg-[#1a1c23]">
+          <div className="panel w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden shadow-pop">
+            <div className="flex items-center justify-between p-4 border-b border-line bg-ink-850">
               <div className="flex items-center gap-3">
-                <Terminal className="text-[#10b981] w-5 h-5" />
-                <h3 className="text-white font-bold font-mono tracking-wider">{liveSelected.name}</h3>
-                <span className="px-2 py-0.5 rounded bg-[#10b981]/10 text-[#10b981] text-[10px] uppercase font-bold border border-[#10b981]/20">Live Stream</span>
+                <Terminal size={18} strokeWidth={1.75} className="text-accent" />
+                <h3 className="mono-data text-text-hi font-semibold text-sm">{liveSelected.name}</h3>
+                <span className="badge badge-ok">
+                  <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse"></span>
+                  ao vivo
+                </span>
               </div>
-              <button onClick={() => setSelectedContainer(null)} className="text-[#737373] hover:text-white transition-colors">
-                <X size={20} />
+              <button onClick={() => setSelectedContainer(null)} className="btn btn-ghost btn-sm" title="Fechar">
+                <X size={18} strokeWidth={1.75} />
               </button>
             </div>
-            
-            {/* Consumo Isolado do Container */}
+
+            {/* Consumo isolado do container */}
             {liveSelected.state === 'running' && (
-              <div className="grid grid-cols-2 gap-4 p-4 border-b border-white/5 bg-[#0c0c0e]">
-                <div className="flex items-center gap-4 p-3 rounded-lg border border-white/5 bg-[#1a1c23]">
-                  <Cpu className="text-[#f59e0b] w-8 h-8" />
+              <div className="grid grid-cols-2 gap-3 p-4 border-b border-line bg-ink-900">
+                <div className="flex items-center gap-3 p-3 rounded-ctrl border border-line bg-ink-850">
+                  <Cpu size={18} strokeWidth={1.75} className="text-accent shrink-0" />
                   <div>
-                    <div className="text-[10px] text-[#737373] uppercase tracking-widest font-bold">Uso de CPU</div>
-                    <div className="text-xl font-bold text-white">{liveSelected.cpu.toFixed(2)}%</div>
+                    <div className="eyebrow">Uso de CPU</div>
+                    <div className="stat-value text-lg">{liveSelected.cpu.toFixed(2)}%</div>
                   </div>
                 </div>
-                <div className="flex items-center gap-4 p-3 rounded-lg border border-white/5 bg-[#1a1c23]">
-                  <MemoryStick className="text-blue-400 w-8 h-8" />
+                <div className="flex items-center gap-3 p-3 rounded-ctrl border border-line bg-ink-850">
+                  <MemoryStick size={18} strokeWidth={1.75} className="text-info shrink-0" />
                   <div>
-                    <div className="text-[10px] text-[#737373] uppercase tracking-widest font-bold">Memória RAM</div>
-                    <div className="text-xl font-bold text-white">{formatBytes(liveSelected.mem_used)} <span className="text-sm text-[#737373]">/ {formatBytes(liveSelected.mem_limit)}</span></div>
+                    <div className="eyebrow">Memória RAM</div>
+                    <div className="stat-value text-lg">
+                      {formatBytes(liveSelected.mem_used)} <span className="text-sm text-text-faint">/ {formatBytes(liveSelected.mem_limit)}</span>
+                    </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Terminal de Logs */}
-            <div className="flex-1 bg-black p-4 overflow-y-auto font-mono text-[12px] text-gray-300 leading-relaxed custom-scrollbar">
+            {/* Terminal de logs */}
+            <div className="flex-1 bg-ink-950 p-4 overflow-y-auto font-mono text-xs text-text leading-relaxed custom-scrollbar">
               {logs.length === 0 ? (
-                <div className="text-[#737373] italic">Conectando ao container via SSH e puxando os logs...</div>
+                <div className="text-text-faint">Conectando ao container via SSH e puxando os logs...</div>
               ) : (
                 logs.map((log, i) => <div key={i} className="whitespace-pre-wrap break-all selectable">{log}</div>)
               )}

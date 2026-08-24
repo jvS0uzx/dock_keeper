@@ -21,9 +21,9 @@ type Pending =
 const NOTICE_TTL_MS = 5000;
 
 const toneStyle: Record<NoticeTone, { border: string; text: string; Icon: typeof Info }> = {
-  success: { border: 'border-emerald-400/30', text: 'text-emerald-400', Icon: CheckCircle2 },
-  error: { border: 'border-rose-400/30', text: 'text-rose-400', Icon: XCircle },
-  info: { border: 'border-white/10', text: 'text-gray-300', Icon: Info },
+  success: { border: 'border-ok/30', text: 'text-ok', Icon: CheckCircle2 },
+  error: { border: 'border-crit/30', text: 'text-crit', Icon: XCircle },
+  info: { border: 'border-line-hi', text: 'text-text', Icon: Info },
 };
 
 /**
@@ -80,30 +80,32 @@ export const DialogProvider = ({ children }: { children: ReactNode }) => {
 
       {pending && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
           onClick={() => settle(false)}
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-label={pending.options.title}
-            className="w-full max-w-md rounded-xl border border-white/10 bg-[#0c0c0e] shadow-2xl"
+            className="panel anim-rise w-full max-w-md shadow-pop"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start gap-3 border-b border-white/5 p-5">
-              {isDanger && <AlertTriangle size={18} className="mt-0.5 shrink-0 text-rose-400" />}
+            <div className="flex items-start gap-3 border-b border-line p-5">
+              {isDanger && (
+                <AlertTriangle size={18} strokeWidth={1.75} className="mt-0.5 shrink-0 text-crit" />
+              )}
               <div className="flex-1">
-                <h2 className="font-medium text-white">{pending.options.title}</h2>
+                <h2 className="font-semibold tracking-tight text-text-hi">{pending.options.title}</h2>
                 {pending.options.message && (
-                  <p className="mt-1 text-sm text-[#737373]">{pending.options.message}</p>
+                  <p className="mt-1 text-sm text-text-mut">{pending.options.message}</p>
                 )}
               </div>
               <button
                 onClick={() => settle(false)}
                 aria-label="Fechar"
-                className="text-[#737373] transition-colors hover:text-white"
+                className="text-text-faint transition-colors hover:text-text-hi"
               >
-                <X size={18} />
+                <X size={18} strokeWidth={1.75} />
               </button>
             </div>
 
@@ -116,26 +118,19 @@ export const DialogProvider = ({ children }: { children: ReactNode }) => {
                   placeholder={pending.options.placeholder}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && settle(true)}
-                  className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-2 text-sm text-white transition-colors placeholder:text-gray-600 focus:border-[#10b981] focus:outline-none"
+                  className="input-base w-full"
                 />
               </div>
             )}
 
             <div className="flex justify-end gap-2 p-5">
-              <button
-                onClick={() => settle(false)}
-                className="rounded-lg border border-white/10 px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#737373] transition-colors hover:text-white"
-              >
+              <button onClick={() => settle(false)} className="btn btn-ghost">
                 {(pending.kind === 'confirm' && pending.options.cancelLabel) || 'Cancelar'}
               </button>
               <button
                 onClick={() => settle(true)}
                 disabled={pending.kind === 'prompt' && !draft.trim()}
-                className={`rounded-lg border px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-40 ${
-                  isDanger
-                    ? 'border-rose-400/50 bg-rose-400/10 text-rose-400 hover:bg-rose-400/20'
-                    : 'border-[#10b981]/50 bg-[#10b981]/20 text-[#10b981] hover:bg-[#10b981]/30'
-                }`}
+                className={`btn disabled:opacity-40 ${isDanger ? 'btn-danger' : 'btn-primary'}`}
               >
                 {pending.options.confirmLabel || 'Confirmar'}
               </button>
@@ -151,9 +146,9 @@ export const DialogProvider = ({ children }: { children: ReactNode }) => {
             <div
               key={id}
               role="status"
-              className={`pointer-events-auto flex max-w-sm items-start gap-2 rounded-lg border bg-[#0c0c0e]/95 px-4 py-3 text-sm shadow-2xl backdrop-blur ${border} ${text}`}
+              className={`pointer-events-auto flex max-w-sm items-start gap-2 rounded-ctrl border bg-ink-800/95 px-4 py-3 text-sm shadow-pop backdrop-blur ${border} ${text}`}
             >
-              <Icon size={16} className="mt-0.5 shrink-0" />
+              <Icon size={16} strokeWidth={1.75} className="mt-0.5 shrink-0" />
               <span className="selectable">{message}</span>
             </div>
           );

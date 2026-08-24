@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
 } from 'recharts';
 import {
   ArrowLeft, Cpu, MemoryStick, HardDrive, Thermometer, Activity, Clock,
@@ -57,6 +57,15 @@ const METRICS: { key: HistoryMetric; label: string; unit: string }[] = [
 
 const RANGES: HistoryRange[] = ['1h', '6h', '24h', '7d'];
 
+// Linha de referência do gráfico: o mesmo limiar de atenção das demais telas.
+// Só aparece quando a série chega perto dele — sem esticar o domínio à toa.
+const METRIC_THRESHOLD: Partial<Record<HistoryMetric, number>> = {
+  cpu: USAGE_WARN,
+  mem: USAGE_WARN,
+  disk: USAGE_WARN,
+  temperature: TEMP_WARN,
+};
+
 // Mesmos rótulos do inventário de rede, para o tipo não mudar de nome entre
 // as telas.
 const DEVICE_LABELS: Record<string, string> = {
@@ -69,15 +78,15 @@ const DEVICE_LABELS: Record<string, string> = {
 };
 
 const usageColor = (pct: number) => {
-  if (pct >= USAGE_CRITICAL) return 'text-rose-400';
-  if (pct >= USAGE_WARN) return 'text-amber-400';
-  return 'text-white';
+  if (pct >= USAGE_CRITICAL) return 'text-crit';
+  if (pct >= USAGE_WARN) return 'text-warn';
+  return 'text-text-hi';
 };
 
 const tempColor = (celsius: number) => {
-  if (celsius >= TEMP_CRITICAL) return 'text-rose-400';
-  if (celsius >= TEMP_WARN) return 'text-amber-400';
-  return 'text-emerald-400';
+  if (celsius >= TEMP_CRITICAL) return 'text-crit';
+  if (celsius >= TEMP_WARN) return 'text-warn';
+  return 'text-ok';
 };
 
 const formatUptime = (seconds: number) => {
@@ -107,22 +116,22 @@ interface StatProps {
   Icon: typeof Cpu;
 }
 
-const Stat = ({ label, value, hint, accent = 'text-white', title, Icon }: StatProps) => (
-  <div className="glass-panel rounded-xl p-4 border border-white/5 bg-white/[0.02]" title={title}>
+const Stat = ({ label, value, hint, accent = '', title, Icon }: StatProps) => (
+  <div className="stat-card !p-4" title={title}>
     <div className="flex items-center gap-2 mb-2">
-      <Icon size={13} className="text-[#737373]" />
-      <span className="text-[10px] text-[#737373] uppercase tracking-widest">{label}</span>
+      <Icon size={13} strokeWidth={1.75} className="text-text-faint" />
+      <span className="eyebrow">{label}</span>
     </div>
-    <div className={`text-2xl font-bold ${accent}`}>{value}</div>
-    {hint && <div className="text-[10px] text-[#737373] mt-1">{hint}</div>}
+    <div className={`stat-value ${accent}`}>{value}</div>
+    {hint && <div className="text-[11px] text-text-faint mono-data mt-1">{hint}</div>}
   </div>
 );
 
 const Panel = ({ title, Icon, children }: { title: string; Icon: typeof Cpu; children: React.ReactNode }) => (
-  <div className="glass-panel rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
-    <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5">
-      <Icon size={14} className="text-[#10b981]" />
-      <h2 className="text-xs font-bold tracking-widest text-[#737373] uppercase">{title}</h2>
+  <div className="panel overflow-hidden">
+    <div className="flex items-center gap-2 px-4 py-3 border-b border-line">
+      <Icon size={16} strokeWidth={1.75} className="text-accent" />
+      <h2 className="eyebrow">{title}</h2>
     </div>
     <div className="p-4">{children}</div>
   </div>
@@ -130,8 +139,8 @@ const Panel = ({ title, Icon, children }: { title: string; Icon: typeof Cpu; chi
 
 const Field = ({ label, value }: { label: string; value: string }) => (
   <div>
-    <div className="text-[10px] text-[#737373] uppercase tracking-widest">{label}</div>
-    <div className="text-sm text-white/90 mt-0.5">{value || <span className="text-gray-600">—</span>}</div>
+    <div className="eyebrow">{label}</div>
+    <div className="text-sm text-text mt-0.5">{value || <span className="text-text-faint">—</span>}</div>
   </div>
 );
 
@@ -150,6 +159,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   const activeMetric = METRICS.find((m) => m.key === metric) ?? METRICS[0];
+  const threshold = METRIC_THRESHOLD[metric];
 
   // Estado ao vivo da máquina. O endpoint devolve o parque inteiro; o recorte
   // por id acontece aqui porque não há rota de servidor individual.
@@ -238,22 +248,22 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
   const backButton = (
     <button
       onClick={goBack}
-      className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#737373] hover:text-white transition-colors"
+      className="flex items-center gap-2 text-xs font-semibold text-text-mut hover:text-text-hi transition-colors"
     >
-      <ArrowLeft size={14} />
+      <ArrowLeft size={14} strokeWidth={1.75} />
       Voltar
     </button>
   );
 
   if (loading) {
-    return <div className="p-8 text-sm text-[#737373]">Carregando máquina...</div>;
+    return <div className="p-8 text-sm text-text-mut">Carregando máquina...</div>;
   }
 
   if (!machine) {
     return (
       <div className="p-8 flex flex-col items-start gap-4">
         {backButton}
-        <div className="glass-panel rounded-xl border border-white/5 bg-white/[0.02] p-8 text-sm text-[#737373]">
+        <div className="panel p-8 text-sm text-text-mut">
           Máquina não encontrada. Ela pode ter sido removida do painel ou estar
           fora do seu alcance de unidade.
         </div>
@@ -277,53 +287,48 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
   const diskPct = machine.disk_total > 0 ? (machine.disk_used / machine.disk_total) * 100 : 0;
 
   return (
-    <div className="p-4 md:p-8 flex flex-col gap-6">
+    <div className="p-4 md:p-8 flex flex-col gap-6 anim-rise">
       <div className="flex flex-col gap-4">
         {backButton}
 
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="page-header !mb-0">
           <div>
-            <h1 className="text-2xl font-light text-white mb-2 flex items-center gap-3">
-              <MonitorSmartphone className="text-[#10b981]" />
-              <span className="font-bold">{machine.name}</span>
+            <h1 className="page-title flex items-center gap-3">
+              <MonitorSmartphone size={22} strokeWidth={1.75} className="text-accent" />
+              {machine.name}
             </h1>
-            <div className="flex items-center gap-3 flex-wrap text-sm">
-              <span className="font-mono text-[#737373] selectable">{machine.host_ip}</span>
-              <span className="text-[#737373]">·</span>
-              <span className="text-gray-400">{siteName}</span>
+            <div className="flex items-center gap-3 flex-wrap text-sm mt-1.5">
+              <span className="mono-data text-text-mut selectable">{machine.host_ip}</span>
+              <span className="text-text-faint">·</span>
+              <span className="text-text-mut">{siteName}</span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <span
-              className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest border ${
-                machine.online
-                  ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
-                  : 'text-[#737373] bg-white/5 border-white/10'
-              }`}
-            >
+            <span className={`badge ${machine.online ? 'badge-ok' : 'badge-muted'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${machine.online ? 'bg-ok animate-pulse' : 'bg-text-faint'}`} />
               {machine.online ? 'Online' : 'Offline'}
             </span>
-            <span className="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest border border-white/10 text-gray-400 bg-white/5">
+            <span className="badge badge-muted">
               {machine.kind === 'agent' ? 'Agente' : 'SSH'}
             </span>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 stagger">
         <Stat
           label="CPU"
           Icon={Cpu}
           value={machine.online ? `${machine.cpu.toFixed(0)}%` : '—'}
-          accent={machine.online ? usageColor(machine.cpu) : 'text-gray-600'}
+          accent={machine.online ? usageColor(machine.cpu) : 'text-text-faint'}
         />
         <Stat
           label="Memória"
           Icon={MemoryStick}
           value={machine.online && machine.mem_total > 0 ? `${memPct.toFixed(0)}%` : '—'}
           hint={machine.mem_total > 0 ? `${formatGB(machine.mem_used)} / ${formatGB(machine.mem_total)} GB` : undefined}
-          accent={machine.online ? usageColor(memPct) : 'text-gray-600'}
+          accent={machine.online ? usageColor(memPct) : 'text-text-faint'}
         />
         <Stat
           label="Disco"
@@ -336,40 +341,40 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
           label="Temperatura"
           Icon={Thermometer}
           value={formatTemperature(machine.temperature_c)}
-          accent={machine.temperature_c !== null ? tempColor(machine.temperature_c) : 'text-gray-600'}
+          accent={machine.temperature_c !== null ? tempColor(machine.temperature_c) : 'text-text-faint'}
           title={machine.temperature_c === null ? NO_TEMPERATURE_HINT : undefined}
         />
         <Stat
           label="Load (1min)"
           Icon={Activity}
           value={machine.online ? machine.load1.toFixed(2) : '—'}
-          accent={machine.online ? 'text-white' : 'text-gray-600'}
+          accent={machine.online ? '' : 'text-text-faint'}
         />
         <Stat
           label="Ligada há"
           Icon={Clock}
           value={machine.online ? formatUptime(machine.uptime) : '—'}
-          accent={machine.online ? 'text-white' : 'text-gray-600'}
+          accent={machine.online ? '' : 'text-text-faint'}
         />
         <Stat
           label="Usuário logado"
           Icon={User}
           value={machine.last_user || '—'}
-          accent={machine.last_user ? 'text-white' : 'text-gray-600'}
+          accent={machine.last_user ? '' : 'text-text-faint'}
         />
         <Stat
           label={HANDSHAKE_LABEL}
           Icon={Wifi}
           value={formatHandshake(machine.ssh_handshake_ms)}
-          accent={machine.ssh_handshake_ms !== null ? 'text-white' : 'text-gray-600'}
+          accent={machine.ssh_handshake_ms !== null ? '' : 'text-text-faint'}
           title={machine.ssh_handshake_ms === null ? NO_HANDSHAKE_HINT : undefined}
         />
       </div>
 
-      <div className="glass-panel rounded-xl border border-white/5 bg-white/[0.02] p-4 md:p-6">
+      <div className="panel p-4 md:p-6">
         <div className="flex flex-wrap items-end gap-4 mb-6">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="machine-metric" className="text-[10px] text-[#737373] uppercase tracking-widest">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="machine-metric" className="eyebrow">
               Métrica
             </label>
             <Select
@@ -381,17 +386,17 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
             />
           </div>
 
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] text-[#737373] uppercase tracking-widest">Período</span>
+          <div className="flex flex-col gap-1.5">
+            <span className="eyebrow">Período</span>
             <div className="flex gap-1">
               {RANGES.map((r) => (
                 <button
                   key={r}
                   onClick={() => setRange(r)}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold tracking-widest uppercase transition-all border ${
+                  className={`btn text-xs ${
                     range === r
-                      ? 'bg-[#10b981]/20 border-[#10b981]/50 text-[#10b981]'
-                      : 'bg-black/40 border-white/10 text-[#737373] hover:text-white'
+                      ? 'bg-accent/10 border border-accent/40 text-accent'
+                      : 'btn-ghost'
                   }`}
                 >
                   {r}
@@ -402,18 +407,18 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
 
           <button
             onClick={() => fetchHistory()}
-            className="ml-auto flex items-center gap-2 text-xs text-[#737373] hover:text-[#10b981] transition-colors"
+            className="btn btn-ghost ml-auto text-xs"
           >
-            <RefreshCw size={14} className={loadingHistory ? 'animate-spin' : ''} />
+            <RefreshCw size={14} strokeWidth={1.75} className={loadingHistory ? 'animate-spin' : ''} />
             Atualizar
           </button>
         </div>
 
         <div className="h-[320px] w-full">
           {loadingHistory && history.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-sm text-[#737373]">Carregando...</div>
+            <div className="h-full flex items-center justify-center text-sm text-text-faint">Carregando...</div>
           ) : history.length === 0 ? (
-            <div className="h-full flex items-center justify-center px-6 text-center text-sm text-[#737373]">
+            <div className="h-full flex items-center justify-center px-6 text-center text-sm text-text-faint">
               {emptyChartMessage}
             </div>
           ) : (
@@ -421,38 +426,49 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
               <AreaChart data={history} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="machineMetricFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.12} />
+                    <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-line)" strokeOpacity={0.5} vertical={false} />
                 <XAxis
                   dataKey="time"
-                  tick={{ fill: '#737373', fontSize: 11 }}
-                  stroke="rgba(255,255,255,0.1)"
+                  tick={{ fill: 'var(--color-text-faint)', fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
                   minTickGap={30}
                 />
                 <YAxis
-                  tick={{ fill: '#737373', fontSize: 11 }}
-                  stroke="rgba(255,255,255,0.1)"
+                  tick={{ fill: 'var(--color-text-faint)', fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
                   width={48}
                   unit={activeMetric.unit}
                 />
                 <Tooltip
                   contentStyle={{
-                    background: '#0c0c0e',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: 8,
-                    color: '#fff',
+                    background: 'var(--color-ink-800)',
+                    border: '1px solid var(--color-line-hi)',
+                    borderRadius: 10,
                     fontSize: 12,
+                    fontFamily: 'var(--font-mono)',
                   }}
-                  labelStyle={{ color: '#737373' }}
+                  labelStyle={{ color: 'var(--color-text-mut)' }}
+                  itemStyle={{ color: 'var(--color-text-hi)' }}
                   formatter={(value) => [`${value}${activeMetric.unit}`, activeMetric.label]}
                 />
+                {threshold !== undefined && (
+                  <ReferenceLine
+                    y={threshold}
+                    stroke="var(--color-warn)"
+                    strokeDasharray="4 4"
+                    strokeOpacity={0.7}
+                  />
+                )}
                 <Area
                   type="monotone"
                   dataKey="value"
-                  stroke="#10b981"
+                  stroke="var(--color-accent)"
                   strokeWidth={2}
                   fill="url(#machineMetricFill)"
                   dot={false}
@@ -467,7 +483,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Panel title="Inventário de Rede" Icon={Network}>
           {!inventory ? (
-            <p className="text-sm text-[#737373]">
+            <p className="text-sm text-text-mut">
               O endereço {machine.host_ip} não aparece no inventário. Ou a varredura
               ainda não passou por esta faixa, ou a máquina está fora dela.
             </p>
@@ -479,15 +495,15 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
               </div>
 
               <div>
-                <div className="text-[10px] text-[#737373] uppercase tracking-widest mb-1.5">Portas abertas</div>
+                <div className="eyebrow mb-1.5">Portas abertas</div>
                 {inventory.open_ports.length === 0 ? (
-                  <span className="text-sm text-gray-600">—</span>
+                  <span className="text-sm text-text-faint">—</span>
                 ) : (
                   <div className="flex gap-1 flex-wrap">
                     {inventory.open_ports.map((port) => (
                       <span
                         key={port}
-                        className="bg-white/5 text-gray-400 px-1.5 py-0.5 rounded text-[10px] font-mono border border-white/5"
+                        className="bg-ink-800 text-text-mut px-1.5 py-0.5 rounded-md text-[10px] mono-data border border-line"
                       >
                         {port}
                       </span>
@@ -496,7 +512,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4 pt-3 border-t border-white/5">
+              <div className="grid grid-cols-2 gap-4 pt-3 border-t border-line">
                 <Field label="Andar" value={inventory.floor} />
                 <Field label="Setor" value={inventory.sector} />
                 <Field label="Sala" value={inventory.room} />
@@ -506,7 +522,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
               </div>
 
               {inventory.notes && (
-                <div className="pt-3 border-t border-white/5">
+                <div className="pt-3 border-t border-line">
                   <Field label="Observações" value={inventory.notes} />
                 </div>
               )}
@@ -529,14 +545,14 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
 
       <Panel title={`Últimas linhas de log (${logs.length})`} Icon={ScrollText}>
         {logs.length === 0 ? (
-          <p className="text-sm text-[#737373]">Nenhuma linha de log registrada para esta máquina.</p>
+          <p className="text-sm text-text-mut">Nenhuma linha de log registrada para esta máquina.</p>
         ) : (
           <div className="max-h-80 overflow-y-auto custom-scrollbar font-mono text-[11px] flex flex-col gap-1">
             {logs.map((log) => (
               <div key={log.id} className="flex gap-3 break-all selectable">
-                <span className="text-gray-600 shrink-0">{formatDateTime(log.timestamp)}</span>
-                <span className="text-[#737373] shrink-0">{log.container || log.source}</span>
-                <span className="text-white/80">{log.line}</span>
+                <span className="text-text-faint shrink-0">{formatDateTime(log.timestamp)}</span>
+                <span className="text-text-mut shrink-0">{log.container || log.source}</span>
+                <span className="text-text">{log.line}</span>
               </div>
             ))}
           </div>

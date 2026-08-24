@@ -190,15 +190,16 @@ const Select = ({
         disabled={disabled}
         onClick={() => (isOpen ? setIsOpen(false) : open())}
         onKeyDown={handleKeyDown}
-        className="w-full flex items-center justify-between gap-2 bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white text-left transition-colors hover:border-[#10b981]/50 focus:outline-none focus:border-[#10b981] disabled:opacity-40 disabled:hover:border-white/10"
+        className="input-base flex w-full items-center justify-between gap-2 text-left hover:border-line-hi disabled:opacity-40 disabled:hover:border-line"
       >
-        <span className={`truncate ${selected ? 'text-white' : 'text-gray-500'}`}>
+        <span className={`truncate ${selected ? 'text-text-hi' : 'text-text-faint'}`}>
           {selected?.label ?? placeholder}
         </span>
         <ChevronDown
           size={16}
+          strokeWidth={1.75}
           aria-hidden="true"
-          className={`shrink-0 text-[#737373] transition-transform ${isOpen ? 'rotate-180' : ''}`}
+          className={`shrink-0 text-text-faint transition-transform ${isOpen ? 'rotate-180' : ''}`}
         />
       </button>
 
@@ -220,10 +221,10 @@ const Select = ({
               ? 'translateY(-100%)'
               : undefined,
           }}
-          className="overflow-y-auto custom-scrollbar bg-[#0c0c0e] border border-white/10 rounded-lg shadow-2xl z-[200]"
+          className="overflow-y-auto custom-scrollbar rounded-ctrl border border-line-hi bg-ink-800 shadow-pop z-[200]"
         >
           {options.length === 0 && (
-            <li className="px-4 py-2.5 text-sm text-[#737373]">Nenhuma opção</li>
+            <li className="px-3.5 py-2.5 text-sm text-text-faint">Nenhuma opção</li>
           )}
           {options.map((option, index) => {
             const isSelected = option.value === value;
@@ -235,12 +236,12 @@ const Select = ({
                 aria-selected={isSelected}
                 onPointerEnter={() => setActiveIndex(index)}
                 onClick={() => commit(index)}
-                className={`px-4 py-2.5 text-sm cursor-pointer transition-colors ${
+                className={`cursor-pointer px-3.5 py-2.5 text-sm transition-colors ${
                   isSelected
-                    ? 'bg-[#10b981]/15 text-[#10b981] font-medium'
+                    ? 'font-medium text-accent'
                     : isActive
-                      ? 'bg-white/5 text-white'
-                      : 'text-white/80'
+                      ? 'bg-ink-750 text-text-hi'
+                      : 'text-text'
                 }`}
               >
                 {option.label}

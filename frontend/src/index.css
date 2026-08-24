@@ -1,20 +1,66 @@
 @import "tailwindcss";
 
+/*
+ * Sistema de design do DockKeeper — "sala de controle sóbria".
+ * Uma única cor de acento (âmbar); verde, vermelho e azul são SEMÂNTICOS
+ * (ok/crítico/informativo) e nunca decoração. Todo valor de cor vive aqui:
+ * componente não usa hex inline. O contrato completo está em
+ * docs/frontend-design.md.
+ */
 @theme {
-  --color-vd-900: #050505;
-  --color-vd-800: #0a0a0a;
-  --color-vd-700: #141414;
+  /* Superfícies em camadas: cada nível sobe uma elevação. */
+  --color-ink-950: #0a0a0c;
+  --color-ink-900: #0f0f13;
+  --color-ink-850: #141419;
+  --color-ink-800: #191920;
+  --color-ink-750: #1f1f28;
+  --color-ink-700: #262631;
+
+  /* Bordas sólidas (para quando alpha sobre imagem/chart não serve). */
+  --color-line: #26262e;
+  --color-line-hi: #34343e;
+
+  /* Hierarquia de texto. */
+  --color-text-hi: #f4f4f5;
+  --color-text: #cfcfd6;
+  --color-text-mut: #8b8b96;
+  --color-text-faint: #5f5f6a;
+
+  /* Acento único da marca. */
+  --color-accent: #f59e0b;
+  --color-accent-hi: #fbbf24;
+
+  /* Semântica de estado — o único lugar onde verde/vermelho/azul existem. */
+  --color-ok: #34d399;
+  --color-warn: #f59e0b;
+  --color-crit: #f87171;
+  --color-info: #60a5fa;
+
+  /* Aliases legados — mantidos até a última tela migrar; não usar em código novo. */
+  --color-vd-900: #0a0a0c;
+  --color-vd-800: #141419;
+  --color-vd-700: #1f1f28;
   --color-vd-yellow: #f59e0b;
-  --color-vd-green: #10b981;
-  --color-vd-text: #e5e5e5;
-  --color-vd-textMuted: #737373;
+  --color-vd-green: #34d399;
+  --color-vd-text: #cfcfd6;
+  --color-vd-textMuted: #8b8b96;
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", monospace;
+
+  --radius-card: 0.875rem;   /* 14px — cartões e painéis */
+  --radius-ctrl: 0.625rem;   /* 10px — botões, inputs, selects */
+
+  --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 16px 48px -16px rgba(0, 0, 0, 0.75);
 }
 
 @layer base {
   body {
-    background-color: var(--color-vd-900);
-    color: var(--color-vd-text);
-    font-family: ui-sans-serif, system-ui, sans-serif;
+    background-color: var(--color-ink-950);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 
@@ -57,6 +103,19 @@
     cursor: not-allowed;
   }
 
+  /* Números alinham em coluna em qualquer métrica ou tabela. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Foco visível por teclado em tudo que é interativo, sem anel no clique. */
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
   /* Rede de segurança para algum <select> nativo que escape do componente
      ui/Select: o widget da lista é desenhado pelo sistema operacional e não há
      CSS que o padronize entre browsers, mas cor de fundo e de texto das opções
@@ -64,47 +123,314 @@
      branco no meio do tema escuro. */
   select,
   select option {
-    background-color: var(--color-vd-800);
-    color: var(--color-vd-text);
+    background-color: var(--color-ink-850);
+    color: var(--color-text);
   }
 
   select option:checked {
-    color: var(--color-vd-green);
+    color: var(--color-accent);
   }
 }
 
+@layer components {
+  /* ---- Estrutura de página ---- */
+
+  .page-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .page-title {
+    color: var(--color-text-hi);
+    font-size: 1.375rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  .page-desc {
+    color: var(--color-text-mut);
+    font-size: 0.8125rem;
+    margin-top: 0.375rem;
+    max-width: 60ch;
+  }
+
+  /* Rótulo de seção — o ÚNICO lugar onde caps espaçado é permitido. */
+  .eyebrow {
+    color: var(--color-text-faint);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* ---- Superfícies ---- */
+
+  .panel {
+    background-color: var(--color-ink-900);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-panel);
+  }
+
+  .panel-hover {
+    transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+  }
+
+  .panel-hover:hover {
+    border-color: var(--color-line-hi);
+    transform: translateY(-1px);
+  }
+
+  .stat-card {
+    background-color: var(--color-ink-900);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-panel);
+    padding: 1rem 1.25rem;
+  }
+
+  .stat-value {
+    color: var(--color-text-hi);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+  }
+
+  /* Barra fixa do topo — o único glass da casa, sutil de propósito. */
+  .topbar-glass {
+    background: color-mix(in srgb, var(--color-ink-950) 78%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  /* ---- Controles ---- */
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.25rem;
+    padding: 0 0.875rem;
+    border-radius: var(--radius-ctrl);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+  }
+
+  .btn-primary {
+    background-color: var(--color-accent);
+    color: #1a1206;
+  }
+
+  .btn-primary:hover {
+    background-color: var(--color-accent-hi);
+  }
+
+  /* Botão de célula de tabela: mesma família, sem engordar a linha. */
+  .btn-sm {
+    min-height: 1.75rem;
+    padding: 0 0.5rem;
+    font-size: 0.75rem;
+    gap: 0.375rem;
+  }
+
+  .btn-ghost {
+    background-color: transparent;
+    border: 1px solid var(--color-line);
+    color: var(--color-text);
+  }
+
+  .btn-ghost:hover {
+    border-color: var(--color-line-hi);
+    background-color: var(--color-ink-800);
+  }
+
+  .btn-danger {
+    background-color: color-mix(in srgb, var(--color-crit) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-crit) 35%, transparent);
+    color: var(--color-crit);
+  }
+
+  .btn-danger:hover {
+    background-color: color-mix(in srgb, var(--color-crit) 22%, transparent);
+  }
+
+  .input-base {
+    background-color: var(--color-ink-850);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-ctrl);
+    color: var(--color-text-hi);
+    min-height: 2.25rem;
+    padding: 0 0.75rem;
+    font-size: 0.8125rem;
+    transition: border-color 150ms ease;
+  }
+
+  .input-base::placeholder {
+    color: var(--color-text-faint);
+  }
+
+  .input-base:focus {
+    border-color: color-mix(in srgb, var(--color-accent) 60%, transparent);
+    outline: none;
+  }
+
+  /* ---- Badges de estado ---- */
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 999px;
+    padding: 0.125rem 0.625rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1.6;
+    border: 1px solid transparent;
+  }
+
+  .badge-ok {
+    background-color: color-mix(in srgb, var(--color-ok) 12%, transparent);
+    border-color: color-mix(in srgb, var(--color-ok) 28%, transparent);
+    color: var(--color-ok);
+  }
+
+  .badge-warn {
+    background-color: color-mix(in srgb, var(--color-warn) 12%, transparent);
+    border-color: color-mix(in srgb, var(--color-warn) 28%, transparent);
+    color: var(--color-warn);
+  }
+
+  .badge-crit {
+    background-color: color-mix(in srgb, var(--color-crit) 12%, transparent);
+    border-color: color-mix(in srgb, var(--color-crit) 30%, transparent);
+    color: var(--color-crit);
+  }
+
+  .badge-info {
+    background-color: color-mix(in srgb, var(--color-info) 12%, transparent);
+    border-color: color-mix(in srgb, var(--color-info) 28%, transparent);
+    color: var(--color-info);
+  }
+
+  .badge-muted {
+    background-color: var(--color-ink-800);
+    border-color: var(--color-line);
+    color: var(--color-text-mut);
+  }
+
+  /* ---- Tabelas ---- */
+
+  .table-base {
+    width: 100%;
+    font-size: 0.8125rem;
+  }
+
+  .table-base thead th {
+    color: var(--color-text-faint);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: left;
+    padding: 0.625rem 0.75rem;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .table-base tbody td {
+    padding: 0.625rem 0.75rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-line) 55%, transparent);
+  }
+
+  .table-base tbody tr {
+    transition: background-color 120ms ease;
+  }
+
+  .table-base tbody tr:hover {
+    background-color: var(--color-ink-850);
+  }
+
+  /* Dado técnico (IP, hash, nome de container) sempre em mono. */
+  .mono-data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.8125em;
+  }
+}
+
+@layer utilities {
+  /* Entrada padrão de tela: sobe 6px e assenta. Nada de zoom nem bounce. */
+  .anim-rise {
+    animation: rise 300ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  }
+
+  /* Listas entram escalonadas; o teto de 8 evita fila de espera em tabela longa. */
+  .stagger > * {
+    animation: rise 300ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  }
+  .stagger > *:nth-child(1) { animation-delay: 0ms; }
+  .stagger > *:nth-child(2) { animation-delay: 30ms; }
+  .stagger > *:nth-child(3) { animation-delay: 60ms; }
+  .stagger > *:nth-child(4) { animation-delay: 90ms; }
+  .stagger > *:nth-child(5) { animation-delay: 120ms; }
+  .stagger > *:nth-child(6) { animation-delay: 150ms; }
+  .stagger > *:nth-child(7) { animation-delay: 180ms; }
+  .stagger > *:nth-child(n + 8) { animation-delay: 200ms; }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-rise,
+  .stagger > *,
+  .panel-hover {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* ---- Legado em migração: manter até a última tela trocar as classes. ---- */
+
 .glass-panel {
-  background: linear-gradient(165deg, rgba(26, 27, 30, 0.7) 0%, rgba(12, 12, 14, 0.9) 100%);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  border-left: 1px solid rgba(255, 255, 255, 0.03);
-  border-right: 1px solid rgba(255, 255, 255, 0.02);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.8);
-  box-shadow: 0 15px 35px -5px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(12px);
+  background-color: color-mix(in srgb, var(--color-ink-900) 92%, transparent);
+  border: 1px solid var(--color-line);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-panel);
 }
 
-.text-glow-green {
-  text-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
-}
-
-.text-glow-red {
-  text-shadow: 0 0 8px rgba(239, 68, 68, 0.3);
-}
-
-.text-glow-yellow {
-  text-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
-}
+/* Glow aposentado: as classes viram cor semântica pura. */
+.text-glow-green { color: var(--color-ok); text-shadow: none; }
+.text-glow-red { color: var(--color-crit); text-shadow: none; }
+.text-glow-yellow { color: var(--color-warn); text-shadow: none; }
 
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
+  height: 4px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.05);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 10px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(255,255,255,0.2);
+  background: rgba(255, 255, 255, 0.22);
 }

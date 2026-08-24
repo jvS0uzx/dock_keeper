@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Lock, Plus, Search, ShieldCheck, ShieldAlert, AlertTriangle, RefreshCw, Trash2, Globe, Clock, Download } from 'lucide-react';
+import { Plus, Search, ShieldCheck, ShieldAlert, AlertTriangle, RefreshCw, Trash2, Globe, Clock, Download } from 'lucide-react';
 import { api, type DiscoveredDomain, type DomainRecord as DomainItem } from '../lib/api';
 import { relativeTime } from '../lib/format';
 import { useDialog } from './ui/dialog-context';
@@ -181,91 +181,88 @@ const SslView = () => {
     [domains, searchTerm],
   );
 
-  const statusStyle = (s: Status) => ({
-    valid: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
-    warning: 'text-amber-400 bg-amber-400/10 border-amber-400/20',
-    expired: 'text-rose-400 bg-rose-400/10 border-rose-400/20',
-    pending: 'text-blue-400 bg-blue-400/10 border-blue-400/20',
+  const statusBadge = (s: Status) => ({
+    valid: 'badge badge-ok',
+    warning: 'badge badge-warn',
+    expired: 'badge badge-crit',
+    pending: 'badge badge-info',
   }[s]);
 
   const statusIcon = (s: Status) => ({
-    valid: <ShieldCheck size={16} />,
-    warning: <AlertTriangle size={16} />,
-    expired: <ShieldAlert size={16} />,
-    pending: <RefreshCw size={16} className="animate-spin" />,
+    valid: <ShieldCheck size={13} strokeWidth={1.75} />,
+    warning: <AlertTriangle size={13} strokeWidth={1.75} />,
+    expired: <ShieldAlert size={13} strokeWidth={1.75} />,
+    pending: <RefreshCw size={13} className="animate-spin" strokeWidth={1.75} />,
   }[s]);
 
   const statusLabel = (s: Status) => ({
-    valid: 'Válido', warning: 'Expira Breve', expired: 'Inválido/Expirado', pending: 'Checando...',
+    valid: 'Válido', warning: 'Expira breve', expired: 'Inválido', pending: 'Checando...',
   }[s]);
 
+  const daysClass = (days: number) =>
+    days > 30 ? 'text-ok' : days > 0 ? 'text-warn' : 'text-crit';
+
   return (
-    <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden">
-      <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden anim-rise">
+      <div className="page-header flex-col md:flex-row md:items-end items-start">
         <div>
-          <h1 className="text-2xl font-light text-white mb-2 flex items-center gap-3">
-            <Lock className="text-[#10b981]" /> SSL & <span className="font-bold">Domínios (Live)</span>
-          </h1>
-          <p className="text-[#737373] text-sm">Monitoramento contínuo de certificados TLS — revalidação automática a cada 30min.</p>
+          <h1 className="page-title">SSL &amp; Domínios</h1>
+          <p className="page-desc">Certificados TLS revalidados automaticamente; cadeia e hostname conferidos, não só a data.</p>
         </div>
         {canOperate && (
           <div className="flex items-center gap-2">
             {discovered.length > 0 && (
-              <button
-                onClick={importAll}
-                disabled={importing}
-                className="flex items-center gap-2 border border-[#10b981]/50 bg-[#10b981]/10 hover:bg-[#10b981]/20 text-[#10b981] px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-40"
-              >
-                <Download size={18} />
+              <button onClick={importAll} disabled={importing} className="btn btn-ghost disabled:opacity-40">
+                <Download size={16} strokeWidth={1.75} />
                 <span>Importar {discovered.length} do Nginx</span>
               </button>
             )}
-            <button onClick={addDomain} className="flex items-center gap-2 bg-[#10b981] hover:bg-[#059669] text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-[0_0_15px_rgba(16,185,129,0.2)]">
-              <Plus size={18} />
-              <span>Monitorar Domínio</span>
+            <button onClick={addDomain} className="btn btn-primary">
+              <Plus size={16} strokeWidth={1.75} />
+              <span>Monitorar domínio</span>
             </button>
           </div>
         )}
       </div>
 
       {/* Resumo */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 stagger">
         {([
-          ['valid', 'Válidos', summary.valid, 'text-emerald-400 border-emerald-400/20'],
-          ['warning', 'Expirando', summary.warning, 'text-amber-400 border-amber-400/20'],
-          ['expired', 'Inválidos', summary.expired, 'text-rose-400 border-rose-400/20'],
-          ['pending', 'Pendentes', summary.pending, 'text-blue-400 border-blue-400/20'],
+          ['valid', 'Válidos', summary.valid, 'text-ok'],
+          ['warning', 'Expirando', summary.warning, 'text-warn'],
+          ['expired', 'Inválidos', summary.expired, 'text-crit'],
+          ['pending', 'Pendentes', summary.pending, 'text-info'],
         ] as const).map(([key, label, count, cls]) => (
-          <div key={key} className={`glass-panel rounded-xl p-4 border bg-white/[0.02] ${cls}`}>
-            <div className="text-3xl font-bold">{count}</div>
-            <div className="text-xs text-[#737373] uppercase tracking-widest mt-1">{label}</div>
+          <div key={key} className="stat-card">
+            <div className={`stat-value ${count > 0 ? cls : ''}`}>{count}</div>
+            <div className="eyebrow mt-1.5">{label}</div>
           </div>
         ))}
       </div>
 
-      <div className="glass-panel rounded-xl border border-white/5 bg-white/[0.02] flex flex-col flex-1 min-h-0 overflow-hidden">
-        <div className="p-4 border-b border-white/5 flex flex-col md:flex-row gap-4 justify-between items-center bg-black/20">
+      <div className="panel flex flex-col flex-1 min-h-0 overflow-hidden">
+        <div className="p-4 border-b border-line flex flex-col md:flex-row gap-4 justify-between items-center">
           <div className="relative w-full md:w-96">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-faint" size={16} strokeWidth={1.75} />
             <input
               type="text"
               placeholder="Buscar domínio..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-[#0c0c0e] border border-white/10 rounded-lg pl-10 pr-4 py-2 text-sm text-gray-300 focus:outline-none focus:border-[#10b981]/50 focus:ring-1 focus:ring-[#10b981]/50 transition-all placeholder:text-gray-600"
+              className="input-base w-full pl-9"
             />
           </div>
           <div className="flex items-center gap-3">
-            <span className="flex items-center gap-2 text-xs text-emerald-400 uppercase tracking-wider">
+            <span className="flex items-center gap-2 eyebrow text-ok">
               <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-ok opacity-60"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-ok"></span>
               </span>
               Live
             </span>
             {canOperate && (
-              <button onClick={recheckAll} disabled={checkingAll} className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors text-sm px-3 py-1.5 rounded-lg hover:bg-white/5 border border-white/10 disabled:opacity-40">
-                <RefreshCw size={16} className={checkingAll ? 'animate-spin' : ''} />
+              <button onClick={recheckAll} disabled={checkingAll} className="btn btn-ghost disabled:opacity-40">
+                <RefreshCw size={15} strokeWidth={1.75} className={checkingAll ? 'animate-spin' : ''} />
                 <span>Forçar Handshake SSL</span>
               </button>
             )}
@@ -273,22 +270,22 @@ const SslView = () => {
         </div>
 
         <div className="flex-1 overflow-auto custom-scrollbar">
-          <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead className="bg-[#0c0c0e]/80 sticky top-0 z-10">
+          <table className="table-base whitespace-nowrap">
+            <thead className="bg-ink-900 sticky top-0 z-10">
               <tr>
-                <th className="py-3 px-4 font-medium text-gray-500">Domínio</th>
-                <th className="py-3 px-4 font-medium text-gray-500">Emissor</th>
-                <th className="py-3 px-4 font-medium text-gray-500">Validade</th>
-                <th className="py-3 px-4 font-medium text-gray-500">Status</th>
-                <th className="py-3 px-4 font-medium text-gray-500">Última checagem</th>
-                {canOperate && <th className="py-3 px-4 font-medium text-gray-500 text-right">Ações</th>}
+                <th>Domínio</th>
+                <th>Emissor</th>
+                <th>Validade</th>
+                <th>Status</th>
+                <th>Última checagem</th>
+                {canOperate && <th className="text-right">Ações</th>}
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
-              {loading && <tr><td colSpan={canOperate ? 6 : 5} className="py-8 text-center text-gray-500">Carregando domínios...</td></tr>}
+            <tbody>
+              {loading && <tr><td colSpan={canOperate ? 6 : 5} className="py-8 text-center text-text-faint">Carregando domínios...</td></tr>}
               {!loading && filteredDomains.length === 0 && (
                 <tr>
-                  <td colSpan={canOperate ? 6 : 5} className="py-8 text-center text-gray-500">
+                  <td colSpan={canOperate ? 6 : 5} className="py-8 text-center text-text-faint">
                     Nenhum domínio monitorado.
                     {discovered.length > 0
                       ? ` O Nginx atendeu ${discovered.length} domínio(s) — use "Importar do Nginx" acima.`
@@ -299,63 +296,63 @@ const SslView = () => {
               {filteredDomains.map(domain => {
                 const st = statusOf(domain);
                 const pct = Math.max(0, Math.min(100, (domain.days_left / 90) * 100));
-                const barColor = domain.days_left > 30 ? 'bg-emerald-400' : domain.days_left > 0 ? 'bg-amber-400' : 'bg-rose-400';
+                const barColor = domain.days_left > 30 ? 'bg-ok' : domain.days_left > 0 ? 'bg-warn' : 'bg-crit';
                 return (
-                  <tr key={domain.id} className="hover:bg-white/[0.02] transition-colors group">
-                    <td className="py-3 px-4">
+                  <tr key={domain.id}>
+                    <td>
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 border border-white/5">
-                          <Globe size={14} />
+                        <div className="w-7 h-7 rounded-full bg-ink-800 flex items-center justify-center text-text-faint border border-line">
+                          <Globe size={13} strokeWidth={1.75} />
                         </div>
-                        <span className="text-gray-200 font-medium">{domain.domain}</span>
+                        <span className="mono-data text-text-hi">{domain.domain}</span>
                       </div>
                     </td>
-                    <td className="py-3 px-4 text-gray-400">{domain.issuer || '—'}</td>
-                    <td className="py-3 px-4">
+                    <td className="text-text-mut">{domain.issuer || '—'}</td>
+                    <td>
                       {st === 'pending' ? (
-                        <span className="text-blue-400">Checando...</span>
+                        <span className="text-info">Checando...</span>
                       ) : domain.valid ? (
                         <div className="w-32">
-                          <span className={`font-mono font-medium ${domain.days_left > 30 ? 'text-emerald-400' : domain.days_left > 0 ? 'text-amber-400' : 'text-rose-400'}`}>
+                          <span className={`mono-data font-medium ${daysClass(domain.days_left)}`}>
                             {domain.days_left} dias
                           </span>
-                          <div className="w-full h-1 bg-white/10 rounded-full mt-1 overflow-hidden">
+                          <div className="w-full h-1 bg-ink-750 rounded-full mt-1 overflow-hidden">
                             <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }}></div>
                           </div>
                         </div>
                       ) : (
-                        <div className="w-40 space-y-1">
-                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium border border-rose-400/20 bg-rose-400/10 text-rose-300">
-                            <ShieldAlert size={12} />
+                        <div className="w-44 space-y-1">
+                          <span className="badge badge-crit">
+                            <ShieldAlert size={12} strokeWidth={1.75} />
                             {invalidReasonLabel(invalidReasonOf(domain))}
                           </span>
                           {/* O badge mostra só o motivo mais grave; error_msg lista
                               todos quando o certificado tem mais de um problema. */}
                           {domain.error_msg && (
-                            <p className="text-rose-400/70 text-[11px] leading-snug" title={domain.error_msg}>
+                            <p className="text-crit/70 text-[11px] leading-snug whitespace-normal" title={domain.error_msg}>
                               {domain.error_msg}
                             </p>
                           )}
                         </div>
                       )}
                     </td>
-                    <td className="py-3 px-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border ${statusStyle(st)}`}>
+                    <td>
+                      <span className={statusBadge(st)}>
                         {statusIcon(st)}
                         {statusLabel(st)}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-gray-500 text-xs">
-                      <span className="flex items-center gap-1.5"><Clock size={12} /> {relativeTime(domain.last_check)}</span>
+                    <td className="text-text-faint text-xs">
+                      <span className="flex items-center gap-1.5"><Clock size={12} strokeWidth={1.75} /> {relativeTime(domain.last_check)}</span>
                     </td>
                     {canOperate && (
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => recheckOne(domain.id)} disabled={busy[domain.id]} className="p-1.5 text-gray-400 hover:text-emerald-400 hover:bg-emerald-400/10 rounded transition-colors disabled:opacity-40" title="Rechecar agora">
-                            <RefreshCw size={16} className={busy[domain.id] ? 'animate-spin' : ''} />
+                      <td className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => recheckOne(domain.id)} disabled={busy[domain.id]} className="p-1.5 text-text-mut hover:text-accent hover:bg-accent/10 rounded-ctrl transition-colors disabled:opacity-40" title="Rechecar agora">
+                            <RefreshCw size={15} strokeWidth={1.75} className={busy[domain.id] ? 'animate-spin' : ''} />
                           </button>
-                          <button onClick={() => deleteDomain(domain.id)} className="p-1.5 text-gray-400 hover:text-rose-400 hover:bg-rose-400/10 rounded transition-colors" title="Remover">
-                            <Trash2 size={16} />
+                          <button onClick={() => deleteDomain(domain.id)} className="p-1.5 text-text-mut hover:text-crit hover:bg-crit/10 rounded-ctrl transition-colors" title="Remover">
+                            <Trash2 size={15} strokeWidth={1.75} />
                           </button>
                         </div>
                       </td>

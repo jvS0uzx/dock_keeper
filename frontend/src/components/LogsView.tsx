@@ -1,5 +1,5 @@
 import { useState, useEffect, type FormEvent } from 'react';
-import { Search, ScrollText, Server as ServerIcon, ShieldAlert, Box, Loader2 } from 'lucide-react';
+import { Search, Server as ServerIcon, ShieldAlert, Box, Loader2 } from 'lucide-react';
 import { api, type LogEntryRecord as LogEntry } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import Select, { type SelectOption } from './ui/Select';
@@ -57,19 +57,20 @@ const LogsView = () => {
   };
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-light text-white mb-2 flex items-center gap-3">
-        <ScrollText className="w-6 h-6 text-[#10b981]" />
-        Busca de <span className="font-bold">Logs</span>
-      </h1>
-      <p className="text-[#737373] text-sm mb-8">
-        Consulte o histórico de logs de autenticação e containers coletados dos servidores monitorados.
-      </p>
+    <div className="p-8 anim-rise">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Busca de logs</h1>
+          <p className="page-desc">
+            Histórico de logs de autenticação e de containers coletados dos servidores monitorados.
+          </p>
+        </div>
+      </div>
 
-      <form onSubmit={handleSearch} className="glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02] mb-6">
+      <form onSubmit={handleSearch} className="panel p-5 mb-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
-            <label htmlFor="logs-server" className="text-xs text-[#737373] block mb-1">Servidor</label>
+            <label htmlFor="logs-server" className="eyebrow block mb-1.5">Servidor</label>
             <Select
               id="logs-server"
               value={serverId}
@@ -78,7 +79,7 @@ const LogsView = () => {
             />
           </div>
           <div>
-            <label htmlFor="logs-source" className="text-xs text-[#737373] block mb-1">Origem</label>
+            <label htmlFor="logs-source" className="eyebrow block mb-1.5">Origem</label>
             <Select
               id="logs-source"
               value={source}
@@ -87,67 +88,69 @@ const LogsView = () => {
             />
           </div>
           <div className="md:col-span-2">
-            <label htmlFor="logs-query" className="text-xs text-[#737373] block mb-1">Filtro de texto</label>
+            <label htmlFor="logs-query" className="eyebrow block mb-1.5">Filtro de texto</label>
             <input
               id="logs-query"
               type="text"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors"
+              className="input-base w-full"
               placeholder="Ex: Failed password, error, restart..."
             />
           </div>
         </div>
-        <button
-          type="submit"
-          disabled={loading}
-          className="mt-4 flex items-center gap-2 bg-[#10b981]/20 hover:bg-[#10b981]/30 border border-[#10b981]/50 text-[#10b981] font-bold text-xs uppercase tracking-widest py-3 px-6 rounded-lg transition-all disabled:opacity-50"
-        >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+        <button type="submit" disabled={loading} className="btn btn-primary mt-4 disabled:opacity-50">
+          {loading ? <Loader2 size={16} strokeWidth={1.75} className="animate-spin" /> : <Search size={16} strokeWidth={1.75} />}
           Buscar
         </button>
       </form>
 
-      <div className="glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02]">
-        <h2 className="text-sm font-bold tracking-widest text-[#737373] uppercase mb-6">
-          Resultados {logs.length > 0 && <span className="text-[#10b981]">({logs.length})</span>}
+      <div className="panel p-5">
+        <h2 className="eyebrow mb-4">
+          Resultados{logs.length > 0 && <span className="mono-data text-text-mut normal-case tracking-normal"> · {logs.length}</span>}
         </h2>
 
         {loading ? (
-          <p className="text-sm text-[#737373]">Carregando...</p>
+          <p className="text-sm text-text-mut">Carregando...</p>
         ) : !searched ? (
-          <p className="text-sm text-[#737373]">Defina os filtros e clique em Buscar.</p>
+          <p className="text-sm text-text-mut">Defina os filtros e clique em Buscar.</p>
         ) : logs.length === 0 ? (
-          <p className="text-sm text-[#737373]">Nenhum log encontrado para os filtros informados.</p>
+          <p className="text-sm text-text-mut">Nenhum log encontrado para os filtros informados.</p>
         ) : (
           <div className="overflow-x-auto custom-scrollbar">
-            <table className="w-full text-xs text-left border-collapse font-mono">
-              <thead className="text-[10px] text-[#737373] uppercase tracking-widest bg-[#0c0c0e]">
+            <table className="table-base min-w-[720px]">
+              <thead>
                 <tr>
-                  <th className="py-3 px-4 rounded-l whitespace-nowrap">Timestamp</th>
-                  <th className="py-3 px-4 whitespace-nowrap">Servidor</th>
-                  <th className="py-3 px-4 whitespace-nowrap">Origem</th>
-                  <th className="py-3 px-4 rounded-r">Linha</th>
+                  <th className="whitespace-nowrap">Timestamp</th>
+                  <th className="whitespace-nowrap">Servidor</th>
+                  <th className="whitespace-nowrap">Origem</th>
+                  <th>Linha</th>
                 </tr>
               </thead>
               <tbody>
                 {logs.map((l) => (
-                  <tr key={l.id} className="border-b border-white/[0.03] hover:bg-white/[0.05] transition-all align-top">
-                    <td className="py-2 px-4 text-[#737373] whitespace-nowrap">{formatDateTime(l.timestamp)}</td>
-                    <td className="py-2 px-4 text-white/70 whitespace-nowrap flex items-center gap-1">
-                      <ServerIcon className="w-3 h-3 text-[#737373]" />
-                      {serverName(l.server_id)}
-                    </td>
-                    <td className="py-2 px-4 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider">
-                        {l.source === 'auth' ? (
-                          <><ShieldAlert className="w-3 h-3 text-amber-400" /><span className="text-amber-400">auth</span></>
-                        ) : (
-                          <><Box className="w-3 h-3 text-[#10b981]" /><span className="text-[#10b981]">{l.container || 'container'}</span></>
-                        )}
+                  <tr key={l.id} className="align-top">
+                    <td className="mono-data text-text-faint whitespace-nowrap">{formatDateTime(l.timestamp)}</td>
+                    <td className="whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5 text-text-mut">
+                        <ServerIcon size={13} strokeWidth={1.75} className="text-text-faint" />
+                        {serverName(l.server_id)}
                       </span>
                     </td>
-                    <td className="py-2 px-4 text-white/90 break-all">{l.line}</td>
+                    <td className="whitespace-nowrap">
+                      {l.source === 'auth' ? (
+                        <span className="inline-flex items-center gap-1.5 text-warn text-xs">
+                          <ShieldAlert size={13} strokeWidth={1.75} />
+                          auth
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-text-mut text-xs">
+                          <Box size={13} strokeWidth={1.75} className="text-text-faint" />
+                          <span className="mono-data">{l.container || 'container'}</span>
+                        </span>
+                      )}
+                    </td>
+                    <td className="mono-data text-text leading-relaxed break-all selectable">{l.line}</td>
                   </tr>
                 ))}
               </tbody>

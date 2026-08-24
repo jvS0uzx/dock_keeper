@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
-import { Users, Trash2, Plus, KeyRound, Globe, X, ShieldOff } from 'lucide-react';
+import { Trash2, Plus, KeyRound, Globe, X, ShieldOff } from 'lucide-react';
 import { api, type Site, type UserRecord } from '../lib/api';
 import { ROLE_LABELS, type Role, type SiteAccess } from '../lib/session';
 import { relativeTime } from '../lib/format';
@@ -147,54 +147,50 @@ const UsersView = () => {
   // A aba some do menu, mas a tela ainda pode ser alcançada por estado antigo.
   if (session.role !== 'admin') {
     return (
-      <div className="p-8 h-full flex flex-col items-center justify-center text-[#737373] gap-3">
-        <ShieldOff size={32} className="opacity-40" />
+      <div className="p-8 h-full flex flex-col items-center justify-center text-text-mut gap-3">
+        <ShieldOff size={32} strokeWidth={1.75} className="opacity-40" />
         <p className="text-sm">Seu perfil não permite esta tela.</p>
       </div>
     );
   }
 
-  const inputClass =
-    'w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[#10b981] transition-colors';
-
   return (
-    <div className="p-8">
-      <div className="flex items-center gap-3 mb-2">
-        <Users size={22} className="text-[#10b981]" />
-        <h1 className="text-2xl font-light text-white">
-          Usuários do <span className="font-bold">Painel</span>
-        </h1>
+    <div className="p-8 anim-rise">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Usuários do painel</h1>
+          <p className="page-desc">
+            Cada pessoa entra com a própria conta e um papel: Visualizador só vê, Suporte TI opera,
+            Administrador gerencia contas e servidores. O acesso pode ser restrito por unidade.
+          </p>
+        </div>
       </div>
-      <p className="text-[#737373] text-sm mb-8">
-        Cada pessoa entra com a própria conta e um papel: Visualizador só vê, Suporte TI opera,
-        Administrador gerencia contas e servidores. O acesso pode ser restrito por unidade.
-      </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02] col-span-1 h-fit">
-          <h2 className="text-sm font-bold tracking-widest text-[#737373] uppercase mb-6">Nova Conta</h2>
+        <div className="panel p-5 col-span-1 h-fit">
+          <h2 className="eyebrow mb-5">Nova conta</h2>
           <form onSubmit={handleCreate} className="flex flex-col gap-4">
             <div>
-              <label htmlFor="user-name" className="text-xs text-[#737373] block mb-1">Usuário</label>
+              <label htmlFor="user-name" className="eyebrow block mb-1.5">Usuário</label>
               <input
                 id="user-name"
                 type="text"
                 value={form.username}
                 onChange={(e) => setForm({ ...form, username: e.target.value })}
-                className={inputClass}
+                className="input-base w-full"
                 placeholder="Ex: joao.silva"
                 autoComplete="off"
                 required
               />
             </div>
             <div>
-              <label htmlFor="user-password" className="text-xs text-[#737373] block mb-1">Senha</label>
+              <label htmlFor="user-password" className="eyebrow block mb-1.5">Senha</label>
               <input
                 id="user-password"
                 type="password"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
-                className={inputClass}
+                className="input-base w-full"
                 placeholder="Mínimo 10 caracteres"
                 autoComplete="new-password"
                 minLength={10}
@@ -202,7 +198,7 @@ const UsersView = () => {
               />
             </div>
             <div>
-              <label htmlFor="user-role" className="text-xs text-[#737373] block mb-1">Papel</label>
+              <label htmlFor="user-role" className="eyebrow block mb-1.5">Papel</label>
               <Select
                 id="user-role"
                 value={form.role}
@@ -212,19 +208,19 @@ const UsersView = () => {
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-[#737373]">Acessos por unidade</span>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="eyebrow">Acessos por unidade</span>
                 <button
                   type="button"
                   onClick={addAccess}
-                  className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-[#10b981]"
+                  className="btn btn-ghost btn-sm px-1.5 text-accent"
                 >
-                  <Plus size={11} />
+                  <Plus size={12} strokeWidth={1.75} />
                   Adicionar
                 </button>
               </div>
               {accesses.length === 0 ? (
-                <p className="text-[10px] text-[#737373] leading-relaxed">
+                <p className="text-[11px] text-text-faint leading-relaxed">
                   Sem restrição: o papel acima vale para todas as unidades e para a infraestrutura.
                 </p>
               ) : (
@@ -254,9 +250,9 @@ const UsersView = () => {
                         type="button"
                         onClick={() => removeAccess(index)}
                         aria-label="Remover acesso"
-                        className="p-1.5 text-[#737373] hover:text-rose-400 transition-colors"
+                        className="btn btn-ghost btn-sm px-1.5 hover:text-crit"
                       >
-                        <X size={14} />
+                        <X size={14} strokeWidth={1.75} />
                       </button>
                     </div>
                   ))}
@@ -264,60 +260,56 @@ const UsersView = () => {
               )}
             </div>
 
-            <button
-              type="submit"
-              className="mt-2 flex items-center justify-center gap-2 bg-[#10b981]/20 hover:bg-[#10b981]/30 border border-[#10b981]/50 text-[#10b981] font-bold text-xs uppercase tracking-widest py-3 rounded-lg transition-all"
-            >
-              <Plus size={14} />
-              Criar Conta
+            <button type="submit" className="btn btn-primary mt-1">
+              <Plus size={16} strokeWidth={1.75} />
+              Criar conta
             </button>
           </form>
         </div>
 
-        <div className="glass-panel p-6 rounded-xl border border-white/5 bg-white/[0.02] col-span-2">
-          <h2 className="text-sm font-bold tracking-widest text-[#737373] uppercase mb-6">
-            Contas {users.length > 0 && <span className="text-[#10b981]">({users.length})</span>}
+        <div className="panel p-5 col-span-2">
+          <h2 className="eyebrow mb-4">
+            Contas{users.length > 0 && <span className="mono-data text-text-mut normal-case tracking-normal"> · {users.length}</span>}
           </h2>
 
           {loading ? (
-            <p className="text-sm text-[#737373]">Carregando...</p>
+            <p className="text-sm text-text-mut">Carregando...</p>
           ) : users.length === 0 ? (
-            <p className="text-sm text-[#737373]">Nenhuma conta cadastrada.</p>
+            <p className="text-sm text-text-mut">Nenhuma conta cadastrada.</p>
           ) : (
             <div className="overflow-x-auto custom-scrollbar">
-              <table className="w-full text-sm text-left border-collapse">
-                <thead className="text-[10px] text-[#737373] uppercase tracking-widest bg-[#0c0c0e]">
+              <table className="table-base min-w-[720px]">
+                <thead>
                   <tr>
-                    <th className="py-3 px-4 rounded-l">Status</th>
-                    <th className="py-3 px-4">Usuário</th>
-                    <th className="py-3 px-4">Papel</th>
-                    <th className="py-3 px-4">Acessos</th>
-                    <th className="py-3 px-4">Último login</th>
-                    <th className="py-3 px-4 text-right rounded-r">Ações</th>
+                    <th>Status</th>
+                    <th>Usuário</th>
+                    <th>Papel</th>
+                    <th>Acessos</th>
+                    <th>Último login</th>
+                    <th className="text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody>
                   {users.map((user) => (
-                    <tr key={user.id} className="border-b border-white/[0.03] hover:bg-white/[0.05] transition-all">
-                      <td className="py-4 px-4">
+                    <tr key={user.id}>
+                      <td>
                         <button
                           onClick={() => handleToggleActive(user)}
-                          className="flex items-center gap-2"
+                          className="inline-flex"
                           title={user.active ? 'Desativar conta' : 'Reativar conta'}
                         >
-                          <span className={`w-2 h-2 rounded-full ${user.active ? 'bg-[#10b981]' : 'bg-[#737373]'}`} />
-                          <span className={`text-[10px] font-bold tracking-widest uppercase ${user.active ? 'text-[#10b981]' : 'text-[#737373]'}`}>
+                          <span className={`badge ${user.active ? 'badge-ok' : 'badge-muted'}`}>
                             {user.active ? 'Ativa' : 'Inativa'}
                           </span>
                         </button>
                       </td>
-                      <td className="py-4 px-4 font-medium text-white/90">
+                      <td className="font-medium text-text-hi">
                         {user.username}
                         {user.username === session.username && (
-                          <span className="ml-2 text-[10px] text-[#737373] uppercase tracking-wider">(você)</span>
+                          <span className="ml-2 text-[11px] text-text-faint">(você)</span>
                         )}
                       </td>
-                      <td className="py-4 px-4">
+                      <td>
                         <Select
                           ariaLabel={`Papel de ${user.username}`}
                           className="w-40"
@@ -326,40 +318,37 @@ const UsersView = () => {
                           options={ROLE_SELECT_OPTIONS}
                         />
                       </td>
-                      <td className="py-4 px-4">
+                      <td>
                         <div className="flex gap-1 flex-wrap">
                           {user.accesses.length === 0 ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] text-[#737373] bg-white/5 px-2 py-0.5 rounded border border-white/5">
-                              <Globe size={10} />
+                            <span className="badge badge-muted">
+                              <Globe size={10} strokeWidth={1.75} />
                               Global (todas)
                             </span>
                           ) : (
                             user.accesses.map((a, i) => (
-                              <span
-                                key={`${a.site_id ?? 'global'}-${i}`}
-                                className="text-[10px] text-gray-400 bg-white/5 px-2 py-0.5 rounded border border-white/5"
-                              >
+                              <span key={`${a.site_id ?? 'global'}-${i}`} className="badge badge-muted">
                                 {siteName(a.site_id)}: {ROLE_LABELS[a.role]}
                               </span>
                             ))
                           )}
                         </div>
                       </td>
-                      <td className="py-4 px-4 text-[#737373] text-xs">{relativeTime(user.last_login)}</td>
-                      <td className="py-4 px-4 text-right whitespace-nowrap">
+                      <td className="text-text-faint text-xs">{relativeTime(user.last_login)}</td>
+                      <td className="text-right whitespace-nowrap">
                         <button
                           onClick={() => handleResetPassword(user)}
                           title="Trocar senha"
-                          className="p-1.5 text-gray-400 hover:text-[#10b981] hover:bg-[#10b981]/10 rounded transition-colors"
+                          className="btn btn-ghost btn-sm"
                         >
-                          <KeyRound size={14} />
+                          <KeyRound size={14} strokeWidth={1.75} />
                         </button>
                         <button
                           onClick={() => handleDelete(user)}
                           title="Remover conta"
-                          className="p-1.5 text-gray-400 hover:text-rose-400 hover:bg-rose-400/10 rounded transition-colors"
+                          className="btn btn-ghost btn-sm ml-1.5 hover:text-crit"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={14} strokeWidth={1.75} />
                         </button>
                       </td>
                     </tr>
