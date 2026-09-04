@@ -6,10 +6,6 @@ alertas no Telegram — com controle de acesso por papel e por unidade.
 
 Backend em Go, frontend em React + Vite, dados em PostgreSQL.
 
-O nome do produto é **DockKeeper**. O module path Go continua
-`github.com/joaov/vd_stats` por decisão explícita: renomeá-lo mexeria em
-binários, serviços systemd e nome de banco sem benefício visível para ninguém.
-
 ---
 
 ## O que ele faz
