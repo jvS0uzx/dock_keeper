@@ -38,7 +38,7 @@ func TestExpandCIDRAtravessaOctetos(t *testing.T) {
 // A varredura existe para inventariar a rede da própria seção. Recusar
 // endereço público impede que o painel seja apontado para rede de terceiros.
 func TestExpandCIDRRecusaFaixaPublica(t *testing.T) {
-	for _, cidr := range []string{"8.8.8.0/24", "82.38.173.0/24"} {
+	for _, cidr := range []string{"8.8.8.0/24", "203.0.113.0/24"} {
 		if _, err := ExpandCIDR(cidr); err == nil {
 			t.Errorf("%s foi aceita", cidr)
 		} else if !strings.Contains(err.Error(), "privada") {

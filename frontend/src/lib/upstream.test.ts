@@ -11,9 +11,9 @@ const stat = (upstream_addr: string, requests_count: number, server_name = 'app.
 
 describe('splitUpstreams', () => {
   it('separa o retry que o Nginx registra na mesma linha', () => {
-    expect(splitUpstreams('100.105.62.74:80, 100.77.143.39:80')).toEqual([
-      '100.105.62.74:80',
-      '100.77.143.39:80',
+    expect(splitUpstreams('198.51.100.11:80, 198.51.100.12:80')).toEqual([
+      '198.51.100.11:80',
+      '198.51.100.12:80',
     ]);
   });
 
@@ -25,7 +25,7 @@ describe('splitUpstreams', () => {
 
 describe('upstreamHost', () => {
   it('remove a porta', () => {
-    expect(upstreamHost('100.77.143.39:80')).toBe('100.77.143.39');
+    expect(upstreamHost('198.51.100.12:80')).toBe('198.51.100.12');
   });
 
   it('devolve o endereço inteiro quando não há porta', () => {
@@ -40,18 +40,18 @@ describe('deriveUpstreams', () => {
   // o diagrama mostrava os nós zerados, como se não houvesse tráfego.
   it('mostra o tráfego mesmo quando o .env não bate com os endereços reais', () => {
     const stats = [
-      stat('100.105.62.74:80', 9),
-      stat('100.77.143.39:80', 8),
+      stat('198.51.100.11:80', 9),
+      stat('198.51.100.12:80', 8),
     ];
-    const ipsDesatualizadosNoEnv = ['82.38.173.25', '82.38.173.39'];
+    const ipsDesatualizadosNoEnv = ['203.0.113.25', '203.0.113.39'];
 
     const nodes = deriveUpstreams(stats, ipsDesatualizadosNoEnv);
     const comTrafego = nodes.filter((n) => n.reqs > 0);
 
     // O que o Nginx reportou aparece, mesmo fora da lista do .env.
     expect(comTrafego.map((n) => n.addr).sort()).toEqual([
-      '100.105.62.74:80',
-      '100.77.143.39:80',
+      '198.51.100.11:80',
+      '198.51.100.12:80',
     ]);
     expect(comTrafego.reduce((acc, n) => acc + n.reqs, 0)).toBe(17);
   });
@@ -107,16 +107,17 @@ describe('deriveUpstreams', () => {
     expect(nodes.map((n) => n.addr)).toEqual(['10.0.0.2:80', '10.0.0.1:80']);
   });
 
-  // Ordem real do ambiente: o Nginx fala com as VPS pela Tailscale, e o
-  // mapeamento não segue o último octeto do IP público — 100.77.143.39 é a
-  // VPS-1 (82.38.173.25), não a VPS-2.
-  it('mantém Node 1 = VPS-1 com os endereços Tailscale reais', () => {
+  // Reproduz a topologia do ambiente com endereços de documentação: o Nginx
+  // fala com as VPS pela malha privada, e o mapeamento não segue o último
+  // octeto do IP público — 198.51.100.12 é a VPS-1 (203.0.113.25), não a
+  // VPS-2. É essa inversão que o teste protege.
+  it('mantém Node 1 = VPS-1 quando o endereço da malha não casa com o público', () => {
     const nodes = deriveUpstreams(
-      [stat('100.105.62.74:80', 20), stat('100.77.143.39:80', 3)],
-      ['100.77.143.39', '100.105.62.74'],
+      [stat('198.51.100.11:80', 20), stat('198.51.100.12:80', 3)],
+      ['198.51.100.12', '198.51.100.11'],
     );
 
-    expect(nodes.map((n) => n.addr)).toEqual(['100.77.143.39:80', '100.105.62.74:80']);
+    expect(nodes.map((n) => n.addr)).toEqual(['198.51.100.12:80', '198.51.100.11:80']);
   });
 
   it('sem tráfego nenhum, mostra os conhecidos zerados', () => {

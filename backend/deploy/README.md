@@ -10,18 +10,24 @@ O painel **se recusa a subir sem `SSH_KNOWN_HOSTS`**. Antes ele caía em silênc
 para "aceita qualquer host key", registrando só um aviso — e um painel que roda
 comando como `root` por SSH nessa condição está aberto a máquina no meio.
 
-O arquivo aqui foi coletado com `ssh-keyscan`, que abre a conexão e lê a chave
+O `known_hosts.exemplo` deste diretório traz **apenas o formato** — nenhuma
+chave nele é real. Gere o seu com `ssh-keyscan`, que abre a conexão e lê a chave
 pública apresentada sem autenticar nem alterar nada no servidor:
 
 ```bash
-ssh-keyscan -T 8 -H 82.38.173.25 82.38.173.39 82.38.173.38 > known_hosts.exemplo
+ssh-keyscan -T 8 -H 203.0.113.25 203.0.113.39 203.0.113.38 > known_hosts
 ```
 
-Cobre Node 1, Node 2 e Load Balancer. A VM de estado não tem IP público e só é
-alcançável pela malha Tailscale — se o painel passar a monitorá-la, acrescente
-`ssh-keyscan -H 100.117.218.82` a partir de uma máquina dentro da malha.
+Os endereços acima são da faixa reservada pela RFC 5737 para documentação:
+troque pelos seus. Um comando desses cobre Node 1, Node 2 e Load Balancer. A VM
+de estado não tem IP público e só é alcançável pela malha privada — se o painel
+passar a monitorá-la, acrescente um `ssh-keyscan` do endereço dela a partir de
+uma máquina dentro da malha.
 
-Copie para o caminho que `SSH_KNOWN_HOSTS` apontar e confira com `ssh-keygen -l
+A flag `-H` grava o nome do host em hash, de modo que o arquivo resultante não
+revela quais máquinas você monitora — vale manter mesmo em uso local.
+
+Aponte `SSH_KNOWN_HOSTS` para o arquivo gerado e confira com `ssh-keygen -l
 -f`. **Reveja as impressões digitais antes de confiar nelas**: um `ssh-keyscan`
 executado numa rede já comprometida grava a chave do atacante com a mesma
 naturalidade com que gravaria a legítima. A conferência fora de banda — pelo
