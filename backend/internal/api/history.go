@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/joaov/vd_stats/internal/auth"
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/auth"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 type historyPoint struct {

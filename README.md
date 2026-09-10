@@ -127,7 +127,7 @@ migração manual.
 ```bash
 cd backend
 go mod tidy
-go run ./cmd/vd_stats
+go run ./cmd/dockkeeper
 ```
 
 A API sobe em `:8080` (`API_ADDR` muda).

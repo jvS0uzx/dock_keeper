@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/joaov/vd_stats/internal/database"
-	"github.com/joaov/vd_stats/internal/network"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/network"
 )
 
 // Janela de log consultada para descobrir vhosts. Um dia cobre domínio que só

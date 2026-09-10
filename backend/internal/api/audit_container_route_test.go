@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/joaov/vd_stats/internal/auth"
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/auth"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 // A ação de container é auditada pelo próprio handler, com o verbo, o servidor

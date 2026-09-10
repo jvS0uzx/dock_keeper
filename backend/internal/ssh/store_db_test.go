@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 // Testes que gravam de verdade: seguem o padrão do repositório — pulam sem

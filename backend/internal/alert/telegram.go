@@ -15,7 +15,7 @@ import (
 
 	"gorm.io/gorm/clause"
 
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 // cooldown entre alertas repetidos da mesma chave, para não inundar o Telegram

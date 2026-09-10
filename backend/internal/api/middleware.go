@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/joaov/vd_stats/internal/audit"
-	"github.com/joaov/vd_stats/internal/auth"
+	"github.com/jvS0uzx/dock_keeper/internal/audit"
+	"github.com/jvS0uzx/dock_keeper/internal/auth"
 	"gorm.io/gorm"
 )
 

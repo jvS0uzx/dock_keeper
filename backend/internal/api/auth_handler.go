@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/joaov/vd_stats/internal/auth"
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/auth"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"gorm.io/gorm"
 )
 

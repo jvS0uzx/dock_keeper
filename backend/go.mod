@@ -1,4 +1,4 @@
-module github.com/joaov/vd_stats
+module github.com/jvS0uzx/dock_keeper
 
 go 1.26.5
 

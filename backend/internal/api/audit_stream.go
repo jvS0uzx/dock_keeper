@@ -3,8 +3,8 @@ package api
 import (
 	"net/http"
 
-	"github.com/joaov/vd_stats/internal/audit"
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/audit"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 // Ações dos streams que expõem dado sensível do host remoto.

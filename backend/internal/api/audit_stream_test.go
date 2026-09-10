@@ -5,9 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/joaov/vd_stats/internal/audit"
-	"github.com/joaov/vd_stats/internal/auth"
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/audit"
+	"github.com/jvS0uzx/dock_keeper/internal/auth"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 const srvStream = "00000000-0000-0000-0000-0000000000e1"

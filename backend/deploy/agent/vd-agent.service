@@ -9,7 +9,7 @@
 
 [Unit]
 Description=vd_stats - agente de metricas da estacao
-Documentation=https://github.com/joaov/vd_stats
+Documentation=https://github.com/jvS0uzx/dock_keeper
 After=network-online.target
 Wants=network-online.target
 

@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/joaov/vd_stats/internal/audit"
-	"github.com/joaov/vd_stats/internal/auth"
+	"github.com/jvS0uzx/dock_keeper/internal/audit"
+	"github.com/jvS0uzx/dock_keeper/internal/auth"
 )
 
 // auditActor preenche os campos de ator de uma linha de auditoria a partir da

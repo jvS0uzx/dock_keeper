@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/joaov/vd_stats/internal/logstore"
+	"github.com/jvS0uzx/dock_keeper/internal/logstore"
 )
 
 // Quantas linhas de histórico o auth.log entrega antes de passar a acompanhar.

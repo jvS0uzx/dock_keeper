@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joaov/vd_stats/internal/audit"
-	"github.com/joaov/vd_stats/internal/database"
-	"github.com/joaov/vd_stats/internal/discovery"
+	"github.com/jvS0uzx/dock_keeper/internal/audit"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/discovery"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

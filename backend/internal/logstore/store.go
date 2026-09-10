@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 // Save insere uma linha de log. É barata e síncrona: uma inserção direta no

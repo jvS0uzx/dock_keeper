@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )

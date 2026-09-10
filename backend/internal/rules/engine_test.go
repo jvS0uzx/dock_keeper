@@ -4,7 +4,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 func siteID(id uint) *uint { return &id }

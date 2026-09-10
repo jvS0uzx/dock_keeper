@@ -3,7 +3,7 @@ package discovery
 import (
 	"testing"
 
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 // Regressão do achado 1 do QA: a varredura reinferia device_type a cada ciclo e

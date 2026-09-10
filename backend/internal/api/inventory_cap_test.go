@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 const tokenLegadoDeTeste = "token-legado-de-teste-n3"

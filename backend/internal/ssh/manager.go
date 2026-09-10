@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joaov/vd_stats/internal/alert"
+	"github.com/jvS0uzx/dock_keeper/internal/alert"
 )
 
 // Pausa antes de reabrir a sessão SSH. Sem ela um retorno sem erro vira loop
