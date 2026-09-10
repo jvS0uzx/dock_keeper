@@ -3,7 +3,7 @@
 # Instalar (ou use o install.sh deste diretorio):
 #   sudo cp dist/agent-linux-amd64 /usr/local/bin/vd-agent
 #   sudo cp deploy/agent/vd-agent.service /etc/systemd/system/
-#   sudo cp deploy/agent/agent.env /etc/vd-agent.env   # e edite
+#   sudo cp deploy/agent/agent.env.exemplo /etc/vd-agent.env   # e edite
 #   sudo chmod 600 /etc/vd-agent.env
 #   sudo systemctl enable --now vd-agent
 

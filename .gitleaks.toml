@@ -1,0 +1,33 @@
+# Configuração do gitleaks. Herda o conjunto de regras padrão e só acrescenta
+# as exceções que a auditoria de 09/09/2026 conferiu uma a uma.
+#
+# Toda entrada aqui precisa de justificativa. Um allowlist sem motivo escrito é
+# como um passo de CI que nunca falha: dá a impressão de cobertura.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Falsos positivos verificados na auditoria de segredos"
+
+paths = [
+  # Só placeholders vazios, e o glob *.env do .gitignore impede que o arquivo
+  # real entre. O conteúdo é documentação de qual variável existe.
+  '''backend/deploy/agent/agent\.env\.exemplo''',
+  '''\.env\.example''',
+  '''frontend/\.env\.example''',
+  # Formato de known_hosts, sem chave real desde a limpeza da exposição.
+  '''backend/deploy/known_hosts\.exemplo''',
+]
+
+regexes = [
+  # Senha do container efêmero de Postgres que o Actions sobe e destrói a cada
+  # execução. Não existe fora do runner.
+  '''POSTGRES_PASSWORD: ci''',
+  '''postgres://postgres:ci@127\.0\.0\.1''',
+  # Placeholder do docker-compose de desenvolvimento (commit 3ecdd7d).
+  '''POSTGRES_PASSWORD: secretpassword''',
+  # Canário do passo "token nao vaza para o bundle": o valor existe para ser
+  # procurado no build, e o passo falha se ele aparecer em dist/.
+  '''canario-do-ci-nao-pode-aparecer-no-bundle''',
+]

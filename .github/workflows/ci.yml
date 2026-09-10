@@ -11,6 +11,30 @@ permissions:
   contents: read
 
 jobs:
+  # A varredura de segredo foi uma auditoria manual pontual. Como passo de CI
+  # ela vira garantia contínua: cobre a árvore e o histórico completo, então um
+  # segredo commitado e removido no commit seguinte continua sendo pego.
+  segredos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A varredura de histórico precisa dos commits; o padrão é rasa.
+          fetch-depth: 0
+
+      - name: gitleaks
+        env:
+          VERSAO: 8.18.4
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSAO}/gitleaks_${VERSAO}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          # --redact para o achado não reimprimir o segredo no log público do
+          # Actions, que é justamente onde ele não deve estar.
+          # --log-opts=--all: sem isso a varredura cobre só a branch atual, e um
+          # segredo que ficou numa branch antiga passaria.
+          ./gitleaks detect --redact --no-banner --config .gitleaks.toml --log-opts=--all
+          ./gitleaks detect --redact --no-banner --config .gitleaks.toml --no-git
+
   backend:
     runs-on: ubuntu-latest
     defaults:
