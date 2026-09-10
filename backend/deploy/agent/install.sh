@@ -39,7 +39,7 @@ install -m 0644 "$SCRIPT_DIR/vd-agent.service" "$UNIT_DEST"
 if [[ -f "$ENV_DEST" ]]; then
     echo "config existente preservada: $ENV_DEST"
 else
-    install -m 0600 "$SCRIPT_DIR/agent.env" "$ENV_DEST"
+    install -m 0600 "$SCRIPT_DIR/agent.env.exemplo" "$ENV_DEST"
     echo "config modelo criada em $ENV_DEST — EDITE o token antes de usar:"
     echo "  sudoedit $ENV_DEST"
 fi

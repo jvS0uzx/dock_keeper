@@ -1,6 +1,10 @@
 # Segredos. Sem barra, então casa em qualquer nível: .env, backend/.env,
-# frontend/.env.
-.env
+# frontend/.env, backend/deploy/agent/agent.env. O glob cobre a categoria
+# inteira em vez de um nome por vez — um arquivo terminado em .env rastreado é
+# convite a preencher com o valor real e commitar sem perceber.
+*.env
+!*.env.exemplo
+!*.env.example
 *.pem
 *.key
 

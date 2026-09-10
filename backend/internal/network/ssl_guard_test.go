@@ -61,7 +61,7 @@ func TestIPBloqueadoDistingueLocalDePublico(t *testing.T) {
 			t.Errorf("%s deveria ser bloqueado", v)
 		}
 	}
-	publicos := []string{"8.8.8.8", "1.1.1.1", "82.38.173.25", "2001:4860:4860::8888"}
+	publicos := []string{"8.8.8.8", "1.1.1.1", "203.0.113.25", "2001:4860:4860::8888"}
 	for _, v := range publicos {
 		if ipBloqueado(net.ParseIP(v)) {
 			t.Errorf("%s é público e não deveria ser bloqueado", v)

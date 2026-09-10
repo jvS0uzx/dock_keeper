@@ -4,7 +4,7 @@ import type { LbStat } from './api';
 export const LOCAL_LABEL = 'Local (Nginx/Cache)';
 
 export interface UpstreamNode {
-  /** Endereço como o Nginx reporta, ex: "100.77.143.39:80". */
+  /** Endereço como o Nginx reporta, ex: "198.51.100.12:80". */
   addr: string;
   /** Só o host, sem porta — é o que casa com um IP configurado. */
   host: string;
@@ -24,7 +24,7 @@ export const splitUpstreams = (raw: string): string[] =>
     .map((part) => part.trim())
     .filter((part) => part !== '' && part !== '-');
 
-/** Tira a porta: "100.77.143.39:80" vira "100.77.143.39". */
+/** Tira a porta: "198.51.100.12:80" vira "198.51.100.12". */
 export const upstreamHost = (addr: string): string => {
   const idx = addr.lastIndexOf(':');
   return idx === -1 ? addr : addr.slice(0, idx);
