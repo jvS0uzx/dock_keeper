@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/joaov/vd_stats/internal/ssh"
+	"github.com/jvS0uzx/dock_keeper/internal/ssh"
 )
 
 // securityRadarHandler lista as portas em LISTEN do host (ss -tulnp).

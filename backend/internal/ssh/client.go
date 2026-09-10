@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joaov/vd_stats/internal/alert"
-	"github.com/joaov/vd_stats/internal/database"
-	"github.com/joaov/vd_stats/internal/logstore"
-	"github.com/joaov/vd_stats/scripts"
+	"github.com/jvS0uzx/dock_keeper/internal/alert"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/logstore"
+	"github.com/jvS0uzx/dock_keeper/scripts"
 )
 
 // Nomes de container Docker só têm [a-zA-Z0-9_.-] e começam por alfanumérico.

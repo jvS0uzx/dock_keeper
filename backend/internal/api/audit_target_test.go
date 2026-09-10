@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/joaov/vd_stats/internal/audit"
-	"github.com/joaov/vd_stats/internal/auth"
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/audit"
+	"github.com/jvS0uzx/dock_keeper/internal/auth"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 // auditTarget é chamada de dentro de handlers que também rodam fora do

@@ -7,8 +7,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/joaov/vd_stats/internal/auth"
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/auth"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 // sessaoDeTeste abre uma sessão real e a derruba no fim do teste.

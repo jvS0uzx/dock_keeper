@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joaov/vd_stats/internal/alert"
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/alert"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 // Alerta quando o certificado está a esta distância (ou menos) do vencimento.

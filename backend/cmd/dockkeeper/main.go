@@ -8,16 +8,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joaov/vd_stats/internal/alert"
-	"github.com/joaov/vd_stats/internal/api"
-	"github.com/joaov/vd_stats/internal/auth"
-	"github.com/joaov/vd_stats/internal/database"
-	"github.com/joaov/vd_stats/internal/discovery"
-	"github.com/joaov/vd_stats/internal/logstore"
-	"github.com/joaov/vd_stats/internal/network"
-	"github.com/joaov/vd_stats/internal/rules"
-	"github.com/joaov/vd_stats/internal/ssh"
 	"github.com/joho/godotenv"
+	"github.com/jvS0uzx/dock_keeper/internal/alert"
+	"github.com/jvS0uzx/dock_keeper/internal/api"
+	"github.com/jvS0uzx/dock_keeper/internal/auth"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/discovery"
+	"github.com/jvS0uzx/dock_keeper/internal/logstore"
+	"github.com/jvS0uzx/dock_keeper/internal/network"
+	"github.com/jvS0uzx/dock_keeper/internal/rules"
+	"github.com/jvS0uzx/dock_keeper/internal/ssh"
 )
 
 const (

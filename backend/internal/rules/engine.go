@@ -9,8 +9,8 @@ import (
 
 	"gorm.io/gorm/clause"
 
-	"github.com/joaov/vd_stats/internal/alert"
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/alert"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 // metricValue calcula o valor da métrica a partir da última leitura do host.

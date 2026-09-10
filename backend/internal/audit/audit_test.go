@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/joaov/vd_stats/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 func setupAuditDB(t *testing.T) {

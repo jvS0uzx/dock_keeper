@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joaov/vd_stats/internal/database"
-	"github.com/joaov/vd_stats/internal/discovery"
+	"github.com/jvS0uzx/dock_keeper/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/discovery"
 )
 
 // Host sem contato há mais tempo que isto aparece como offline no inventário.

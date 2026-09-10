@@ -13,7 +13,7 @@ npm run dev
 
 O Vite serve em `http://localhost:5173`, que é o valor padrão de
 `ALLOWED_ORIGINS` no backend. Suba o backend antes (`cd ../backend && go run
-./cmd/vd_stats`), senão a tela de login responde erro de rede.
+./cmd/dockkeeper`), senão a tela de login responde erro de rede.
 
 ## Verificação
 

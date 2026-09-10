@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joaov/vd_stats/internal/auth"
+	"github.com/jvS0uzx/dock_keeper/internal/auth"
 )
 
 // Validade de um ticket de stream. Curta de propósito: ele existe só para

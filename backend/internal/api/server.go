@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/joaov/vd_stats/internal/auth"
+	"github.com/jvS0uzx/dock_keeper/internal/auth"
 )
 
 const (

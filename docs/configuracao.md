@@ -4,7 +4,7 @@ Todas as variáveis abaixo foram extraídas do código, não do `.env.example`. 
 painel lê **36 variáveis**; o agente lê outras **8**; o frontend, **4**.
 
 O `.env` é carregado de `../.env` e depois `.env`, relativo ao diretório de
-trabalho — por isso `go run ./cmd/vd_stats` de dentro de `backend/` acha o `.env`
+trabalho — por isso `go run ./cmd/dockkeeper` de dentro de `backend/` acha o `.env`
 da raiz do repositório.
 
 ## Obrigatórias

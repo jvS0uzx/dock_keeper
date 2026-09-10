@@ -27,7 +27,7 @@ preciso conhecer antes de escolher.
 ## 1. Coleta por SSH
 
 **O que é.** Para cada servidor cadastrado com `Kind = "ssh"`, o painel abre uma
-sessão SSH persistente no boot (`startCollectors` em `cmd/vd_stats/main.go`) e
+sessão SSH persistente no boot (`startCollectors` em `cmd/dockkeeper/main.go`) e
 envia um script pelo stdin de um `bash -s`. O script fica num laço, imprimindo
 uma linha JSON a cada `SSH_COLLECT_INTERVAL` segundos, e o painel a consome sem
 reconectar.

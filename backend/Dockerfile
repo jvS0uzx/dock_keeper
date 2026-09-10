@@ -17,7 +17,7 @@ COPY . .
 
 # CGO_ENABLED=0 gera binário estático, que é o que permite a imagem final ser
 # uma base sem libc. -s -w tira símbolos e DWARF.
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w" -o /out/dockkeeper ./cmd/vd_stats
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w" -o /out/dockkeeper ./cmd/dockkeeper
 
 # ---- runtime ----
 # alpine e não scratch: o painel precisa de resolvedor de DNS reverso para o

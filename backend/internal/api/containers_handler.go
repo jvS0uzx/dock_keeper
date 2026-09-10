@@ -5,8 +5,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/joaov/vd_stats/internal/audit"
-	"github.com/joaov/vd_stats/internal/ssh"
+	"github.com/jvS0uzx/dock_keeper/internal/audit"
+	"github.com/jvS0uzx/dock_keeper/internal/ssh"
 )
 
 // startSSE prepara a resposta para Server-Sent Events e devolve o flusher.
