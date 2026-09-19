@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
@@ -21,8 +23,6 @@ const (
 	dialTimeout = 10 * time.Second
 )
 
-// Target identifica um host monitorado e como abrir SSH nele. Substitui a
-// sequência (id, name, host, user, keyPath) que era repetida em cada função.
 type Target struct {
 	ID      string
 	Name    string
@@ -31,7 +31,6 @@ type Target struct {
 	Port    int
 	KeyPath string
 
-	// CollectNginx liga o stream do access log do Nginx neste host.
 	CollectNginx bool
 }
 
@@ -49,9 +48,6 @@ var (
 	hostKeyErr  error
 )
 
-// ValidateHostKeyPolicy resolve a política de host key no boot. Sem isso a
-// recusa só apareceria no primeiro dial, minutos depois da partida e no meio
-// do log de um coletor, em vez de na cara de quem subiu o serviço.
 func ValidateHostKeyPolicy() error {
 	_, err := hostKeyCallback()
 	return err
@@ -65,11 +61,6 @@ func hostKeyCallback() (ssh.HostKeyCallback, error) {
 	return hostKeyCB, hostKeyErr
 }
 
-// resolveHostKeyCallback decide como o host key é verificado. Verificar deixou
-// de ser opcional: o painel abre sessão SSH como root nos hosts, e aceitar
-// qualquer chave entrega essa sessão a quem conseguir se pôr no caminho. Só
-// desliga com SSH_INSECURE_HOST_KEY explícito, no mesmo espírito do API_TOKEN,
-// que também recusa subir vazio.
 func resolveHostKeyCallback(knownHosts string, insecure bool) (ssh.HostKeyCallback, error) {
 	if insecure {
 		log.Println("[SSH] ATENÇÃO: SSH_INSECURE_HOST_KEY=true — host key não verificado. " +
@@ -101,39 +92,91 @@ func expandHome(path string) string {
 	return path
 }
 
-// clientConfig monta a config SSH a partir da chave privada do processo.
-func clientConfig(t Target) (*ssh.ClientConfig, error) {
-	keyBytes, err := os.ReadFile(expandHome(t.KeyPath))
+func clientConfig(t Target) (*ssh.ClientConfig, func(), error) {
+	auth, release, err := authMethods(t)
+	if err != nil {
+		return nil, nil, err
+	}
+	hostKey, err := hostKeyCallback()
+	if err != nil {
+		release()
+		return nil, nil, err
+	}
+	return &ssh.ClientConfig{
+		User:            t.User,
+		Auth:            auth,
+		HostKeyCallback: hostKey,
+		Timeout:         dialTimeout,
+	}, release, nil
+}
+
+func authMethods(t Target) ([]ssh.AuthMethod, func(), error) {
+	withAgent := useAgent()
+	var methods []ssh.AuthMethod
+
+	if t.KeyPath != "" || !withAgent {
+		signer, err := loadKey(t.KeyPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		methods = append(methods, ssh.PublicKeys(signer))
+	}
+	if !withAgent {
+		return methods, func() {}, nil
+	}
+
+	sock := strings.TrimSpace(os.Getenv("SSH_AUTH_SOCK"))
+	if sock == "" {
+		return nil, nil, errors.New("SSH_USE_AGENT=true, mas SSH_AUTH_SOCK não está definido: " +
+			"rode o painel com um ssh-agent carregado")
+	}
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		return nil, nil, fmt.Errorf("erro ao falar com o ssh-agent em SSH_AUTH_SOCK: %w", err)
+	}
+	methods = append(methods, ssh.PublicKeysCallback(agent.NewClient(conn).Signers))
+	return methods, func() { conn.Close() }, nil
+}
+
+func loadKey(path string) (ssh.Signer, error) {
+	keyBytes, err := os.ReadFile(expandHome(path))
 	if err != nil {
 		return nil, fmt.Errorf("erro ao ler a chave SSH: %w", err)
 	}
 	signer, err := ssh.ParsePrivateKey(keyBytes)
-	if err != nil {
-		return nil, fmt.Errorf("chave SSH inválida: %w", err)
+	var missing *ssh.PassphraseMissingError
+	if !errors.As(err, &missing) {
+		if err != nil {
+			return nil, fmt.Errorf("chave SSH inválida: %w", err)
+		}
+		return signer, nil
 	}
-	hostKey, err := hostKeyCallback()
-	if err != nil {
-		return nil, err
+
+	passphrase := os.Getenv("SSH_KEY_PASSPHRASE")
+	if passphrase == "" {
+		return nil, errors.New("chave protegida por passphrase: defina SSH_KEY_PASSPHRASE ou use SSH_USE_AGENT=true")
 	}
-	return &ssh.ClientConfig{
-		User:            t.User,
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: hostKey,
-		Timeout:         dialTimeout,
-	}, nil
+	signer, err = ssh.ParsePrivateKeyWithPassphrase(keyBytes, []byte(passphrase))
+	if err != nil {
+		return nil, fmt.Errorf("passphrase da chave SSH recusada: %w", err)
+	}
+	return signer, nil
 }
 
-// dial abre a conexão SSH com o alvo. Ponto único de entrada — antes cada
-// stream reimplementava leitura de chave, parse e Dial.
+func useAgent() bool {
+	on, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("SSH_USE_AGENT")))
+	return on
+}
+
 func dial(t Target) (*ssh.Client, error) {
-	config, err := clientConfig(t)
+	config, release, err := clientConfig(t)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	return ssh.Dial("tcp", t.addr(), config)
 }
 
-// openSession abre conexão e sessão no alvo. O chamador fecha as duas.
 func openSession(t Target) (*ssh.Client, *ssh.Session, error) {
 	client, err := dial(t)
 	if err != nil {
@@ -147,9 +190,6 @@ func openSession(t Target) (*ssh.Client, *ssh.Session, error) {
 	return client, session, nil
 }
 
-// stopOnCancel derruba sessão e conexão quando o contexto é cancelado. Sem
-// isso o comando remoto (tail -f, docker logs -f) segue rodando na VPS depois
-// que o operador fecha a tela.
 func stopOnCancel(ctx context.Context, client *ssh.Client, session *ssh.Session) {
 	go func() {
 		<-ctx.Done()

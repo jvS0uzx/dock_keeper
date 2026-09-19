@@ -22,6 +22,14 @@ Estas três derrubam ou incapacitam o processo:
 | Variável | Padrão | Efeito |
 |---|---|---|
 | `DATABASE_URL` | — | DSN do Postgres, formato `key=value` do GORM |
+| `ALERT_RETENTION_DAYS` | `90` | Idade máxima de alerta resolvido ou já entregue; alerta `open` nunca é podado por idade |
+| `DB_STATEMENT_TIMEOUT` | `15s` | Limite por consulta, aplicado no DSN. Consulta travada morre sozinha em vez de segurar conexão do pool |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` ou `error`. O log sai em JSON (`log/slog`) |
+| `API_TOKEN_ALLOW_WRITE` | `false` | `true` deixa o `API_TOKEN` de máquina escrever. Por padrão ele é somente leitura, e cada escrita liberada fica na auditoria |
+| `INGEST_RATE_WINDOW` | `1m` | Janela do limite de taxa da ingestão e do enroll |
+| `INGEST_RATE_MAX` | `120` | Envios por dispositivo na janela; acima disso, 429 com `Retry-After` |
+| `INGEST_RATE_MAX_ENROLL` | `10` | Tentativas de enroll por IP na janela |
+| `DB_AUTOMIGRATE` | `false` | `true` volta a criar o esquema pelo `AutoMigrate` do GORM em vez das migrações versionadas (ADR 012). Para ambiente descartável |
 | `DB_MAX_OPEN_CONNS` | `20` | Teto de conexões simultâneas. Precisa caber no `max_connections` do servidor, contando todas as réplicas |
 | `DB_MAX_IDLE_CONNS` | `5` | Conexões mantidas ociosas. Rebaixado ao teto de abertas se for maior, com aviso |
 | `DB_CONN_MAX_LIFETIME` | `30m` | Vida útil da conexão, formato `time.ParseDuration` |
@@ -37,6 +45,8 @@ que é exatamente o bug original.
 | `API_ADDR` | `:8080` | Endereço de escuta. Útil para subir uma segunda instância sem conflito |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | Origens liberadas no CORS, separadas por vírgula |
 | `TRUST_PROXY_HEADERS` | `false` | Autoriza ler `X-Real-IP` e `X-Forwarded-For` |
+| `SESSION_TTL` | `12h` | Vida da sessão de login, formato `time.ParseDuration`. Sem renovação: vencida, o usuário entra de novo |
+| `HOST_OFFLINE_AFTER` | `30m` | Tempo sem ser visto a partir do qual um host do inventário aparece offline na tela de rede e na planta |
 
 ⚠️ `TRUST_PROXY_HEADERS=true` **só** com proxy reverso à frente. Sem ele o
 cabeçalho vem do próprio cliente, e o limite de tentativa por IP vira enfeite.
@@ -51,10 +61,17 @@ atacante insistente tranca a tela de login para todos os usuários.
 | `LOGIN_RATE_WINDOW` | `15m` | Janela deslizante de contagem das falhas |
 | `LOGIN_RATE_MAX_IP` | `30` | Falhas por endereço de origem na janela |
 | `LOGIN_RATE_MAX_USER` | `8` | Falhas por nome de usuário na janela |
+| `LOGIN_RATE_MAX_KEYS` | `10000` | Teto de chaves guardadas na memória do limitador |
 
 A rota de login é pública e cada tentativa gasta um bcrypt de custo 10 (60 a
 100 ms de CPU), o que a torna também negação de serviço barata. Passado o teto, a
 resposta é `429` **antes** de a senha ser conferida.
+
+O limitador guarda uma chave por origem e por nome de usuário tentado, então uma
+enxurrada com nomes aleatórios faria a memória crescer sem limite. Ao passar de
+`LOGIN_RATE_MAX_KEYS` ele poda: primeiro descarta as chaves cuja última falha já
+saiu da janela e, se ainda estiver acima do teto, descarta as de menos falhas —
+nessa ordem, quem está bloqueado continua bloqueado.
 
 ## SSH
 
@@ -66,6 +83,14 @@ resposta é `429` **antes** de a senha ser conferida.
 | `SSH_AUTH_LOG_PATH` | `/var/log/auth.log` | Log de autenticação **no host remoto** |
 | `SSH_NGINX_LOG_PATH` | `/var/log/nginx/access.log` | Access log do Nginx no host remoto |
 | `SSH_COLLECT_INTERVAL` | `2` | Segundos entre amostras do script de coleta |
+| `SSH_KEY_PASSPHRASE` | — | Passphrase da chave de `SSH_KEY_PATH`, quando ela é protegida. Sem ela, chave protegida recusa com "chave protegida por passphrase" |
+| `SSH_USE_AGENT` | `false` | Autentica também pelas chaves do `ssh-agent` em `SSH_AUTH_SOCK`. Ligado, o `SSH_KEY_PATH` passa a ser opcional |
+| `SSH_USE_SUDO` | `false` | Com usuário diferente de `root`, prefixa `sudo -n` e caminho absoluto no `tail` do `auth.log`, no `tail` do nginx e no `ss -tulnp`. Ver `docs/operacao.md` |
+| `SSH_RECONNECT_MAX` | `5m` | Teto da espera entre reconexões. A espera começa em 5 s, dobra a cada queda e volta a 5 s depois de uma sessão que ficou de pé por 60 s ou mais, com variação de ±20 % |
+| `RTT_PROBE` | `true` | Grava o RTT medido pelo keepalive SSH (`rtt_ms`). Desligado, o keepalive continua detectando conexão morta, só não grava. Ver `docs/metricas.md` |
+| `RTT_PROBE_INTERVAL` | `30s` | Intervalo entre dois keepalives na conexão de coleta, formato `time.ParseDuration` |
+| `SSH_KEEPALIVE_MAX_MISSES` | `3` | Keepalives seguidos sem resposta (timeout de 3 s cada) que fazem o painel fechar a conexão e reconectar |
+| `SSH_MAX_SESSIONS_PER_HOST` | `6` | Sessões SSH sob demanda simultâneas por servidor (logs, `auth.log`, radar, ações). A excedente recebe 503 sem abrir conexão. Os streams de fundo (métricas e nginx) não contam |
 
 Os dois caminhos são de Debian e Ubuntu. Em RHEL o `auth.log` se chama
 `/var/log/secure`, e o caminho cravado deixava a tela de Segurança **vazia sem
@@ -107,12 +132,22 @@ segunda resolução de DNS entre a checagem e a conexão.
 | `TELEGRAM_BOT_TOKEN` | — | Sem ele os alertas só vão para o log |
 | `TELEGRAM_CHAT_ID` | — | Idem |
 | `ALERT_MIN_SEVERITY` | `warning` | Piso de notificação: `info`, `warning`, `high` ou `critical` |
+| `AUTHLOG_WATCH` | `true` | Vigia de força bruta: uma sessão SSH de fundo por servidor que conta falhas de login no `auth.log` |
+| `BRUTEFORCE_THRESHOLD` | `10` | Falhas do mesmo IP na janela que disparam o `[ALERTA]` de força bruta |
+| `BRUTEFORCE_WINDOW` | `5m` | Janela deslizante da contagem de força bruta |
+| `LB_ERROR_RATIO` | `0.5` | Proporção de respostas 5xx de um upstream que dispara o `[ALERTA]`, entre 0 e 1 |
+| `LB_MIN_REQUESTS` | `20` | Requisições mínimas do upstream na janela para a proporção de 5xx valer. Abaixo disso, poucas requisições com erro não disparam |
+| `LB_WINDOW` | `5m` | Janela deslizante da proporção de 5xx por upstream |
+| `ALERT_COOLDOWN` | `30m` | Intervalo mínimo entre dois avisos da mesma chave, contado a partir da última **entrega bem-sucedida**. Enquanto houver alerta pendente da mesma chave, nada novo é enfileirado |
+| `ALERT_MAX_ATTEMPTS` | `8` | Tentativas de entrega antes de marcar `delivery=falhou`. O alerta continua aberto no painel (ADR 011) |
+| `ALERT_NOTIFY_RECOVERY` | `true` | Enfileira a mensagem `[OK]` quando a condição volta ao normal. O alerta é resolvido mesmo com a mensagem desligada |
 
 ## Ingestão e identidade de dispositivo
 
 | Variável | Padrão | Efeito |
 |---|---|---|
-| `AGENT_INGEST_TOKEN` | — | Token compartilhado, **em descontinuação**. Sem ele e sem credencial apresentada, a ingestão fica desligada (fail-closed) |
+| `AGENT_INGEST_TOKEN` | — | Token compartilhado **legado**. Só é conferido com `ALLOW_LEGACY_INGEST_TOKEN=true` |
+| `ALLOW_LEGACY_INGEST_TOKEN` | `false` | Aceita o `X-Agent-Token` compartilhado nas rotas de ingestão, com aviso no log a cada uso. Desligada, o envio com esse cabeçalho recebe 401 e uma linha de auditoria com o IP de origem. Serve só para a janela de migração das estações antigas; ver o ADR 009 |
 
 O substituto é a credencial por dispositivo. Ver [`agente.md`](agente.md).
 
@@ -146,6 +181,13 @@ depois.
 
 Valor inválido, zero ou negativo cai no padrão com aviso. Zero significaria
 "apagar tudo a cada passada", e um erro de digitação não pode ter esse efeito.
+A mesma regra vale para `SESSION_TTL`, `HOST_OFFLINE_AFTER`, `ALERT_COOLDOWN`,
+`SSH_RECONNECT_MAX` e `SSH_MAX_SESSIONS_PER_HOST`.
+
+As linhas de log vão para o banco em lote: até 200 por INSERT, ou o que houver
+depois de 1 s. Com o banco lento e a fila (10 mil linhas) cheia, a linha nova é
+descartada e contada no log do painel, para o stream ao vivo nunca esperar o
+banco.
 
 ## Usuários e armazenamento
 
@@ -180,7 +222,7 @@ Definidas **na máquina monitorada**, não no painel. Ver [`agente.md`](agente.m
 | `AGENT_SERVER_URL` | — | URL do painel. Obrigatória |
 | `AGENT_ENROLL_TOKEN` | — | Convite de uso único; trocado por credencial no primeiro boot |
 | `AGENT_TOKEN` | — | Modo compartilhado, em descontinuação |
-| `AGENT_CREDENTIAL_PATH` | `/etc/vd-agent/credential.json` | Onde a credencial é gravada (modo `0600`) |
+| `AGENT_CREDENTIAL_PATH` | `/var/lib/dockkeeper-agent/credential.json` | Onde a credencial é gravada (modo `0600`) |
 | `AGENT_MACHINE_ID` | `/etc/machine-id` | Sobrescreve o identificador de máquina |
 | `AGENT_HOSTNAME` | hostname do sistema | Sobrescreve o nome reportado |
 | `AGENT_SITE` | — | Código da unidade. Ignorado quando há credencial: a unidade sai dela |
@@ -219,7 +261,7 @@ com `:?`, ou seja, obrigatória. Foram acrescentadas:
 |---|---|---|
 | `POSTGRES_PASSWORD` | — (obrigatória) | compose |
 | `POSTGRES_USER` | `postgres` | compose |
-| `POSTGRES_DB` | `vd_stats` | compose |
+| `POSTGRES_DB` | `dockkeeper` | compose |
 | `POSTGRES_PORT` | `5433` | compose |
 | `PANEL_PORT` | `8081` | compose |
 

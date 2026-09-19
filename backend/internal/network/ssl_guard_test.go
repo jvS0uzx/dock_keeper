@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-// A guarda desligada é o padrão e não pode mudar o fluxo atual: monitorar
-// serviço da rede interna é o uso normal do painel auto-hospedado.
 func TestGuardaDesligadaMantemFluxoAtual(t *testing.T) {
 	agora := time.Now()
 	ca, caKey := emitirCert(t, certOpts{
@@ -45,8 +43,6 @@ func TestGuardaBloqueiaEnderecoPrivadoOuLocal(t *testing.T) {
 	}
 }
 
-// Nome que resolve para loopback é o caso real do ataque: o hostname parece
-// inofensivo e o DNS aponta para dentro.
 func TestGuardaBloqueiaNomeQueResolveParaLoopback(t *testing.T) {
 	info := checkSSLGuarded("localhost", 443, 2*time.Second, nil, true)
 	if info.Valid || info.InvalidReason != ReasonAlvoPrivado {
@@ -69,7 +65,6 @@ func TestIPBloqueadoDistingueLocalDePublico(t *testing.T) {
 	}
 }
 
-// IP público literal passa pela guarda sem abrir conexão nenhuma na resolução.
 func TestResolverAlvoDevolveIPPublicoParaDiscar(t *testing.T) {
 	dial, bloqueado, err := resolverAlvo("8.8.8.8", time.Second)
 	if err != nil || bloqueado != nil || dial != "8.8.8.8" {
@@ -77,8 +72,6 @@ func TestResolverAlvoDevolveIPPublicoParaDiscar(t *testing.T) {
 	}
 }
 
-// O dial vai no endereço informado e a verificação continua sendo do nome:
-// é o que garante que a guarda pode conectar no IP conferido sem re-resolver.
 func TestCheckSSLAtVerificaONomeENaoOEndereco(t *testing.T) {
 	agora := time.Now()
 	ca, caKey := emitirCert(t, certOpts{

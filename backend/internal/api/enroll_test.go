@@ -20,6 +20,9 @@ const (
 func setupEnrollDB(t *testing.T) (uint, uint) {
 	t.Helper()
 
+	zerarLimiteDeIngestao()
+	t.Cleanup(zerarLimiteDeIngestao)
+
 	if os.Getenv("DATABASE_URL") == "" {
 		t.Skip("DATABASE_URL não definido; pulando teste de enrollment")
 	}
@@ -54,9 +57,6 @@ func limparEnroll(t *testing.T) {
 	database.DB.Where("code IN ?", []string{codigoFilialA, codigoFilialB}).Delete(&database.Site{})
 }
 
-// emitirConvite cria um convite direto no banco. Não passa pelo handler de
-// emissão de propósito: o que estes testes medem é a troca e o uso da
-// credencial, e depender do handler faria a falha dele derrubar todos eles.
 func emitirConvite(t *testing.T, siteID uint, validade time.Duration) string {
 	t.Helper()
 
@@ -88,9 +88,6 @@ func chamarEnroll(t *testing.T, convite, machineID string) *httptest.ResponseRec
 	return rec
 }
 
-// O convite é de uso único. Sem a queima na MESMA transação da criação, dois
-// instaladores concorrentes trocam o mesmo convite por duas credenciais, e "uso
-// único" vira promessa.
 func TestConviteSoPodeSerUsadoUmaVez(t *testing.T) {
 	sedeA, _ := setupEnrollDB(t)
 	convite := emitirConvite(t, sedeA, time.Hour)
@@ -122,9 +119,6 @@ func TestConviteExpiradoERecusado(t *testing.T) {
 	}
 }
 
-// A unidade sai do CONVITE, não do corpo do pedido. Se viesse do corpo, quem
-// tem um convite de uma filial se cadastraria em outra — e o enrollment não
-// resolveria nada.
 func TestUnidadeVemDoConviteENaoDoCorpo(t *testing.T) {
 	sedeA, sedeB := setupEnrollDB(t)
 	convite := emitirConvite(t, sedeB, time.Hour)
@@ -146,10 +140,6 @@ func TestUnidadeVemDoConviteENaoDoCorpo(t *testing.T) {
 	}
 }
 
-// O coração do item S7: a credencial da unidade A não pode escrever na unidade
-// B. Sob o token compartilhado isso era livre — bastava mudar o site_code do
-// corpo — e uma estação comprometida em qualquer filial injetava métrica falsa
-// em qualquer outra.
 func TestCredencialDeUmaUnidadeNaoEscreveEmOutra(t *testing.T) {
 	sedeA, _ := setupEnrollDB(t)
 	convite := emitirConvite(t, sedeA, time.Hour)
@@ -179,8 +169,6 @@ func TestCredencialDeUmaUnidadeNaoEscreveEmOutra(t *testing.T) {
 		t.Fatalf("status = %d, esperado 409: a credencial da unidade A gravou na unidade B", ingest.Code)
 	}
 
-	// O envio é descartado inteiro: aceitar parte dele é aceitar a parte que o
-	// atacante escolheu.
 	var n int64
 	database.DB.Unscoped().Model(&database.Server{}).Where("name = ?", "estacao-qa").Count(&n)
 	if n != 0 {
@@ -188,8 +176,6 @@ func TestCredencialDeUmaUnidadeNaoEscreveEmOutra(t *testing.T) {
 	}
 }
 
-// Revogar um dispositivo não pode afetar os demais, e a revogação precisa valer
-// no envio seguinte, não só na tela.
 func TestCredencialRevogadaERecusada(t *testing.T) {
 	sedeA, _ := setupEnrollDB(t)
 	convite := emitirConvite(t, sedeA, time.Hour)
@@ -221,15 +207,12 @@ func TestCredencialRevogadaERecusada(t *testing.T) {
 	}
 }
 
-// O contraponto que impede a correção de virar quebra: o token compartilhado
-// continua funcionando durante a transição. Derrubá-lo no dia do deploy
-// silenciaria todo agente instalado, e um painel de monitoramento que emudece é
-// pior que um inseguro, porque ninguém percebe.
 func TestTokenCompartilhadoContinuaAceito(t *testing.T) {
 	sedeA, _ := setupEnrollDB(t)
 	_ = sedeA
 
 	t.Setenv("AGENT_INGEST_TOKEN", "token-compartilhado-de-teste")
+	t.Setenv("ALLOW_LEGACY_INGEST_TOKEN", "true")
 
 	corpo := `{"hostname":"estacao-qa","site_code":"` + codigoFilialA + `","cpu":10,"mem_total":100,"mem_used":10}`
 	req := httptest.NewRequest(http.MethodPost, "/api/ingest/metrics", strings.NewReader(corpo))

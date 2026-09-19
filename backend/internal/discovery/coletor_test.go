@@ -9,11 +9,6 @@ import (
 
 const codigoUnidadeColetor = "qa-coletor"
 
-// A varredura local e um coletor remoto na mesma unidade são dois escritores no
-// mesmo inventário: cada ciclo sobrescreve o do outro, e a diferença entre as
-// listas de porta faz o tipo do equipamento alternar sozinho a cada quinze
-// minutos. O coletor vence porque enxerga a rede da filial; o painel só enxerga
-// a dele.
 func TestVarreduraLocalDesligaQuandoHaColetorNaUnidade(t *testing.T) {
 	setupDB(t)
 	site := criarUnidade(t, codigoUnidadeColetor)
@@ -48,9 +43,6 @@ func TestVarreduraLocalDesligaQuandoHaColetorNaUnidade(t *testing.T) {
 	}
 }
 
-// O contraponto que impede a proteção de virar desligamento indevido: coletor
-// revogado não conta, senão revogar um dispositivo deixaria a unidade sem
-// nenhuma fonte de inventário.
 func TestColetorRevogadoNaoDesligaAVarredura(t *testing.T) {
 	setupDB(t)
 	site := criarUnidade(t, codigoUnidadeColetor)
@@ -82,10 +74,6 @@ func TestColetorRevogadoNaoDesligaAVarredura(t *testing.T) {
 	}
 }
 
-// Toda porta que a tabela de classificação consulta precisa estar na lista
-// sondada. Sem 631, impressora que só publica IPP caía como "web-device"; sem
-// 5000, NAS virava estação Windows por causa do 445. O coletor remoto já sondava
-// as doze, e o mesmo equipamento mudava de tipo conforme quem o encontrasse.
 func TestPortasSondadasCobremATabelaDeClassificacao(t *testing.T) {
 	sondadas := make(map[int]bool, len(DefaultPorts))
 	for _, p := range DefaultPorts {

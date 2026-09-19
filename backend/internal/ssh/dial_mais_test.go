@@ -25,8 +25,6 @@ func TestExpandHome(t *testing.T) {
 	}
 }
 
-// ValidateHostKeyPolicy é o que faz a recusa aparecer no boot, não no primeiro
-// dial. Os dois caminhos passam pelo sync.Once, por isso o reset entre casos.
 func TestValidateHostKeyPolicyResolveNoBoot(t *testing.T) {
 	t.Run("sem configuração recusa subir", func(t *testing.T) {
 		usaPoliticaHostKey(t, "")
@@ -47,8 +45,6 @@ func TestValidateHostKeyPolicyResolveNoBoot(t *testing.T) {
 		if err := ValidateHostKeyPolicy(); err != nil {
 			t.Fatalf("primeira resolução: %v", err)
 		}
-		// Trocar o ambiente depois da primeira resolução não muda a política:
-		// ela vale para o processo inteiro.
 		os.Setenv("SSH_KNOWN_HOSTS", "")
 		if err := ValidateHostKeyPolicy(); err != nil {
 			t.Fatalf("política deveria continuar a memoizada: %v", err)
@@ -60,7 +56,7 @@ func TestClientConfigLeChaveEHostKey(t *testing.T) {
 	t.Run("chave ausente", func(t *testing.T) {
 		usaPoliticaHostKey(t, knownHostsTemporario(t))
 		alvo := Target{User: "root", KeyPath: filepath.Join(t.TempDir(), "nao-existe")}
-		if _, err := clientConfig(alvo); err == nil || !strings.Contains(err.Error(), "erro ao ler a chave SSH") {
+		if _, _, err := clientConfig(alvo); err == nil || !strings.Contains(err.Error(), "erro ao ler a chave SSH") {
 			t.Fatalf("esperado erro de leitura da chave, veio: %v", err)
 		}
 	})
@@ -72,7 +68,7 @@ func TestClientConfigLeChaveEHostKey(t *testing.T) {
 			t.Fatal(err)
 		}
 		alvo := Target{User: "root", KeyPath: path}
-		if _, err := clientConfig(alvo); err == nil || !strings.Contains(err.Error(), "chave SSH inválida") {
+		if _, _, err := clientConfig(alvo); err == nil || !strings.Contains(err.Error(), "chave SSH inválida") {
 			t.Fatalf("esperado erro de chave inválida, veio: %v", err)
 		}
 	})
@@ -80,7 +76,7 @@ func TestClientConfigLeChaveEHostKey(t *testing.T) {
 	t.Run("política de host key inválida derruba a config", func(t *testing.T) {
 		usaPoliticaHostKey(t, "")
 		alvo := Target{User: "root", KeyPath: chaveClienteTemporaria(t)}
-		if _, err := clientConfig(alvo); err == nil || !strings.Contains(err.Error(), "SSH_KNOWN_HOSTS") {
+		if _, _, err := clientConfig(alvo); err == nil || !strings.Contains(err.Error(), "SSH_KNOWN_HOSTS") {
 			t.Fatalf("esperado erro da política de host key, veio: %v", err)
 		}
 	})
@@ -88,7 +84,7 @@ func TestClientConfigLeChaveEHostKey(t *testing.T) {
 	t.Run("config completa", func(t *testing.T) {
 		usaPoliticaHostKey(t, knownHostsTemporario(t))
 		alvo := Target{User: "monitor", KeyPath: chaveClienteTemporaria(t)}
-		cfg, err := clientConfig(alvo)
+		cfg, _, err := clientConfig(alvo)
 		if err != nil {
 			t.Fatalf("config válida recusada: %v", err)
 		}
@@ -104,7 +100,6 @@ func TestClientConfigLeChaveEHostKey(t *testing.T) {
 	})
 }
 
-// O ponto do S5: o dial só fecha com quem apresenta a chave registrada.
 func TestDialVerificaHostKeyDoServidor(t *testing.T) {
 	responder := func(string) respostaExec { return respostaExec{} }
 
@@ -119,7 +114,6 @@ func TestDialVerificaHostKeyDoServidor(t *testing.T) {
 
 	t.Run("chave divergente é recusada", func(t *testing.T) {
 		addr, _ := servidorSSHFake(t, responder)
-		// known_hosts de outro host: a chave apresentada não casa com nada.
 		usaPoliticaHostKey(t, knownHostsTemporario(t))
 
 		host, porta, err := net.SplitHostPort(addr)

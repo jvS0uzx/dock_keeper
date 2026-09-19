@@ -14,11 +14,6 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// Regressão do item N1. FloorPlanPin identifica o host só pelo IP, e a
-// unicidade do inventário deixou de ser global: duas filiais com a mesma faixa
-// RFC1918 têm o mesmo endereço em dois equipamentos diferentes. Resolvendo pelo
-// endereço sozinho, o marcador de uma filial exibia o estado da outra.
-
 const (
 	ipRepetido    = "192.168.77.10"
 	srvPlantaA    = "00000000-0000-0000-0000-00000000f001"
@@ -27,8 +22,6 @@ const (
 	codigoPlantaB = "teste-planta-b"
 )
 
-// operadorGlobal é a sessão usada nos testes de gravação: o gate de papel não
-// pode ser o que reprova quando o que está sob teste é a validação do endereço.
 var operadorGlobal = auth.Session{
 	Username: "operador-de-teste",
 	Role:     auth.RoleOperator,
@@ -65,9 +58,6 @@ func setupPlantaDB(t *testing.T) cenarioPlanta {
 	}
 
 	agora := time.Now().UTC()
-	// O mesmo endereço nas duas unidades: é o caso que a chave global não
-	// distinguia. Só o da filial A está online, e os tipos diferem, para o teste
-	// conseguir dizer qual das duas linhas foi resolvida.
 	hosts := []database.NetworkHost{
 		{
 			IP: ipRepetido, Hostname: "maquina-da-filial-a", DeviceType: "linux",
@@ -138,7 +128,6 @@ func limpaPlantas(t *testing.T) {
 	database.DB.Where("code IN ?", []string{codigoPlantaA, codigoPlantaB}).Delete(&database.Site{})
 }
 
-// O teste decisivo: o mesmo endereço nas duas unidades, uma planta em cada.
 func TestPinoResolveOHostDaPropriaUnidade(t *testing.T) {
 	c := setupPlantaDB(t)
 
@@ -186,9 +175,6 @@ func TestPinoResolveOHostDaPropriaUnidade(t *testing.T) {
 	}
 }
 
-// A planta da filial A não pode ler nenhuma linha de inventário da filial B.
-// Um endereço que só existe na outra unidade tem que aparecer como
-// desconhecido, e não emprestar o estado do vizinho.
 func TestPlantaNaoEnxergaInventarioDeOutraUnidade(t *testing.T) {
 	c := setupPlantaDB(t)
 
@@ -225,9 +211,6 @@ func TestPlantaNaoEnxergaInventarioDeOutraUnidade(t *testing.T) {
 	t.Fatalf("o marcador de %s não voltou na resposta", soNaFilialB)
 }
 
-// Endereço malformado é erro do cliente e nunca resolveria; endereço bem
-// formado ainda fora do inventário é estado legítimo, porque o operador
-// posiciona a máquina antes de a varredura chegar nela.
 func TestGravacaoDePinoRecusaEnderecoMalformado(t *testing.T) {
 	c := setupPlantaDB(t)
 

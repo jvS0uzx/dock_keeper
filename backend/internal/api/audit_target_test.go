@@ -12,17 +12,11 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// auditTarget é chamada de dentro de handlers que também rodam fora do
-// middleware — rota isenta, chamada direta num teste. Sem o no-op, cada um
-// desses caminhos viraria panic em produção.
 func TestAuditTargetForaDoMiddlewareNaoEstoura(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/sites", nil)
 	auditTarget(req, "site", "1", "matriz", nil)
 }
 
-// A unidade da criação vem do CORPO, que o middleware não lê nem pode ler: sem
-// o handler informá-la, a linha nascia sem unidade e a auditoria deixava de ser
-// recortável justamente na ação que cria a unidade.
 func TestAuditoriaDeUnidadeGuardaNomeEId(t *testing.T) {
 	setupAuditAPI(t)
 	limparUnidadesDeAuditoria(t)
@@ -53,9 +47,6 @@ func TestAuditoriaDeUnidadeGuardaNomeEId(t *testing.T) {
 	}
 }
 
-// Numa exclusão o rótulo precisa ser lido ANTES de a linha sumir. Lido depois,
-// a auditoria guarda "removeu a unidade 7", que ninguém consegue interpretar
-// seis meses adiante — que é exatamente quando a auditoria é consultada.
 func TestAuditoriaDeExclusaoGuardaONomeAntesDeSumir(t *testing.T) {
 	setupAuditAPI(t)
 	limparUnidadesDeAuditoria(t)
@@ -83,8 +74,6 @@ func TestAuditoriaDeExclusaoGuardaONomeAntesDeSumir(t *testing.T) {
 	}
 }
 
-// O rótulo do usuário é o nome, e a mesma linha que passa a carregá-lo não pode
-// carregar a senha junto: ela vai para a tabela que o administrador consulta.
 func TestAuditoriaDeUsuarioGuardaNomeENaoSenha(t *testing.T) {
 	setupAuditAPI(t)
 
@@ -106,9 +95,6 @@ func TestAuditoriaDeUsuarioGuardaNomeENaoSenha(t *testing.T) {
 	if l.TargetLabel != nome {
 		t.Errorf("target_label = %q, esperado %q", l.TargetLabel, nome)
 	}
-	// Usuário tem concessões em várias unidades; escolher uma para o campo faria
-	// a consulta por unidade mostrar a criação de um admin global como evento de
-	// uma filial.
 	if l.SiteID != nil {
 		t.Errorf("site_id = %d, esperado nulo: usuário não pertence a uma unidade", *l.SiteID)
 	}
@@ -119,7 +105,6 @@ func TestAuditoriaDeUsuarioGuardaNomeENaoSenha(t *testing.T) {
 	}
 }
 
-// A unidade de uma regra por unidade também só existe no corpo.
 func TestAuditoriaDeRegraGuardaNomeEUnidade(t *testing.T) {
 	setupAuditAPI(t)
 	limparUnidadesDeAuditoria(t)
@@ -150,11 +135,6 @@ func TestAuditoriaDeRegraGuardaNomeEUnidade(t *testing.T) {
 	}
 }
 
-// O middleware de auditoria corre ANTES do gate de credencial, de propósito,
-// para que a recusa por falta de permissão também vire linha. A consequência é
-// que a requisição que ele enxerga ainda não carrega sessão: sem o aviso que
-// withSession deixa no contexto, TODA escrita autenticada era gravada sem ator
-// — e "quem fez" é metade da pergunta que a auditoria existe para responder.
 func TestAuditoriaGravaOAtorDaEscritaAutenticada(t *testing.T) {
 	setupAuditAPI(t)
 	limparUnidadesDeAuditoria(t)
@@ -178,15 +158,11 @@ func TestAuditoriaGravaOAtorDaEscritaAutenticada(t *testing.T) {
 	}
 }
 
-// O contraponto: handler que não chama auditTarget continua gerando a linha de
-// antes. Sem isso, a mudança teria trocado cobertura por rótulo.
 func TestHandlerSemAlvoMantemALinhaDeAntes(t *testing.T) {
 	setupAuditAPI(t)
 
 	sess := sessaoReal(t, "operador-sem-alvo", auth.RoleOperator)
 
-	// Corpo sem name e sem code: o handler recusa antes de tocar no banco, então
-	// nunca chega a informar alvo nenhum.
 	rec := postComSessao(t, "/api/sites", `{}`, sess)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, esperado 400", rec.Code)
@@ -204,12 +180,6 @@ func TestHandlerSemAlvoMantemALinhaDeAntes(t *testing.T) {
 	}
 }
 
-// sessaoReal abre a sessão passando por um usuário de verdade no banco.
-//
-// A sessão persistente relê as concessões a cada requisição, então sessão
-// fabricada para usuário inexistente não sobrevive ao primeiro Lookup. Usuário
-// sem linha em user_site_accesses recebe o papel da conta valendo globalmente,
-// que é o alcance que estes testes precisam.
 func sessaoReal(t *testing.T, username, role string) auth.Session {
 	t.Helper()
 
@@ -248,9 +218,6 @@ func postComSessao(t *testing.T, path, corpo string, sess auth.Session) *httptes
 	return rec
 }
 
-// umaLinha exige que a ação tenha gerado exatamente um registro. Aceitar
-// "a primeira de várias" esconderia duplicação de linha, que já apareceu nesta
-// tabela quando dois registradores cobriam a mesma rota.
 func umaLinha(t *testing.T, action string) database.AuditLog {
 	t.Helper()
 

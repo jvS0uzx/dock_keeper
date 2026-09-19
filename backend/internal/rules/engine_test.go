@@ -9,7 +9,6 @@ import (
 
 func siteID(id uint) *uint { return &id }
 
-// Parque de exemplo: duas filiais e uma VPS de infraestrutura sem unidade.
 func parqueExemplo() []database.Server {
 	return []database.Server{
 		{ID: "srv-norte-1", Name: "PC-RH", SiteID: siteID(1)},
@@ -49,8 +48,6 @@ func TestResolveTargetsServidorEspecifico(t *testing.T) {
 		[]string{"srv-sul-1"})
 }
 
-// O caso que motivou o campo: uma regra para a filial inteira, sem repetir a
-// mesma configuração máquina a máquina.
 func TestResolveTargetsPorUnidade(t *testing.T) {
 	rule := database.AlertRule{Target: "*", TargetSiteID: siteID(1)}
 
@@ -58,8 +55,6 @@ func TestResolveTargetsPorUnidade(t *testing.T) {
 		[]string{"srv-norte-1", "srv-norte-2"})
 }
 
-// A unidade vence o "*": a regra por unidade chega aqui sempre com Target="*",
-// porque o handler força isso para o registro não guardar dois alvos.
 func TestResolveTargetsUnidadeVenceCuringa(t *testing.T) {
 	rule := database.AlertRule{Target: "*", TargetSiteID: siteID(2)}
 
@@ -67,8 +62,6 @@ func TestResolveTargetsUnidadeVenceCuringa(t *testing.T) {
 		[]string{"srv-sul-1"})
 }
 
-// Filial recém-criada, ainda sem máquina: não pode virar alerta do parque
-// inteiro nem estourar em pânico.
 func TestResolveTargetsUnidadeSemServidores(t *testing.T) {
 	rule := database.AlertRule{Target: "*", TargetSiteID: siteID(3)}
 
@@ -87,8 +80,6 @@ func TestResolveTargetsUnidadeInexistente(t *testing.T) {
 	}
 }
 
-// Servidor sem unidade (VPS de infraestrutura) nunca entra numa regra por
-// filial — é o escopo do painel Dev, não do Suporte TI.
 func TestResolveTargetsIgnoraServidorSemUnidade(t *testing.T) {
 	rule := database.AlertRule{Target: "*", TargetSiteID: siteID(1)}
 

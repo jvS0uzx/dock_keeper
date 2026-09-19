@@ -12,8 +12,6 @@ import (
 
 const tokenLegadoDeTeste = "token-legado-de-teste-n3"
 
-// corpoComHosts monta um envio com n hosts. Objeto vazio serve: o decode não
-// valida campo por host, e é a contagem que está em teste.
 func corpoComHosts(n int, prefixo, sufixo string) string {
 	var b strings.Builder
 	b.WriteString(prefixo)
@@ -32,6 +30,7 @@ func corpoComHosts(n int, prefixo, sufixo string) string {
 func requisicaoDeInventario(t *testing.T, corpo string) *httptest.ResponseRecorder {
 	t.Helper()
 	t.Setenv("AGENT_INGEST_TOKEN", tokenLegadoDeTeste)
+	t.Setenv("ALLOW_LEGACY_INGEST_TOKEN", "true")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/ingest/inventory", strings.NewReader(corpo))
@@ -40,11 +39,6 @@ func requisicaoDeInventario(t *testing.T, corpo string) *httptest.ResponseRecord
 	return rec
 }
 
-// O discriminador do item N3: depois do host 5001 o corpo traz lixo que não é
-// JSON. O decode antigo materializava a lista inteira antes de conferir o teto,
-// então tropeçava no lixo e respondia 400; o decode incremental recusa no host
-// 5001 sem ler o resto, e a resposta é 413. Este teste falha na implementação
-// antiga.
 func TestInventarioEstouradoRecusadoDuranteODecode(t *testing.T) {
 	corpo := corpoComHosts(maxInventoryHosts+1, `{"site_code":"qa-n3",`, `, lixo-que-nao-e-json`)
 	rec := requisicaoDeInventario(t, corpo)
@@ -57,22 +51,17 @@ func TestInventarioEstouradoRecusadoDuranteODecode(t *testing.T) {
 	}
 }
 
-// No teto exato o envio passa do decode e segue o fluxo normal — a recusa do
-// teste acima não pode ter virado um off-by-one que rejeita envio legítimo.
 func TestInventarioNoTetoExatoPassaDoDecode(t *testing.T) {
 	setupInventarioCap(t)
 
 	corpo := corpoComHosts(maxInventoryHosts, `{"site_code":"qa-n3-cap",`, `}`)
 	rec := requisicaoDeInventario(t, corpo)
 
-	// Hosts sem IP são pulados na gravação; o que importa é não ser 413.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, esperado 200: %s", rec.Code, rec.Body.String())
 	}
 }
 
-// site_code depois de hosts no JSON: o decode incremental percorre o objeto na
-// ordem em que ele vem, e a ordem dos campos não é contrato do coletor.
 func TestSiteCodeDepoisDeHostsContinuaAceito(t *testing.T) {
 	setupInventarioCap(t)
 

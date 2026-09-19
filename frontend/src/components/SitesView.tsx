@@ -1,3 +1,5 @@
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { Trash2, Plus, MonitorSmartphone, Network } from 'lucide-react';
 import { api, type Site, type ServerLiveStat, type NetworkHostView } from '../lib/api';
@@ -11,8 +13,6 @@ const emptyForm = { name: '', code: '', address: '' };
 const SitesView = () => {
   const dialog = useDialog();
   const { canOperate } = useRole();
-  // O seletor da barra lateral lê a mesma lista: cadastrar ou remover aqui
-  // precisa refletir lá na hora.
   const { reloadSites } = useSiteScope();
   const { openSite } = useNavigation();
   const [sites, setSites] = useState<Site[]>([]);
@@ -20,6 +20,8 @@ const SitesView = () => {
   const [hosts, setHosts] = useState<NetworkHostView[]>([]);
   const [form, setForm] = useState({ ...emptyForm });
   const [loading, setLoading] = useState(true);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
 
   const load = useCallback(async () => {
     try {
@@ -31,12 +33,13 @@ const SitesView = () => {
       setSites(siteList);
       setStations(live.servers);
       setHosts(inventory.hosts);
+      cargaOk();
     } catch (err) {
-      console.error(err);
+      cargaFail(err, 'Falha ao ler as unidades.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cargaOk, cargaFail]);
 
   useEffect(() => {
     load();
@@ -80,6 +83,7 @@ const SitesView = () => {
 
   return (
     <div className="p-8 anim-rise">
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
       <div className="page-header">
         <div>
           <h1 className="page-title">Unidades monitoradas</h1>
@@ -91,7 +95,6 @@ const SitesView = () => {
       </div>
 
       <div className={`grid grid-cols-1 gap-6 ${canOperate ? 'lg:grid-cols-3' : ''}`}>
-        {/* Cadastro só para Suporte TI; Visualizador vê as unidades. */}
         {canOperate && (
         <div className="panel p-5 col-span-1 h-fit">
           <h2 className="eyebrow mb-5">Nova unidade</h2>
@@ -149,7 +152,7 @@ const SitesView = () => {
 
           {loading ? (
             <p className="text-sm text-text-mut">Carregando...</p>
-          ) : sites.length === 0 ? (
+          ) : sites.length === 0 && carga.error && !carga.lastOk ? null : sites.length === 0 ? (
             <p className="text-sm text-text-mut">
               Nenhuma unidade cadastrada. Crie a primeira para agrupar as máquinas por local.
             </p>

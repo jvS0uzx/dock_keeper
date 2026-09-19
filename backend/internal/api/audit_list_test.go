@@ -21,8 +21,6 @@ func semearAuditoria(t *testing.T, quantas int) {
 	linhas := make([]database.AuditLog, 0, quantas)
 	for i := 0; i < quantas; i++ {
 		linhas = append(linhas, database.AuditLog{
-			// Todas no MESMO instante de propósito: é o caso que expõe
-			// paginação sem desempate estável.
 			At:            agora,
 			Action:        acaoDeListagem,
 			ActorUsername: "ator-de-teste",
@@ -54,8 +52,6 @@ func listarAuditoria(t *testing.T, query string) auditListPage {
 	return page
 }
 
-// Sem teto de LIMIT, a primeira consulta numa base de um ano carrega a tabela
-// inteira para a memória do processo.
 func TestListagemLimitaOTamanhoDaPagina(t *testing.T) {
 	setupAuditAPI(t)
 	semearAuditoria(t, 5)
@@ -67,13 +63,6 @@ func TestListagemLimitaOTamanhoDaPagina(t *testing.T) {
 	}
 }
 
-// Percorre as páginas e confere que cada linha aparece uma vez só.
-//
-// Não prova o desempate por id do ORDER BY: medido, o teste continua verde sem
-// ele, porque neste tamanho o Postgres devolve a ordem de inserção por acaso do
-// plano. O desempate fica assim mesmo — "ORDER BY at DESC" com empate é ordem
-// indefinida pelo padrão, e o dia em que o plano virar index scan a paginação
-// passaria a repetir e pular linha em silêncio.
 func TestPaginacaoNaoRepeteNemPulaLinha(t *testing.T) {
 	setupAuditAPI(t)
 	semearAuditoria(t, 6)
@@ -108,8 +97,6 @@ func TestListagemContaOTotalIndependenteDaPagina(t *testing.T) {
 	}
 }
 
-// Filtro de tempo inválido não pode ser ignorado em silêncio: a tela mostraria
-// o período errado e ninguém saberia.
 func TestIntervaloInvalidoRecusaEmVezDeIgnorar(t *testing.T) {
 	setupAuditAPI(t)
 
@@ -121,8 +108,6 @@ func TestIntervaloInvalidoRecusaEmVezDeIgnorar(t *testing.T) {
 	}
 }
 
-// A auditoria mostra ação de todas as unidades. Um administrador de filial não
-// pode ler a lista de quem o administra.
 func TestListagemExigeAdminGlobal(t *testing.T) {
 	cfg := testConfig()
 	filial := uint(4)

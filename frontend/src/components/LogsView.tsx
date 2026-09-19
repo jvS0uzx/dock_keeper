@@ -1,3 +1,5 @@
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
 import { useState, useEffect, type FormEvent } from 'react';
 import { Search, Server as ServerIcon, ShieldAlert, Box, Loader2 } from 'lucide-react';
 import { api, type LogEntryRecord as LogEntry } from '../lib/api';
@@ -19,6 +21,10 @@ const LOG_SOURCES: SelectOption[] = [
 
 const LogsView = () => {
   const [servers, setServers] = useState<ServerOption[]>([]);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
+  const busca = useLoadStatus();
+  const { ok: buscaOk, fail: buscaFail } = busca;
   const [serverId, setServerId] = useState('');
   const [source, setSource] = useState('');
   const [q, setQ] = useState('');
@@ -30,10 +36,15 @@ const LogsView = () => {
   useEffect(() => {
     const controller = new AbortController();
     api.liveMetrics(controller.signal)
-      .then((data) => setServers(data.servers.map(({ id, name }) => ({ id, name }))))
-      .catch(() => {});
+      .then((data) => {
+        setServers(data.servers.map(({ id, name }) => ({ id, name })));
+        cargaOk();
+      })
+      .catch((err) => {
+        if (!controller.signal.aborted) cargaFail(err, 'Falha ao listar os servidores.');
+      });
     return () => controller.abort();
-  }, []);
+  }, [cargaOk, cargaFail]);
 
   const serverName = (id: string) => servers.find((s) => s.id === id)?.name || id.slice(0, 8);
 
@@ -48,9 +59,10 @@ const LogsView = () => {
       if (q) params.q = q;
 
       setLogs(await api.searchLogs(params));
+      buscaOk();
     } catch (err) {
-      console.error(err);
       setLogs([]);
+      buscaFail(err, 'Falha ao buscar os logs.');
     } finally {
       setLoading(false);
     }
@@ -58,6 +70,7 @@ const LogsView = () => {
 
   return (
     <div className="p-8 anim-rise">
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
       <div className="page-header">
         <div>
           <h1 className="page-title">Busca de logs</h1>
@@ -114,6 +127,8 @@ const LogsView = () => {
           <p className="text-sm text-text-mut">Carregando...</p>
         ) : !searched ? (
           <p className="text-sm text-text-mut">Defina os filtros e clique em Buscar.</p>
+        ) : busca.error ? (
+          <LoadNotice error={busca.error} />
         ) : logs.length === 0 ? (
           <p className="text-sm text-text-mut">Nenhum log encontrado para os filtros informados.</p>
         ) : (

@@ -12,14 +12,17 @@ Backend em Go, frontend em React + Vite, dados em PostgreSQL.
 
 | Medida | Valor |
 |---|---|
-| Linhas de Go | 19.909 |
-| Linhas de Go em teste | 9.060 — **45,5% do código Go** |
-| Funções de teste | 292 |
-| Pacotes internos | 10 — `alert`, `api`, `audit`, `auth`, `database`, `discovery`, `logstore`, `network`, `rules`, `ssh` |
-| ADRs | 8, cada uma com contexto, decisão e consequência |
-| Rotas HTTP registradas | 32 |
+| Linhas de Go | 23.517 |
+| Linhas de Go em teste | 12.801 — **54,4% do código Go** |
+| Funções de teste em Go | 445 |
+| Testes do frontend (vitest) | 116, em 18 arquivos |
+| Pacotes internos | 10 de produção — `alert`, `api`, `audit`, `auth`, `database`, `discovery`, `logstore`, `network`, `rules`, `ssh` — e `semcomentario`, que só tem teste |
+| ADRs | 10, cada uma com contexto, decisão e consequência |
+| Rotas HTTP registradas | 35 |
 
-Contagem feita sobre os arquivos rastreados pelo git, em 10/09/2026.
+Contagem feita sobre os arquivos do repositório em 18/09/2026: `backend/`
+inteiro para Go, `npx vitest run` para o frontend e `mux.HandleFunc` em
+`internal/api/server.go` para as rotas.
 
 O CI roda em todo pull request e em todo push para `main`, com um Postgres de
 verdade como serviço: `gofmt` com conferência da saída, `go vet`, `go build`,
@@ -75,10 +78,10 @@ flowchart TB
     subgraph painel["Painel — Go 1.26, porta 8080"]
         gate["<b>Gate de papel</b><br/>Bearer ou X-API-Token<br/>RBAC por papel e por unidade"]
         ticket["<b>Ticket de SSE</b><br/>uso único, 30 s"]
-        rotas["<b>32 rotas HTTP</b><br/>internal/api/server.go"]
+        rotas["<b>35 rotas HTTP</b><br/>internal/api/server.go"]
         stream["<b>Streams SSE</b><br/>logs de container e auth.log"]
-        ingest["<b>Ingestão</b><br/>X-Agent-Token<br/>fail-closed: 503 sem token"]
-        sshmgr["<b>Gerente SSH</b><br/>uma goroutine por VPS<br/>hot-plug, reconexão em 5 s"]
+        ingest["<b>Ingestão</b><br/>credencial por dispositivo<br/>tipo agent ou collector"]
+        sshmgr["<b>Gerente SSH</b><br/>uma goroutine por VPS<br/>hot-plug, reconexão com backoff"]
         workers["<b>Workers de fundo</b><br/>regras 30 s · vigia de SSL<br/>rollup 15 min · retenção 1 h<br/>descoberta RFC1918"]
     end
 
@@ -153,14 +156,18 @@ por SSH — veja [Fontes de dado](docs/arquitetura.md).
   host. Quem depende dela precisa de `network_mode: host` ou do coletor remoto.
 - **A tela de descoberta de SSL depende do access log do Nginx.** Sem um host com
   `collect_nginx` ligado, ela fica vazia — não há erro, não há o que descobrir.
-- **Não há prober de rede.** O que o painel chama de handshake SSH é o tempo de
-  abrir a sessão inteira (TCP + troca de chaves), uma ordem de grandeza acima do
-  RTT. Ver [`docs/metricas.md`](docs/metricas.md).
-- **Uma chave SSH única para toda a frota.** `SSH_KEY_PATH` é uma só chave, por
-  padrão `root`. Comprometer o host do painel é comprometer a frota. A redução
-  disponível: usuário dedicado `vd-monitor` com grupos e sudoers mínimos — ver
+- **RTT só onde há conexão SSH.** A latência (`rtt_ms`) é o tempo de ida e volta
+  de um keepalive na sessão de coleta já aberta, até o sshd. Host que só reporta
+  por agente de push fica sem RTT, e não há medida por ICMP. O handshake SSH
+  continua sendo outra métrica, o custo de abrir a sessão inteira. Ver
+  [`docs/metricas.md`](docs/metricas.md).
+- **Uma chave SSH única para toda a frota.** `SSH_KEY_PATH` é uma só chave (com
+  passphrase ou vinda do `ssh-agent`, se configurado), e o usuário padrão do
+  cadastro é `root`. Comprometer o host do painel é comprometer a frota. A redução
+  disponível: usuário dedicado `dockkeeper-monitor` com grupos, `SSH_USE_SUDO` e
+  sudoers mínimo — ver
   [`docs/operacao.md`](docs/operacao.md) e
-  [`backend/deploy/sudoers-vd-monitor.exemplo`](backend/deploy/sudoers-vd-monitor.exemplo).
+  [`backend/deploy/sudoers-dockkeeper-monitor.exemplo`](backend/deploy/sudoers-dockkeeper-monitor.exemplo).
 - **Sessões vivem no banco, mas o cooldown de alerta também.** Com o banco
   indisponível o painel recusa login e passa a notificar sem deduplicar — falha
   aberta de propósito, porque alerta duplicado incomoda e alerta perdido mata.
@@ -317,9 +324,19 @@ cobertura.
 Para rodar os testes de integração, aponte um Postgres descartável:
 
 ```bash
-export DATABASE_URL="postgres://postgres@127.0.0.1:5433/vdstats_test?sslmode=disable"
+export DATABASE_URL="postgres://postgres@127.0.0.1:5433/dockkeeper_test?sslmode=disable"
 go test ./...
 ```
+
+---
+
+## Contribuindo
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — como rodar o projeto e a suíte, e as regras
+  de um pull request.
+- [`SECURITY.md`](SECURITY.md) — como reportar uma vulnerabilidade em privado.
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — conduta esperada de quem participa.
+- [`CHANGELOG.md`](CHANGELOG.md) — o que mudou, por data de entrega.
 
 ---
 

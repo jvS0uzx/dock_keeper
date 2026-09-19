@@ -6,20 +6,21 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/jvS0uzx/dock_keeper/internal/auth"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"github.com/jvS0uzx/dock_keeper/internal/discovery"
 )
 
-// sitesHandler faz o CRUD das unidades monitoradas.
 func sitesHandler(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
 
 	switch r.Method {
 	case http.MethodGet:
 		tx := database.DB.Order("name ASC")
-		// Usuário restrito só lista as unidades que alcança.
 		if !auth.HasGlobal(sess.Accesses) {
 			ids := auth.SiteIDs(sess.Accesses)
 			if len(ids) == 0 {
@@ -40,8 +41,6 @@ func sitesHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, sites)
 
 	case http.MethodPost:
-		// Criar/remover unidade muda o cadastro global: exige operador global,
-		// não apenas operador de uma unidade.
 		if !auth.Allows(auth.GlobalRole(sess.Accesses), auth.RoleOperator) {
 			writeError(w, http.StatusForbidden, "criar unidades exige acesso global de Suporte TI")
 			return
@@ -86,17 +85,22 @@ func sitesHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "id é obrigatório")
 			return
 		}
-		// O nome é lido antes da exclusão: remover a unidade 4 é exatamente o
-		// tipo de linha que ninguém consegue interpretar depois.
 		var doomed database.Site
 		found := database.DB.Where("id = ?", id).First(&doomed).Error == nil
 
-		// Hosts e plantas ficam sem unidade em vez de sumirem junto: o
-		// inventário é o registro de campo, a unidade é só o agrupamento.
-		database.DB.Model(&database.NetworkHost{}).Where("site_id = ?", id).Update("site_id", nil)
-		database.DB.Model(&database.FloorPlan{}).Where("site_id = ?", id).Update("site_id", nil)
+		presos, err := dispositivosVivos(id)
+		if err != nil {
+			log.Printf("[API] erro ao conferir dispositivos da unidade %s: %v", id, err)
+			writeError(w, http.StatusInternalServerError, "falha ao remover a unidade")
+			return
+		}
+		if presos != "" {
+			writeError(w, http.StatusConflict,
+				"a unidade ainda tem "+presos+"; revogue antes de remover, senão o dispositivo continuaria enviando dados para uma unidade que não existe mais")
+			return
+		}
 
-		if err := database.DB.Where("id = ?", id).Delete(&database.Site{}).Error; err != nil {
+		if err := removerUnidadeEReferencias(id); err != nil {
 			log.Printf("[API] erro ao remover unidade %s: %v", id, err)
 			writeError(w, http.StatusInternalServerError, "falha ao remover a unidade")
 			return
@@ -108,11 +112,55 @@ func sitesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// networkHostUpdateHandler grava os campos cadastrais de um host.
-// PATCH /api/network/host?ip=...
-//
-// Só toca no que o operador informa: hostname, MAC, portas e datas continuam
-// sendo território exclusivo da varredura.
+func dispositivosVivos(id string) (string, error) {
+	var credenciais, convites int64
+	if err := database.DB.Model(&database.DeviceCredential{}).
+		Where("site_id = ? AND revoked_at IS NULL", id).Count(&credenciais).Error; err != nil {
+		return "", err
+	}
+	if err := database.DB.Model(&database.EnrollmentToken{}).
+		Where("site_id = ? AND used_at IS NULL AND expires_at > ?", id, time.Now().UTC()).
+		Count(&convites).Error; err != nil {
+		return "", err
+	}
+
+	partes := make([]string, 0, 2)
+	if credenciais > 0 {
+		partes = append(partes, strconv.FormatInt(credenciais, 10)+" dispositivo(s) com credencial ativa")
+	}
+	if convites > 0 {
+		partes = append(partes, strconv.FormatInt(convites, 10)+" convite(s) válido(s)")
+	}
+	return strings.Join(partes, " e "), nil
+}
+
+func removerUnidadeEReferencias(id string) error {
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&database.Server{}).Where("site_id = ?", id).Update("site_id", nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&database.AlertRule{}).Where("target_site_id = ?", id).Update("target_site_id", nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&database.NetworkHost{}).Where("site_id = ?", id).Update("site_id", nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&database.FloorPlan{}).Where("site_id = ?", id).Update("site_id", nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("site_id = ?", id).Delete(&database.UserSiteAccess{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("site_id = ?", id).Delete(&database.DeviceCredential{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("site_id = ?", id).Delete(&database.EnrollmentToken{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", id).Delete(&database.Site{}).Error
+	})
+}
+
 func networkHostUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	ip := strings.TrimSpace(r.URL.Query().Get("ip"))
 	if ip == "" {
@@ -127,18 +175,12 @@ func networkHostUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "host não encontrado no inventário")
 		return
 	}
-	// O cadastro é editável por quem é Suporte TI na unidade atual do host;
-	// host sem unidade exige acesso global.
 	if !auth.Allows(auth.RoleForSite(sess.Accesses, current.SiteID), auth.RoleOperator) {
 		writeError(w, http.StatusForbidden, "este host está fora do seu alcance")
 		return
 	}
 
 	var req struct {
-		// SiteID é json.RawMessage porque *uint não distingue "campo ausente"
-		// de "campo enviado como null", e os dois significam coisas opostas
-		// aqui: ausente não mexe na unidade, null devolve o host ao controle
-		// automático do coletor.
 		SiteID     json.RawMessage `json:"site_id"`
 		Floor      *string         `json:"floor"`
 		Sector     *string         `json:"sector"`
@@ -156,23 +198,17 @@ func networkHostUpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 	updates := map[string]any{}
 
-	// json.RawMessage SEM ponteiro é o que distingue "campo ausente" de
-	// "campo enviado como null": com ponteiro, o encoding/json zera o ponteiro
-	// nos dois casos e o destravar por null nunca chegava aqui.
 	if len(req.SiteID) > 0 {
 		siteID, ok := parseOptionalUint(req.SiteID)
 		if !ok {
 			writeError(w, http.StatusBadRequest, "site_id inválido: informe um número ou null")
 			return
 		}
-		// Mover o host exige alcance também na unidade de destino; devolver ao
-		// automático (null) é avaliado contra o escopo sem unidade.
 		if !auth.Allows(auth.RoleForSite(sess.Accesses, siteID), auth.RoleOperator) {
 			writeError(w, http.StatusForbidden, "a unidade de destino está fora do seu alcance")
 			return
 		}
 		if siteID == nil {
-			// Destravar: a unidade volta a ser definida pelo coletor.
 			updates["site_id"] = nil
 			updates["site_locked"] = false
 		} else {
@@ -181,8 +217,6 @@ func networkHostUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// device_type vazio destrava e reinfere na hora pelas portas já gravadas;
-	// esperar a próxima varredura deixaria o campo desatualizado por um ciclo.
 	if req.DeviceType != nil {
 		if chosen := strings.TrimSpace(*req.DeviceType); chosen == "" {
 			updates["device_type"] = discovery.DeviceType(discovery.ParsePorts(current.OpenPorts))
@@ -222,15 +256,10 @@ func networkHostUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "falha ao reler o host")
 		return
 	}
-	// A unidade registrada é a de DEPOIS da edição: é o estado que esta ação
-	// produziu. Quem audita a unidade de origem de um host movido não o
-	// encontra por aqui — ver a limitação anotada no relatório do item N5.
 	auditTarget(r, "network-host", host.IP, host.Hostname, host.SiteID)
 	writeJSON(w, http.StatusOK, host)
 }
 
-// parseOptionalUint interpreta o conteúdo bruto de um campo JSON que aceita
-// número ou null. Devolve (nil, true) para null e (nil, false) para lixo.
 func parseOptionalUint(raw json.RawMessage) (*uint, bool) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "null" || trimmed == "" {

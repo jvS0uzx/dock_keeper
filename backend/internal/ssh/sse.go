@@ -7,9 +7,6 @@ import (
 	"sync"
 )
 
-// sseWriter serializa a escrita no http.ResponseWriter. O stream de logs lê
-// stdout e stderr em goroutines separadas: sem o mutex as duas escrevem no
-// mesmo ResponseWriter ao mesmo tempo, o que é corrida de dados.
 type sseWriter struct {
 	mu      sync.Mutex
 	w       io.Writer

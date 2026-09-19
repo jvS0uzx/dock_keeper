@@ -15,11 +15,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Teto do corpo multipart. Sobra sobre maxPlanBytes para caber os campos de
-// texto do formulário; o tamanho da imagem em si é validado depois.
 const maxPlanUploadBytes = maxPlanBytes + (1 << 20)
 
-// PinView é um marcador com o estado do host resolvido no momento da consulta.
 type PinView struct {
 	ID           uint    `json:"id"`
 	HostIP       string  `json:"host_ip"`
@@ -28,15 +25,12 @@ type PinView struct {
 	Y            float64 `json:"y"`
 	TargetPlanID *uint   `json:"target_plan_id"`
 
-	// Resolvido do inventário, não persistido no pin.
 	Hostname   string `json:"hostname"`
 	DeviceType string `json:"device_type"`
 	Online     bool   `json:"online"`
 	Monitored  bool   `json:"monitored"`
-	Known      bool   `json:"known"` // o IP existe no inventário
-	// Preenchido quando a máquina reporta métricas: é o que permite abrir a
-	// tela de detalhe direto do marcador.
-	ServerID string `json:"server_id"`
+	Known      bool   `json:"known"`
+	ServerID   string `json:"server_id"`
 }
 
 type FloorPlanView struct {
@@ -50,15 +44,12 @@ type FloorPlanView struct {
 	Pins        []PinView `json:"pins"`
 }
 
-// floorPlansHandler lista as plantas (sem pins) e recebe o upload de uma nova.
 func floorPlansHandler(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
 
 	switch r.Method {
 	case http.MethodGet:
 		tx := database.DB.Order("name ASC")
-		// Usuário restrito só vê plantas das unidades dele; planta sem unidade
-		// é material global.
 		if !auth.HasGlobal(sess.Accesses) {
 			ids := auth.SiteIDs(sess.Accesses)
 			if len(ids) == 0 {
@@ -116,9 +107,6 @@ func createFloorPlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	siteID := optionalUint(r.FormValue("site_id"))
-	// A planta é sempre de uma unidade: é ela que dá sentido ao mapa e define
-	// quem enxerga. Planta solta ficaria visível para todo mundo e sem lugar
-	// no painel de campo.
 	if siteID == nil {
 		removePlanImage(stored.Path)
 		writeError(w, http.StatusBadRequest, "site_id é obrigatório: a planta pertence a uma unidade")
@@ -130,7 +118,6 @@ func createFloorPlan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unidade inexistente")
 		return
 	}
-	// Publicar planta exige Suporte TI na unidade dela.
 	if !auth.Allows(auth.RoleForSite(sess.Accesses, siteID), auth.RoleOperator) {
 		removePlanImage(stored.Path)
 		writeError(w, http.StatusForbidden, "esta unidade está fora do seu alcance")
@@ -146,7 +133,6 @@ func createFloorPlan(w http.ResponseWriter, r *http.Request) {
 		Height:      stored.Height,
 	}
 	if err := database.DB.Create(&plan).Error; err != nil {
-		// O arquivo já está em disco: sem isso ele viraria órfão.
 		removePlanImage(stored.Path)
 		log.Printf("[API] erro ao cadastrar planta %q: %v", name, err)
 		writeError(w, http.StatusInternalServerError, "falha ao cadastrar a planta")
@@ -159,8 +145,6 @@ func createFloorPlan(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// floorPlanHandler responde uma planta com seus pins, e a remove.
-// GET/DELETE /api/floorplans/{id}
 func floorPlanHandler(w http.ResponseWriter, r *http.Request) {
 	id, ok := planIDFromPath(w, r, "")
 	if !ok {
@@ -173,8 +157,6 @@ func floorPlanHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "planta não encontrada")
 		return
 	}
-	// Fora do alcance responde igual a inexistente, para não confirmar que a
-	// planta existe.
 	if !auth.CanSeeSite(sess.Accesses, plan.SiteID) {
 		writeError(w, http.StatusNotFound, "planta não encontrada")
 		return
@@ -213,10 +195,6 @@ func floorPlanHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// floorPlanImageHandler devolve o binário da planta.
-//
-// O frontend busca com fetch() autenticado e monta um object URL: <img src>
-// não envia cabeçalho, e passar o token na URL o gravaria no access log.
 func floorPlanImageHandler(w http.ResponseWriter, r *http.Request) {
 	id, ok := planIDFromPath(w, r, "/image")
 	if !ok {
@@ -243,7 +221,6 @@ func floorPlanImageHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", plan.ContentType)
 	w.Header().Set("Cache-Control", "private, max-age=300")
-	// A imagem é dado do operador: nunca deve ser interpretada como documento.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Disposition", "inline")
 	if _, err := w.Write(data); err != nil {
@@ -251,8 +228,6 @@ func floorPlanImageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// floorPlanPinsHandler substitui todos os pins da planta de uma vez.
-// PUT /api/floorplans/{id}/pins
 func floorPlanPinsHandler(w http.ResponseWriter, r *http.Request) {
 	id, ok := planIDFromPath(w, r, "/pins")
 	if !ok {
@@ -294,10 +269,6 @@ func floorPlanPinsHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "um pin não pode apontar para a própria planta")
 			return
 		}
-		// Endereço malformado nunca resolve contra o inventário: é erro do
-		// cliente, não estado legítimo. Mesma régua da ingestão de inventário,
-		// que descarta o que net.ParseIP recusa. Endereço BEM formado que ainda
-		// não está no inventário é outra coisa, e passa — ver abaixo.
 		if p.HostIP != "" && net.ParseIP(p.HostIP) == nil {
 			writeError(w, http.StatusBadRequest, "host_ip inválido: "+p.HostIP)
 			return
@@ -312,8 +283,6 @@ func floorPlanPinsHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Troca atômica: o painel manda o conjunto inteiro a cada gravação, então
-	// apagar e recriar fora de transação deixaria a planta sem pins no meio.
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("plan_id = ?", plan.ID).Delete(&database.FloorPlanPin{}).Error; err != nil {
 			return err
@@ -335,11 +304,6 @@ func floorPlanPinsHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "falha ao reler os marcadores")
 		return
 	}
-	// Marcador para endereço fora do inventário da unidade é estado legítimo, e
-	// não erro: PinView.Known existe justamente para representá-lo, e o operador
-	// posiciona a máquina na planta antes de a varredura chegar nela. O que não
-	// pode é ser silencioso — sem registro, unidade errada fica indistinguível
-	// de máquina ainda não descoberta, e as duas se parecem na tela.
 	if n := unknownPins(saved); n > 0 {
 		log.Printf("[API] planta %d (unidade %v): %d marcador(es) apontam para endereço fora do inventário da unidade",
 			plan.ID, plan.SiteID, n)
@@ -347,15 +311,6 @@ func floorPlanPinsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"pins": saved})
 }
 
-// pinsWithState junta os pins ao estado atual de cada host, resolvido dentro da
-// unidade da planta.
-//
-// A resolução é por (unidade da planta, ip), nunca por ip sozinho: a unicidade
-// do inventário deixou de ser global, e duas filiais com a mesma faixa RFC1918
-// têm o mesmo 192.168.0.10 em dois equipamentos diferentes. Resolvendo só pelo
-// endereço, o marcador de uma filial exibia o estado do equipamento da outra —
-// e a consulta lia a tabela inteira, entregando o inventário de todas as
-// unidades a quem abrisse qualquer planta.
 func pinsWithState(plan database.FloorPlan) ([]PinView, error) {
 	var pins []database.FloorPlanPin
 	if err := database.DB.Where("plan_id = ?", plan.ID).Order("id ASC").Find(&pins).Error; err != nil {
@@ -372,7 +327,7 @@ func pinsWithState(plan database.FloorPlan) ([]PinView, error) {
 		return nil, err
 	}
 
-	cutoff := time.Now().UTC().Add(-hostOfflineAfter)
+	now := time.Now().UTC()
 	views := make([]PinView, 0, len(pins))
 	for _, p := range pins {
 		view := PinView{
@@ -383,7 +338,7 @@ func pinsWithState(plan database.FloorPlan) ([]PinView, error) {
 			view.Known = true
 			view.Hostname = host.Hostname
 			view.DeviceType = host.DeviceType
-			view.Online = host.LastSeen.After(cutoff)
+			view.Online = hostOnline(host.LastSeen, now)
 			_, view.Monitored = monitored.lookup(host.IP, host.Hostname)
 			view.ServerID = monitored.serverID(host.IP, host.Hostname)
 		}
@@ -392,8 +347,6 @@ func pinsWithState(plan database.FloorPlan) ([]PinView, error) {
 	return views, nil
 }
 
-// unknownPins conta os marcadores cujo endereço não existe no inventário da
-// unidade da planta. Sai de PinView, já resolvido, para não repetir a consulta.
 func unknownPins(views []PinView) int {
 	n := 0
 	for _, v := range views {
@@ -404,11 +357,6 @@ func unknownPins(views []PinView) int {
 	return n
 }
 
-// siteKey é a unidade como o índice único do inventário a enxerga. O sentinela
-// 0 existe porque o Postgres trata NULL como distinto de NULL num índice único:
-// a chave gravada é COALESCE(site_id, 0), e a consulta precisa perguntar do
-// mesmo jeito para poder usar o índice. Site.ID é serial e começa em 1, então o
-// zero nunca colide com unidade real.
 func siteKey(siteID *uint) uint {
 	if siteID == nil {
 		return 0
@@ -416,8 +364,6 @@ func siteKey(siteID *uint) uint {
 	return *siteID
 }
 
-// pinIPs junta os endereços que a planta referencia, sem repetição. Pin de
-// drill-down (só target_plan_id) não tem endereço e fica de fora.
 func pinIPs(pins []database.FloorPlanPin) []string {
 	ips := make([]string, 0, len(pins))
 	visto := make(map[string]struct{}, len(pins))
@@ -434,8 +380,6 @@ func pinIPs(pins []database.FloorPlanPin) []string {
 	return ips
 }
 
-// hostsOfSite lê do inventário apenas os endereços que a planta referencia,
-// dentro da unidade dela.
 func hostsOfSite(siteID *uint, ips []string) (map[string]database.NetworkHost, error) {
 	byIP := make(map[string]database.NetworkHost, len(ips))
 	if len(ips) == 0 {
@@ -454,12 +398,6 @@ func hostsOfSite(siteID *uint, ips []string) (map[string]database.NetworkHost, e
 	return byIP, nil
 }
 
-// monitoredServersOfSite indexa só os servidores da unidade da planta.
-//
-// O recorte é pela unidade da planta, e não pelo alcance da sessão como em
-// monitoredServers: Server.HostIP não é único, então sem ele o mesmo endereço
-// em duas filiais faria o marcador abrir a tela da máquina errada. O sentinela
-// 0 do COALESCE casa com a semântica do índice único do inventário.
 func monitoredServersOfSite(siteID *uint) (serverIndex, error) {
 	var servers []database.Server
 	if err := database.DB.
@@ -471,7 +409,6 @@ func monitoredServersOfSite(siteID *uint) (serverIndex, error) {
 	return indexServers(servers), nil
 }
 
-// planIDFromPath extrai o {id} de /api/floorplans/{id}{suffix}.
 func planIDFromPath(w http.ResponseWriter, r *http.Request, suffix string) (uint, bool) {
 	raw := strings.TrimPrefix(r.URL.Path, "/api/floorplans/")
 	raw = strings.TrimSuffix(raw, suffix)
@@ -485,8 +422,6 @@ func planIDFromPath(w http.ResponseWriter, r *http.Request, suffix string) (uint
 	return uint(id), true
 }
 
-// clampPercent mantém a coordenada dentro da imagem. Os pins são gravados em
-// porcentagem para acompanhar o redimensionamento da planta na tela.
 func clampPercent(v float64) float64 {
 	if v < 0 {
 		return 0

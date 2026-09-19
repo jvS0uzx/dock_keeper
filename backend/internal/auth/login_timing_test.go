@@ -15,12 +15,6 @@ const (
 	timingSenhaIncorret = "senha-errada-9876"
 )
 
-// setupTimingDB liga no Postgres de desenvolvimento. Sem DATABASE_URL o teste é
-// pulado: a suíte precisa passar numa máquina sem banco.
-//
-// A cobertura é de integração porque Login consulta a tabela de usuários
-// diretamente — a ordem entre o bcrypt e a conferência de Active não aparece
-// num teste de unidade.
 func setupTimingDB(t *testing.T) {
 	t.Helper()
 
@@ -46,9 +40,6 @@ func setupTimingDB(t *testing.T) {
 	if err := database.DB.Create(&usuarios).Error; err != nil {
 		t.Fatalf("criar usuários de teste: %v", err)
 	}
-	// A desativação é um UPDATE separado porque User.Active tem `default:true`:
-	// o GORM omite o campo do INSERT quando o valor é o zero de bool, e o banco
-	// grava o padrão. Criar com Active: false devolve um usuário ativo.
 	if err := database.DB.Model(&database.User{}).
 		Where("username = ?", timingUserInativo).
 		Update("active", false).Error; err != nil {
@@ -62,13 +53,6 @@ func limparUsuariosDeTiming(t *testing.T) {
 	database.DB.Unscoped().Where("username IN ?", nomes).Delete(&database.User{})
 }
 
-// TestContaDesativadaComSenhaErradaNaoSeDistingue trava a correção do canal
-// lateral de tempo: conferir Active antes do bcrypt respondia em microssegundos
-// para conta desativada, enquanto senha errada e usuário inexistente gastavam os
-// 60-100 ms do bcrypt de custo 10 — e esse intervalo revela que a conta existe.
-//
-// O erro devolvido é o observável que prova a ordem: com o bcrypt primeiro, quem
-// erra a senha recebe ErrInvalidCredentials mesmo que a conta esteja desativada.
 func TestContaDesativadaComSenhaErradaNaoSeDistingue(t *testing.T) {
 	setupTimingDB(t)
 
@@ -78,9 +62,6 @@ func TestContaDesativadaComSenhaErradaNaoSeDistingue(t *testing.T) {
 	}
 }
 
-// TestContaDesativadaComSenhaCertaContinuaRecusada garante que a correção não
-// virou permissão: quem sabe a senha continua sabendo que a conta foi desativada,
-// o que é informação que ele já tinha.
 func TestContaDesativadaComSenhaCertaContinuaRecusada(t *testing.T) {
 	setupTimingDB(t)
 
@@ -90,8 +71,6 @@ func TestContaDesativadaComSenhaCertaContinuaRecusada(t *testing.T) {
 	}
 }
 
-// TestContaAtivaContinuaEntrando é o controle: sem ele os dois testes acima
-// passariam com um Login que recusa tudo.
 func TestContaAtivaContinuaEntrando(t *testing.T) {
 	setupTimingDB(t)
 

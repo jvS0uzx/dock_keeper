@@ -22,17 +22,13 @@ func TestAuditActionDerivaONomeDaRota(t *testing.T) {
 		{http.MethodPost, "/api/sites", "site.create"},
 		{http.MethodPatch, "/api/network/host", "network-host.update"},
 		{http.MethodPost, "/api/floorplans", "floorplan.create"},
-		// Segmento dinâmico: o id não pode virar parte do nome, senão cada
-		// planta gera uma ação diferente e o filtro por ação deixa de agrupar.
 		{http.MethodPut, "/api/floorplans/12", "floorplan.update"},
 		{http.MethodDelete, "/api/floorplans/12/pins", "floorplan.delete"},
-		// Rotas cujo último segmento já é o verbo.
 		{http.MethodPost, "/api/ssl/recheck", "ssl.recheck"},
 		{http.MethodPost, "/api/ssl/recheck-all", "ssl.recheck-all"},
 		{http.MethodPost, "/api/network/scan", "network.scan"},
 		{http.MethodPost, "/api/auth/login", "auth.login"},
 		{http.MethodPost, "/api/auth/logout", "auth.logout"},
-		// Rota não cadastrada ainda gera linha, com nome que denuncia a omissão.
 		{http.MethodPost, "/api/rota/nova", "desconhecido.create"},
 	}
 	for _, c := range casos {
@@ -69,8 +65,6 @@ func TestAuditResultForTraduzOStatus(t *testing.T) {
 	}
 }
 
-// O ticket de SSE é credencial de uso único. Se ele entrar no detalhe, a
-// auditoria passa a guardar a chave que ela deveria estar protegendo.
 func TestDetalheNaoCarregaOTicket(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/api/x?ticket=SEGREDO&token=SEGREDO&server_id=7", nil)
 
@@ -92,9 +86,6 @@ func TestDetalheNaoCarregaOTicket(t *testing.T) {
 	}
 }
 
-// startSSE decide se há streaming por type assertion para http.Flusher. Um
-// envelope que não a satisfaça faz o painel parar de receber dado em tempo real
-// sem erro nenhum, então o envelope precisa repassá-la.
 func TestAuditWriterRepassaOFlusher(t *testing.T) {
 	aw := &auditWriter{ResponseWriter: httptest.NewRecorder(), status: http.StatusOK}
 
@@ -119,8 +110,6 @@ func TestAuditWriterGuardaOPrimeiroStatus(t *testing.T) {
 	}
 }
 
-// Write sem WriteHeader é 200 implícito no net/http, e a auditoria precisa
-// registrar 200, não zero.
 func TestAuditWriterAssumeDuzentosSemWriteHeader(t *testing.T) {
 	aw := &auditWriter{ResponseWriter: httptest.NewRecorder(), status: http.StatusOK}
 
@@ -132,10 +121,6 @@ func TestAuditWriterAssumeDuzentosSemWriteHeader(t *testing.T) {
 	}
 }
 
-// gravadas coleta as linhas que o middleware produziria, sem banco: substitui o
-// Record por uma captura. Como audit.Record fala direto com o database.DB, o
-// teste exercita a cadeia e observa o writer, e a checagem de conteúdo da linha
-// fica nos testes de integração abaixo.
 func rodaMiddleware(t *testing.T, onlyDenied bool, req *http.Request, status int) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -148,7 +133,6 @@ func rodaMiddleware(t *testing.T, onlyDenied bool, req *http.Request, status int
 	return rec
 }
 
-// O middleware não pode alterar a resposta: ele observa, não intervém.
 func TestAuditNaoAlteraAResposta(t *testing.T) {
 	casos := []int{http.StatusOK, http.StatusForbidden, http.StatusInternalServerError}
 	for _, status := range casos {
@@ -163,8 +147,6 @@ func TestAuditNaoAlteraAResposta(t *testing.T) {
 	}
 }
 
-// GET tem que atravessar o middleware sem tocar em nada: é o caminho do polling
-// do painel, e qualquer trabalho aqui é multiplicado por todo cliente aberto.
 func TestAuditDeixaOGetPassarIntacto(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/metrics/live", nil)
 	rec := rodaMiddleware(t, auditAll, req, http.StatusOK)

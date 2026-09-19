@@ -23,3 +23,18 @@ export const formatDateTime = (iso: string): string => {
   const date = new Date(iso);
   return isNaN(date.getTime()) ? iso : date.toLocaleString('pt-BR');
 };
+
+export const formatRate = (bytesPerSecond: number | null): string =>
+  bytesPerSecond === null ? '—' : `${formatBytes(bytesPerSecond)}/s`;
+
+export const formatPercent = (valor: number | null, casas = 0): string =>
+  valor === null ? '—' : `${valor.toFixed(casas)}%`;
+
+export const formatLoad = (valor: number | null): string =>
+  valor === null ? '—' : valor.toFixed(2);
+
+export const formatLatency = (ms: number | null): string => {
+  if (ms === null) return '—';
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(1).replace('.', ',')} s`;
+};

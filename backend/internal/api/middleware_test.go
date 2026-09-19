@@ -70,8 +70,6 @@ func TestRequireAuthRejectsWrongToken(t *testing.T) {
 	}
 }
 
-// O API_TOKEN nunca pode autenticar por query string: a URL vai para o access
-// log do Nginx e para o histórico do browser, e o segredo é permanente.
 func TestTokenNaQueryNuncaAutentica(t *testing.T) {
 	cfg := testConfig()
 
@@ -102,7 +100,6 @@ func TestTicketAutorizaStreamUmaVezSo(t *testing.T) {
 		t.Fatalf("primeiro uso do ticket: status = %d", rec.Code)
 	}
 
-	// Reuso: um ticket que sobra no access log não pode valer de novo.
 	rec = httptest.NewRecorder()
 	h(rec, httptest.NewRequest(http.MethodGet, "/api/s?ticket="+ticket, nil))
 	if rec.Code != http.StatusUnauthorized {
@@ -114,7 +111,6 @@ func TestTicketExpirado(t *testing.T) {
 	cfg := testConfig()
 	ticket, _ := cfg.tickets.issue(machineSession)
 
-	// Força o vencimento sem esperar os 30s reais.
 	cfg.tickets.mu.Lock()
 	cfg.tickets.issued[ticket] = ticketEntry{expires: time.Now().Add(-time.Second)}
 	cfg.tickets.mu.Unlock()
@@ -185,8 +181,6 @@ func TestAllowMethods(t *testing.T) {
 	}
 }
 
-// A superfície inteira é autenticada; só o liveness fica aberto para o
-// orquestrador conseguir checar o processo.
 func TestRoutesRequireToken(t *testing.T) {
 	handler := Routes(testConfig())
 
@@ -234,12 +228,9 @@ func TestLoadConfigRequiresToken(t *testing.T) {
 	}
 }
 
-// Papel insuficiente responde 403, não 401: quem está autenticado precisa
-// saber que o problema é permissão, não credencial.
 func TestRequireRoleRespeitaHierarquia(t *testing.T) {
 	cfg := testConfig()
 
-	// O API_TOKEN é credencial de máquina e passa por qualquer nível.
 	for _, role := range []string{auth.RoleViewer, auth.RoleOperator, auth.RoleAdmin} {
 		req := httptest.NewRequest(http.MethodGet, "/api/x", nil)
 		req.Header.Set("Authorization", "Bearer "+testToken)
@@ -251,7 +242,6 @@ func TestRequireRoleRespeitaHierarquia(t *testing.T) {
 		}
 	}
 
-	// Sem credencial nenhuma continua 401.
 	rec := httptest.NewRecorder()
 	cfg.requireRole(auth.RoleViewer)(okHandler)(rec, httptest.NewRequest(http.MethodGet, "/api/x", nil))
 	if rec.Code != http.StatusUnauthorized {
@@ -259,12 +249,6 @@ func TestRequireRoleRespeitaHierarquia(t *testing.T) {
 	}
 }
 
-// A rota de login precisa ficar aberta, senão ninguém consegue o primeiro
-// token; o resto continua fechado.
-//
-// O login é sondado com GET numa rota POST-only: a cadeia responde 405 se a
-// requisição passou da autenticação e 401 se não passou. Assim o teste prova
-// que a rota é pública sem executar o handler, que precisaria de banco.
 func TestLoginEhPublicoEResultoFechado(t *testing.T) {
 	handler := Routes(testConfig())
 
@@ -316,8 +300,6 @@ func TestSiteScope(t *testing.T) {
 	}
 }
 
-// "none" seleciona o que não foi classificado — é onde as VPS de
-// infraestrutura ficam de propósito.
 func TestSiteScopeMatches(t *testing.T) {
 	umaUnidade := uint(3)
 	outraUnidade := uint(9)
@@ -340,8 +322,6 @@ func TestSiteScopeMatches(t *testing.T) {
 
 func sitePtr(id uint) *uint { return &id }
 
-// O recorte deixa de ser conveniência e vira permissão: o que a sessão não
-// alcança nunca sai da consulta, peça o que a requisição pedir.
 func TestResolveScopeIntersectaComAsConcessoes(t *testing.T) {
 	global := auth.Session{Accesses: []auth.Access{{SiteID: nil, Role: auth.RoleViewer}}}
 	restrito := auth.Session{Accesses: []auth.Access{
@@ -353,7 +333,6 @@ func TestResolveScopeIntersectaComAsConcessoes(t *testing.T) {
 		return httptest.NewRequest(http.MethodGet, "/api/x"+q, nil)
 	}
 
-	// Global: o pedido vale como veio, inclusive "none" (VPS/Dev).
 	if scope, status := resolveScope(global, req("")); status != 0 || scope.filter {
 		t.Errorf("global sem filtro: scope=%+v status=%d", scope, status)
 	}
@@ -361,7 +340,6 @@ func TestResolveScopeIntersectaComAsConcessoes(t *testing.T) {
 		t.Errorf("global none: scope=%+v status=%d", scope, status)
 	}
 
-	// Restrito sem filtro: recebe a união das unidades dele, não o parque.
 	scope, status := resolveScope(restrito, req(""))
 	if status != 0 || !scope.filter || len(scope.ids) != 2 {
 		t.Fatalf("restrito sem filtro: scope=%+v status=%d", scope, status)
@@ -370,25 +348,20 @@ func TestResolveScopeIntersectaComAsConcessoes(t *testing.T) {
 		t.Error("restrito enxergou o escopo sem unidade")
 	}
 
-	// Restrito pedindo a própria unidade: passa.
 	if _, status := resolveScope(restrito, req("?site_id=3")); status != 0 {
 		t.Errorf("unidade própria: status=%d", status)
 	}
-	// Restrito pedindo unidade alheia ou o escopo Dev: 403.
 	if _, status := resolveScope(restrito, req("?site_id=9")); status != http.StatusForbidden {
 		t.Errorf("unidade alheia: status=%d, esperado 403", status)
 	}
 	if _, status := resolveScope(restrito, req("?site_id=none")); status != http.StatusForbidden {
 		t.Errorf("none restrito: status=%d, esperado 403", status)
 	}
-	// site_id malformado continua 400.
 	if _, status := resolveScope(restrito, req("?site_id=abc")); status != http.StatusBadRequest {
 		t.Errorf("malformado: status=%d, esperado 400", status)
 	}
 }
 
-// A sessão de pessoa entra pelo contexto e o gate respeita o papel dela; o
-// recorte fino usa as concessões carregadas.
 func TestRequireRoleComSessaoDePessoa(t *testing.T) {
 	viewer := sessaoDeTeste(t, "olheiro", []auth.Access{{SiteID: nil, Role: auth.RoleViewer}})
 
@@ -407,8 +380,6 @@ func TestRequireRoleComSessaoDePessoa(t *testing.T) {
 		t.Fatalf("viewer em rota viewer: status=%d", rec.Code)
 	}
 
-	// Mesmo usuário barrado no gate de escrita: é a regra "Visualizador não
-	// cadastra nada".
 	req = httptest.NewRequest(http.MethodPost, "/api/x", nil)
 	req.Header.Set("Authorization", "Bearer "+viewer.Token)
 	rec = httptest.NewRecorder()
@@ -417,7 +388,6 @@ func TestRequireRoleComSessaoDePessoa(t *testing.T) {
 		t.Fatalf("viewer em escrita: status=%d, esperado 403", rec.Code)
 	}
 
-	// GET na mesma rota continua liberado.
 	req = httptest.NewRequest(http.MethodGet, "/api/x", nil)
 	req.Header.Set("Authorization", "Bearer "+viewer.Token)
 	rec = httptest.NewRecorder()

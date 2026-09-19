@@ -15,13 +15,6 @@ const (
 	unidadeDeSessao = "teste-sessao-unidade"
 )
 
-// setupSessaoDB liga no Postgres de desenvolvimento e semeia uma dona de sessão
-// de verdade. Sem DATABASE_URL o teste é pulado: a suíte precisa passar numa
-// máquina sem banco.
-//
-// A sessão deixou de ser um mapa em memória, então não há mais como fabricar
-// sessão para usuário que não existe — a autorização é relida do banco a cada
-// Lookup, e um usuário inexistente não autoriza nada.
 func setupSessaoDB(t *testing.T) database.User {
 	t.Helper()
 
@@ -62,9 +55,6 @@ func limparSessao(t *testing.T) {
 	database.DB.Where("code = ?", unidadeDeSessao).Delete(&database.Site{})
 }
 
-// O que "sobrevive a reinício" quer dizer na prática: um processo que nunca viu
-// o login resolve a sessão lendo a tabela. A linha aqui é inserida à mão, sem
-// passar por CreateSession — contra o mapa em memória isto nunca resolveria.
 func TestSessaoInseridaNoBancoResolveSemEstadoEmMemoria(t *testing.T) {
 	user := setupSessaoDB(t)
 
@@ -75,7 +65,7 @@ func TestSessaoInseridaNoBancoResolveSemEstadoEmMemoria(t *testing.T) {
 		UserID:     user.ID,
 		Role:       RoleViewer,
 		Username:   user.Username,
-		ExpiresAt:  agora.Add(SessionTTL),
+		ExpiresAt:  agora.Add(sessionTTL),
 		CreatedAt:  agora,
 		LastSeenAt: agora,
 	}
@@ -92,8 +82,6 @@ func TestSessaoInseridaNoBancoResolveSemEstadoEmMemoria(t *testing.T) {
 	}
 }
 
-// O banco guarda o hash, nunca o token. Backup, réplica de leitura ou um SELECT
-// de quem só deveria consultar não podem entregar sessão ativa de ninguém.
 func TestTokenEmClaroNaoVaiParaOBanco(t *testing.T) {
 	user := setupSessaoDB(t)
 
@@ -102,9 +90,6 @@ func TestTokenEmClaroNaoVaiParaOBanco(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	// A busca é pelo dono, não pelo hash: procurar pelo hash faria o teste
-	// falhar com "não encontrei" numa implementação que grave o token cru, em
-	// vez de falhar dizendo que o token vazou.
 	var row database.UserSession
 	if err := database.DB.First(&row, "user_id = ?", user.ID).Error; err != nil {
 		t.Fatalf("a sessão não foi gravada: %v", err)
@@ -120,9 +105,6 @@ func TestTokenEmClaroNaoVaiParaOBanco(t *testing.T) {
 	}
 }
 
-// Remover a concessão de alguém a uma unidade precisa valer na requisição
-// seguinte. Congelar as concessões no login faria "revoguei e continuou
-// entrando", que é o pior defeito possível num controle de acesso.
 func TestConcessaoRemovidaValeNaRequisicaoSeguinte(t *testing.T) {
 	user := setupSessaoDB(t)
 
@@ -162,7 +144,6 @@ func TestConcessaoRemovidaValeNaRequisicaoSeguinte(t *testing.T) {
 	}
 }
 
-// Conta apagada não pode deixar sessão órfã resolvendo.
 func TestSessaoDeUsuarioApagadoMorre(t *testing.T) {
 	user := setupSessaoDB(t)
 
@@ -181,7 +162,6 @@ func TestSessaoDeUsuarioApagadoMorre(t *testing.T) {
 	}
 }
 
-// Conta desativada perde a sessão na hora, mesmo sem ninguém chamar RevokeUser.
 func TestSessaoDeUsuarioDesativadoMorre(t *testing.T) {
 	user := setupSessaoDB(t)
 
@@ -190,8 +170,6 @@ func TestSessaoDeUsuarioDesativadoMorre(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	// UPDATE separado: User.Active tem `default:true`, e o GORM omite o campo do
-	// INSERT quando o valor é o zero de bool.
 	database.DB.Model(&database.User{}).Where("id = ?", user.ID).Update("active", false)
 
 	if _, ok := Lookup(sess.Token); ok {
@@ -199,7 +177,6 @@ func TestSessaoDeUsuarioDesativadoMorre(t *testing.T) {
 	}
 }
 
-// Sessão vencida some da tabela quando alguém entra, no padrão do ticketStore.
 func TestSessaoVencidaEPodadaNoLoginSeguinte(t *testing.T) {
 	user := setupSessaoDB(t)
 
@@ -226,7 +203,6 @@ func TestSessaoVencidaEPodadaNoLoginSeguinte(t *testing.T) {
 	}
 }
 
-// Token vencido não resolve nem enquanto a poda não passou.
 func TestSessaoVencidaNaoResolve(t *testing.T) {
 	user := setupSessaoDB(t)
 

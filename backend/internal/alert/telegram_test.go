@@ -11,8 +11,6 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// fakeTelegram sobe um servidor que responde como a API do Telegram e registra
-// as chamadas recebidas, para o teste conferir o que o bot mandou.
 func fakeTelegram(t *testing.T, replies map[string]string) *[]*http.Request {
 	t.Helper()
 
@@ -40,21 +38,21 @@ func fakeTelegram(t *testing.T, replies map[string]string) *[]*http.Request {
 
 func resetState() {
 	enabled = false
+	resetSaude()
 	clear(lastSent)
 
-	// O cooldown deixou de ser só memória: sem limpar a tabela, a segunda
-	// execução da suíte contra o mesmo banco encontraria o disparo gravado pela
-	// primeira e recusaria o primeiro claimSlot do teste.
 	if database.DB != nil {
 		database.DB.Where("key LIKE ? OR key LIKE ?", "container_down:%", "e12-teste:%").
 			Delete(&database.AlertState{})
+		database.DB.Where("key LIKE ? OR key LIKE ?", "container_down:%", "e12-teste:%").
+			Delete(&database.Alert{})
 	}
 }
 
 func TestInitAtivaComCredenciaisValidas(t *testing.T) {
 	resetState()
 	calls := fakeTelegram(t, map[string]string{
-		"getMe":   `{"ok":true,"result":{"username":"vd_stats_bot"}}`,
+		"getMe":   `{"ok":true,"result":{"username":"dockkeeper_bot"}}`,
 		"getChat": `{"ok":true,"result":{"id":123456789}}`,
 	})
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123:abc")
@@ -70,7 +68,7 @@ func TestInitAtivaComCredenciaisValidas(t *testing.T) {
 	}
 }
 
-func TestInitRecusaTokenInvalido(t *testing.T) {
+func TestInitComTokenRecusadoFicaDegradado(t *testing.T) {
 	resetState()
 	fakeTelegram(t, map[string]string{
 		"getMe": `{"ok":false,"description":"Unauthorized"}`,
@@ -80,17 +78,18 @@ func TestInitRecusaTokenInvalido(t *testing.T) {
 
 	Init()
 
-	if enabled {
-		t.Fatal("Init habilitou o Telegram com token recusado")
+	if !enabled {
+		t.Fatal("token recusado desligou o canal: configurado significa ligado, com estado degradado")
+	}
+	if e := Status().Estado; e != EstadoDegradado {
+		t.Fatalf("estado = %q, esperado %q", e, EstadoDegradado)
 	}
 }
 
-// É exatamente o caso do TELEGRAM_CHAT_ID="botVdSats": token válido, chat que
-// não existe. Sem a checagem de boot isso só apareceria alerta a alerta.
-func TestInitRecusaChatIDInvalido(t *testing.T) {
+func TestInitComChatIDRecusadoFicaDegradado(t *testing.T) {
 	resetState()
 	fakeTelegram(t, map[string]string{
-		"getMe":   `{"ok":true,"result":{"username":"vd_stats_bot"}}`,
+		"getMe":   `{"ok":true,"result":{"username":"dockkeeper_bot"}}`,
 		"getChat": `{"ok":false,"description":"Bad Request: chat not found"}`,
 	})
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123:abc")
@@ -98,8 +97,11 @@ func TestInitRecusaChatIDInvalido(t *testing.T) {
 
 	Init()
 
-	if enabled {
-		t.Fatal("Init habilitou o Telegram com chat_id inexistente")
+	if !enabled {
+		t.Fatal("chat_id inexistente desligou o canal: configurado significa ligado, com estado degradado")
+	}
+	if e := Status().Estado; e != EstadoDegradado {
+		t.Fatalf("estado = %q, esperado %q", e, EstadoDegradado)
 	}
 }
 
@@ -122,7 +124,7 @@ func TestInitSemCredenciaisNaoChamaAPI(t *testing.T) {
 func TestSendMandaMensagemQuandoAtivo(t *testing.T) {
 	resetState()
 	calls := fakeTelegram(t, map[string]string{
-		"getMe":       `{"ok":true,"result":{"username":"vd_stats_bot"}}`,
+		"getMe":       `{"ok":true,"result":{"username":"dockkeeper_bot"}}`,
 		"getChat":     `{"ok":true,"result":{"id":123456789}}`,
 		"sendMessage": `{"ok":true,"result":{"message_id":1}}`,
 	})
@@ -144,7 +146,6 @@ func TestSendMandaMensagemQuandoAtivo(t *testing.T) {
 	}
 }
 
-// ativaTelegram valida credenciais contra o fake e deixa o envio habilitado.
 func ativaTelegram(t *testing.T, sendMessage http.HandlerFunc) *[]*http.Request {
 	t.Helper()
 
@@ -156,7 +157,7 @@ func ativaTelegram(t *testing.T, sendMessage http.HandlerFunc) *[]*http.Request 
 		w.Header().Set("Content-Type", "application/json")
 		switch method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]; method {
 		case "getMe":
-			_, _ = w.Write([]byte(`{"ok":true,"result":{"username":"vd_stats_bot"}}`))
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"username":"dockkeeper_bot"}}`))
 		case "getChat":
 			_, _ = w.Write([]byte(`{"ok":true,"result":{"id":123456789}}`))
 		case "sendMessage":
@@ -179,8 +180,6 @@ func ativaTelegram(t *testing.T, sendMessage http.HandlerFunc) *[]*http.Request 
 	return &got
 }
 
-// telegramComMarkdown imita o comportamento real da API: com parse_mode e
-// entidade desbalanceada no texto, responde 400 e a mensagem não é entregue.
 func telegramComMarkdown(w http.ResponseWriter, r *http.Request) {
 	texto := r.PostForm.Get("text")
 	if modo := r.PostForm.Get("parse_mode"); modo != "" && desbalanceado(texto) {
@@ -195,9 +194,6 @@ func desbalanceado(texto string) bool {
 	return strings.Count(texto, "_")%2 != 0 || strings.Count(texto, "*")%2 != 0
 }
 
-// O caso que motivou o E10, na forma exata que internal/ssh/client.go monta:
-// nome de container entre asteriscos, e o nome trazendo um "_". O Markdown fica
-// com entidade de itálico sem fechamento, a API responde 400 e o alerta some.
 func TestSendEntregaNomeComUnderline(t *testing.T) {
 	calls := ativaTelegram(t, telegramComMarkdown)
 
@@ -216,8 +212,6 @@ func TestSendEntregaNomeComUnderline(t *testing.T) {
 	}
 }
 
-// Nome com asterisco tem a mesma origem: vem do Docker e do DNS, é texto
-// arbitrário, e nenhum deles pode derrubar o envio.
 func TestSendEntregaNomeComAsterisco(t *testing.T) {
 	calls := ativaTelegram(t, telegramComMarkdown)
 
@@ -236,9 +230,6 @@ func TestSendEntregaNomeComAsterisco(t *testing.T) {
 	}
 }
 
-// Texto puro é a decisão, não um efeito colateral: qualquer parse_mode traz de
-// volta a classe inteira de falha, porque o texto interpola nome de container,
-// de host e de domínio, que ninguém controla.
 func TestSendNaoUsaParseMode(t *testing.T) {
 	calls := ativaTelegram(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
@@ -252,8 +243,6 @@ func TestSendNaoUsaParseMode(t *testing.T) {
 	}
 }
 
-// Com o Telegram desligado nenhum alerta pode gerar tráfego HTTP: seriam
-// milhares de chamadas condenadas ao longo do dia.
 func TestSendNaoChamaAPIQuandoDesligado(t *testing.T) {
 	resetState()
 	calls := fakeTelegram(t, nil)
@@ -279,8 +268,6 @@ func TestNotifyRespeitaCooldown(t *testing.T) {
 	}
 }
 
-// O Telegram exige o token no caminho da URL e o *url.Error do Go embute a URL
-// inteira. Sem redação, uma falha de rede grava o segredo no log.
 func TestErroDeRedeNaoVazaToken(t *testing.T) {
 	resetState()
 	base := apiBase
@@ -302,7 +289,6 @@ func TestErroDeRedeNaoVazaToken(t *testing.T) {
 	}
 }
 
-// Um 3xx faria o Go reenviar a URL — com o token — para o host de destino.
 func TestNaoSegueRedirecionamento(t *testing.T) {
 	resetState()
 

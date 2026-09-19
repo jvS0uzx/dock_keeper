@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,12 +12,6 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// sessaoDeTeste abre uma sessão real e a derruba no fim do teste.
-//
-// Precisa de banco: a sessão deixou de viver num mapa em memória e a
-// autorização é relida a cada Lookup, então uma sessão só se sustenta se o
-// usuário e as concessões existirem de verdade. Fabricar sessão para usuário
-// inexistente passou a devolver 401, que é o comportamento correto.
 func sessaoDeTeste(t *testing.T, nome string, accesses []auth.Access) auth.Session {
 	t.Helper()
 
@@ -29,8 +24,6 @@ func sessaoDeTeste(t *testing.T, nome string, accesses []auth.Access) auth.Sessi
 		}
 	}
 
-	// O nome vai cru: dois testes conferem o username que chegou no handler, e
-	// um prefixo faria a asserção falhar por motivo que não é o do teste.
 	usuario := nome
 	limparUsuarioDeGate(t, usuario)
 	t.Cleanup(func() { limparUsuarioDeGate(t, usuario) })
@@ -45,6 +38,7 @@ func sessaoDeTeste(t *testing.T, nome string, accesses []auth.Access) auth.Sessi
 		t.Fatalf("criar o usuário de %s: %v", nome, err)
 	}
 	for _, a := range accesses {
+		garantirUnidade(t, a.SiteID)
 		grant := database.UserSiteAccess{UserID: user.ID, SiteID: a.SiteID, Role: a.Role}
 		if err := database.DB.Create(&grant).Error; err != nil {
 			t.Fatalf("criar concessão de %s: %v", nome, err)
@@ -59,6 +53,23 @@ func sessaoDeTeste(t *testing.T, nome string, accesses []auth.Access) auth.Sessi
 	return s
 }
 
+func garantirUnidade(t *testing.T, siteID *uint) {
+	t.Helper()
+
+	if siteID == nil {
+		return
+	}
+	codigo := fmt.Sprintf("qa-unidade-%d", *siteID)
+	err := database.DB.Exec(
+		`INSERT INTO sites (id, name, code, created_at)
+		 VALUES (?, ?, ?, now()) ON CONFLICT (id) DO NOTHING`,
+		*siteID, codigo, codigo).Error
+	if err != nil {
+		t.Fatalf("criar a unidade %d do teste: %v", *siteID, err)
+	}
+	database.DB.Exec(`SELECT setval('sites_id_seq', GREATEST((SELECT last_value FROM sites_id_seq), ?::bigint))`, *siteID)
+}
+
 func limparUsuarioDeGate(t *testing.T, username string) {
 	t.Helper()
 
@@ -71,8 +82,6 @@ func limparUsuarioDeGate(t *testing.T, username string) {
 	database.DB.Unscoped().Where("username = ?", username).Delete(&database.User{})
 }
 
-// pedeTicket exercita a rota real: autentica por cabeçalho e lê o ticket da
-// resposta, como o painel faz antes de abrir o EventSource.
 func pedeTicket(t *testing.T, cfg Config, s auth.Session) string {
 	t.Helper()
 
@@ -97,9 +106,6 @@ func pedeTicket(t *testing.T, cfg Config, s auth.Session) string {
 	return body.Ticket
 }
 
-// Regressão do furo C2: o ticket de SSE não carregava sessão, o handler caía no
-// fallback de admin global e um visualizador de uma filial lia o auth.log e o
-// docker logs de qualquer VPS do parque.
 func TestTicketCarregaASessaoDeQuemPediu(t *testing.T) {
 	cfg := testConfig()
 	filial := uint(3)
@@ -127,8 +133,6 @@ func TestTicketCarregaASessaoDeQuemPediu(t *testing.T) {
 		t.Errorf("papel no stream = %q, esperado %q", auth.MaxRole(vista.Accesses), auth.RoleViewer)
 	}
 
-	// É esta negativa que o lookupServer usa para responder 404 ao servidor de
-	// outra unidade — e ela só existe porque a sessão certa chegou ao handler.
 	if !auth.CanSeeSite(vista.Accesses, &filial) {
 		t.Error("visualizador perdeu acesso à própria unidade")
 	}
@@ -140,7 +144,6 @@ func TestTicketCarregaASessaoDeQuemPediu(t *testing.T) {
 	}
 }
 
-// O ticket é de uso único e amarrado a uma sessão: consumido, some do store.
 func TestTicketDeUmaSessaoNaoServeDuasVezes(t *testing.T) {
 	cfg := testConfig()
 	viewer := sessaoDeTeste(t, "olheiro", []auth.Access{{SiteID: nil, Role: auth.RoleViewer}})
@@ -154,7 +157,6 @@ func TestTicketDeUmaSessaoNaoServeDuasVezes(t *testing.T) {
 	}
 }
 
-// Handler alcançado sem passar pelo gate não pode rodar como admin global.
 func TestSessionFromFalhaFechado(t *testing.T) {
 	sess := sessionFrom(httptest.NewRequest(http.MethodGet, "/api/x", nil))
 
@@ -169,8 +171,6 @@ func TestSessionFromFalhaFechado(t *testing.T) {
 		t.Error("contexto vazio enxergou alguma unidade")
 	}
 
-	// O recorte resultante é o que vira "1 = 0" no WHERE: filtra, e sem
-	// nenhuma unidade na lista.
 	scope, status := resolveScope(sess, httptest.NewRequest(http.MethodGet, "/api/x", nil))
 	if status != 0 || !scope.filter || len(scope.ids) != 0 {
 		t.Fatalf("scope de sessão vazia = %+v, status = %d", scope, status)
@@ -180,8 +180,6 @@ func TestSessionFromFalhaFechado(t *testing.T) {
 	}
 }
 
-// Regressão do furo C3: o gate olhava o maior papel em qualquer escopo, então
-// o admin de uma filial alcançava /api/users e /api/servers.
 func TestAdminDeUnidadeNaoEhAdminGlobal(t *testing.T) {
 	cfg := testConfig()
 	filial := uint(3)
@@ -215,7 +213,6 @@ func TestAdminDeUnidadeNaoEhAdminGlobal(t *testing.T) {
 		})
 	}
 
-	// O API_TOKEN continua sendo credencial de máquina com admin global.
 	req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
 	req.Header.Set("Authorization", "Bearer "+testToken)
 	rec := httptest.NewRecorder()
@@ -225,11 +222,6 @@ func TestAdminDeUnidadeNaoEhAdminGlobal(t *testing.T) {
 	}
 }
 
-// O mesmo furo, agora pelo mux montado — é a fiação que importa aqui.
-//
-// O admin de filial é barrado antes do handler, então nada toca o banco. Para
-// o admin global a sonda usa PUT numa rota que não aceita PUT: 405 prova que
-// passou da autenticação, sem executar o handler.
 func TestRotasDeAdminNoMuxExigemConcessaoGlobal(t *testing.T) {
 	handler := Routes(testConfig())
 	filial := uint(3)

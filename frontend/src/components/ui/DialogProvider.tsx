@@ -26,10 +26,6 @@ const toneStyle: Record<NoticeTone, { border: string; text: string; Icon: typeof
   info: { border: 'border-line-hi', text: 'text-text', Icon: Info },
 };
 
-/**
- * Substitui window.alert/confirm/prompt por UI própria: os diálogos nativos
- * travam a thread do browser e quebram o visual do painel.
- */
 export const DialogProvider = ({ children }: { children: ReactNode }) => {
   const [pending, setPending] = useState<Pending | null>(null);
   const [draft, setDraft] = useState('');

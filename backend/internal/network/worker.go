@@ -1,6 +1,7 @@
 package network
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -8,29 +9,24 @@ import (
 
 	"github.com/jvS0uzx/dock_keeper/internal/alert"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/safego"
 )
 
-// Alerta quando o certificado está a esta distância (ou menos) do vencimento.
 const sslWarnDays = 14
 
-// Máximo de handshakes simultâneos ao varrer todos os domínios.
 const sslConcurrency = 8
 
-// StartSSLWorker checa todos os domínios cadastrados a cada interval, persiste
-// o resultado em Domain e dispara alerta para os que estão vencendo ou inválidos.
 func StartSSLWorker(interval time.Duration) {
-	go func() {
+	safego.Run(context.Background(), "network:ssl", func(context.Context) {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			CheckAllDomains()
 			<-ticker.C
 		}
-	}()
+	})
 }
 
-// CheckAllDomains verifica todos os domínios em paralelo (pool limitado) e
-// persiste cada resultado. Pode ser chamada pelo worker ou por endpoint manual.
 func CheckAllDomains() {
 	var domains []database.Domain
 	if err := database.DB.Find(&domains).Error; err != nil {
@@ -53,8 +49,6 @@ func CheckAllDomains() {
 	log.Printf("[SSL] verificação concluída: %d domínios", len(domains))
 }
 
-// CheckAndStore faz o handshake de um domínio, grava o estado em Domain e
-// dispara alerta se estiver inválido ou vencendo. Retorna o registro atualizado.
 func CheckAndStore(d database.Domain) database.Domain {
 	info := CheckSSL(d.Name)
 	now := time.Now().UTC()
@@ -66,10 +60,6 @@ func CheckAndStore(d database.Domain) database.Domain {
 	d.InvalidReason = info.InvalidReason
 	d.LastCheck = &now
 
-	// O mapa grava todas as chaves a cada verificação, inclusive as vazias.
-	// É o que apaga error_msg e invalid_reason quando o certificado é renovado:
-	// gravar só quando há problema deixaria o domínio verde exibindo o motivo
-	// da falha anterior, para sempre.
 	if err := database.DB.Model(&database.Domain{}).Where("id = ?", d.ID).Updates(map[string]any{
 		"valid":          d.Valid,
 		"issuer":         d.Issuer,

@@ -4,18 +4,25 @@ import (
 	"bytes"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// Sem TELEGRAM_BOT_TOKEN o alerta vira linha de log — que é exatamente o canal
-// observável para este teste: parado alerta, rodando fica em silêncio.
 func TestNotifyStoppedContainersSoAlertaContainerParado(t *testing.T) {
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 
-	alvo := Target{ID: "zz-notify-teste", Host: "203.0.113.7"}
+	alvo := Target{ID: "zz-notify-teste-" + strconv.FormatInt(time.Now().UnixNano(), 10), Host: "203.0.113.7"}
+	t.Cleanup(func() {
+		if database.DB != nil {
+			database.DB.Where("key LIKE ?", "container_down:"+alvo.ID+":%").Delete(&database.AlertState{})
+		}
+	})
 	notifyStoppedContainers(alvo, []DockerPSPayload{
 		{Name: "web", State: "running"},
 		{Name: "worker", State: "exited"},

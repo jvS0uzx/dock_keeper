@@ -13,7 +13,6 @@ func TestExpandCIDRDescartaRedeEBroadcast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExpandCIDR: %v", err)
 	}
-	// /29 são 8 endereços; sobram 6 utilizáveis.
 	if len(ips) != 6 {
 		t.Fatalf("len = %d, esperado 6: %v", len(ips), ips)
 	}
@@ -35,8 +34,6 @@ func TestExpandCIDRAtravessaOctetos(t *testing.T) {
 	}
 }
 
-// A varredura existe para inventariar a rede da própria seção. Recusar
-// endereço público impede que o painel seja apontado para rede de terceiros.
 func TestExpandCIDRRecusaFaixaPublica(t *testing.T) {
 	for _, cidr := range []string{"8.8.8.0/24", "203.0.113.0/24"} {
 		if _, err := ExpandCIDR(cidr); err == nil {
@@ -61,7 +58,6 @@ func TestExpandCIDRRecusaEntradaInvalida(t *testing.T) {
 	}
 }
 
-// Uma faixa inválida no meio da lista não pode abortar a varredura das outras.
 func TestScanIgnoraFaixaInvalidaEContinua(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -97,7 +93,6 @@ func TestScanIgnoraFaixaInvalidaEContinua(t *testing.T) {
 }
 
 func TestScanNaoRetornaHostSemPortaAberta(t *testing.T) {
-	// Porta 1 em loopback não tem nada escutando.
 	hosts, errs := Scan(context.Background(), Config{
 		CIDRs:   []string{"127.0.0.1/32"},
 		Ports:   []int{1},

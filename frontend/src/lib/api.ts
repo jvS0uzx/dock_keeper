@@ -8,7 +8,6 @@ import {
   type SiteAccess,
 } from './session';
 
-// Espelha api.ServerLiveStat do backend (/api/metrics/live).
 export interface ServerLiveStat {
   id: string;
   host_ip: string;
@@ -16,17 +15,11 @@ export interface ServerLiveStat {
   uptime: number;
   disk_used: number;
   disk_total: number;
-  cpu: number;
+  cpu: number | null;
   mem_used: number;
   mem_total: number;
-  load1: number;
+  load1: number | null;
   online: boolean;
-  // Nulo quando a fonte de coleta desta máquina não mede o valor, diferente de
-  // zero, que é leitura real. Ver achados 4 e 5 do QA do fluxo de métricas.
-  //
-  // O campo já se chamou latency_ms. O número nunca foi latência de rede: é o
-  // handshake SSH inteiro (TCP + troca de chaves), uma ordem de grandeza acima
-  // do RTT. Só existe em máquina coletada por SSH.
   ssh_handshake_ms: number | null;
   kind: string;
   site_id: number | null;
@@ -35,12 +28,13 @@ export interface ServerLiveStat {
   arch: string;
   last_user: string;
   agent_version: string;
-  // Nulo quando a máquina não tem sensor legível pela fonte que a coleta.
   temperature_c: number | null;
   collect_nginx: boolean;
+  net_rx_bps: number | null;
+  net_tx_bps: number | null;
+  rtt_ms: number | null;
 }
 
-// Espelha api.ContainerLiveStat do backend.
 export interface ContainerLiveStat {
   server_id: string;
   docker_id: string;
@@ -53,13 +47,11 @@ export interface ContainerLiveStat {
   mem_limit: number;
 }
 
-// Espelha api.LbStat do backend.
 export interface LbStat {
   upstream_addr: string;
   server_name: string;
   status: string;
   requests_count: number;
-  /** UUID do balanceador que reportou a linha; vazio em métrica antiga. */
   server_id?: string;
 }
 
@@ -91,12 +83,6 @@ export interface DomainRecord {
   issuer: string;
   days_left: number;
   error_msg: string;
-  /**
-   * Motivo mais grave da invalidez, legível por máquina: expirado,
-   * ainda_nao_valido, hostname_divergente, autoassinado, cadeia_nao_confiavel,
-   * sem_certificado, handshake. Vazio quando o certificado está válido.
-   * error_msg continua listando TODOS os problemas em texto.
-   */
   invalid_reason: string;
   last_check: string | null;
 }
@@ -104,32 +90,23 @@ export interface DomainRecord {
 export interface AlertRuleRecord {
   id: number;
   name: string;
-  /** "*" para todos, ou o id de um servidor específico. */
   target: string;
-  /** Quando preenchido, a regra vale para todas as máquinas da unidade. */
   target_site_id: number | null;
   metric: string;
   operator: string;
   threshold: number;
   enabled: boolean;
   severity: string;
-  /** Segundos que a condição precisa se manter antes de disparar. 0 = imediato. */
   for_duration_sec: number;
   last_fired: string | null;
 }
 
-/** Domínio observado no access log do Nginx. */
 export interface DiscoveredDomain {
   domain: string;
   monitored: boolean;
   sample_reqs: number;
 }
 
-/**
- * Corpo do cadastro de regra. Só `target_site_id` OU `target` faz sentido: o
- * backend recusa os dois preenchidos e normaliza `target` para "*" quando a
- * regra é por unidade.
- */
 export interface AlertRuleInput {
   name: string;
   target: string;
@@ -162,10 +139,8 @@ export interface NetworkHostView {
   monitored: boolean;
   kind: string;
   device_type: string;
-  /** true = tipo fixado pelo operador; a varredura não sobrescreve. */
   device_type_locked: boolean;
   site_id: number | null;
-  /** true = unidade fixada pelo operador; o coletor não reverte. */
   site_locked: boolean;
   floor: string;
   sector: string;
@@ -176,7 +151,6 @@ export interface NetworkHostView {
   notes: string;
 }
 
-/** Campos cadastrais editáveis; o resto vem da varredura. */
 export type HostInventoryPatch = Partial<
   Pick<NetworkHostView, 'floor' | 'sector' | 'room' | 'rack' | 'asset_tag' | 'owner' | 'notes' | 'device_type'>
 > & { site_id?: number | null };
@@ -203,7 +177,6 @@ export interface FloorPlanPin {
   online: boolean;
   monitored: boolean;
   known: boolean;
-  /** Vazio quando a máquina ainda não reporta métricas. */
   server_id: string;
 }
 
@@ -218,7 +191,6 @@ export interface FloorPlan {
   pins: FloorPlanPin[];
 }
 
-/** Pin sem o estado resolvido — é o que o painel envia ao gravar. */
 export interface FloorPlanPinInput {
   host_ip: string;
   label: string;
@@ -243,11 +215,59 @@ export interface PortInfo {
   process: string;
 }
 
-export type HistoryMetric = 'cpu' | 'mem' | 'disk' | 'load' | 'temperature' | 'latency';
-export type HistoryRange = '1h' | '6h' | '24h' | '7d';
+export type HistoryMetric = 'cpu' | 'mem' | 'disk' | 'load' | 'temperature' | 'latency' | 'net_rx' | 'net_tx' | 'rtt';
+export type HistoryRange = '1h' | '6h' | '24h' | '7d' | '30d' | '90d';
+
+export interface CustomWindow {
+  from: string;
+  to?: string;
+}
+
+export type HistoryWindow = HistoryRange | CustomWindow;
+
+export type DashboardMetric = 'cpu' | 'mem' | 'disk' | 'load' | 'temperature' | 'net_rx' | 'net_tx' | 'rtt';
+
+export interface DashboardPanelInput {
+  title: string;
+  server_id: string;
+  metric: DashboardMetric;
+  range: HistoryRange;
+  width: 1 | 2;
+}
+
+export interface DashboardPanel extends DashboardPanelInput {
+  id: number;
+  position: number;
+}
+
+export interface Dashboard {
+  id: number;
+  name: string;
+  panels: DashboardPanel[];
+  updated_at: string;
+}
+
+export interface DashboardInput {
+  name: string;
+  panels: DashboardPanelInput[];
+}
+
+export interface Annotation {
+  id: number;
+  server_id: string | null;
+  at: string;
+  text: string;
+  author: string;
+  created_at: string;
+}
+
+export interface AnnotationInput {
+  server_id: string | null;
+  at?: string;
+  text: string;
+}
 export type ContainerAction = 'start' | 'stop' | 'restart';
 
-/** Usuário do painel, como devolvido por GET /api/users (admin). */
 export interface UserRecord {
   id: number;
   username: string;
@@ -258,7 +278,26 @@ export interface UserRecord {
   accesses: SiteAccess[];
 }
 
-/** Resposta de GET /api/auth/me: quem está autenticado e com qual credencial. */
+export type DeviceKind = 'agent' | 'collector';
+
+export interface DeviceRecord {
+  device_id: string;
+  site_id: number;
+  kind: DeviceKind;
+  machine_id: string;
+  hostname: string;
+  created_at: string;
+  last_seen_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface EnrollToken {
+  enrollment_token: string;
+  site_id: number;
+  kind: DeviceKind;
+  expires_at: string;
+}
+
 export interface MeInfo {
   username: string;
   role: Role;
@@ -266,14 +305,6 @@ export interface MeInfo {
   accesses: SiteAccess[];
 }
 
-/**
- * Credencial da requisição: a sessão da pessoa vence o token de máquina.
- * Devolve também se a credencial veio de sessão, para o tratamento de 401
- * saber se deve derrubá-la.
- *
- * Em produção o API_TOKEN é sempre vazio (ver config.ts), então sem sessão a
- * requisição sai sem credencial e volta 401 — de propósito.
- */
 const authHeader = (headers: Headers): { usedSession: boolean } => {
   const session = loadSession();
   if (session) {
@@ -284,21 +315,12 @@ const authHeader = (headers: Headers): { usedSession: boolean } => {
   return { usedSession: false };
 };
 
-/**
- * 401 numa requisição feita com sessão significa sessão vencida ou revogada:
- * limpa e avisa o App para voltar ao login. Com token de máquina não há o que
- * derrubar — o erro sobe normalmente.
- */
 const handleUnauthorized = (usedSession: boolean) => {
   if (!usedSession) return;
   clearSession();
   window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
 };
 
-/**
- * Faz a requisição e normaliza a resposta. Concentra aqui a validação de
- * fronteira: token, status HTTP e formato do corpo só são tratados neste ponto.
- */
 const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
   const headers = new Headers(init.headers);
   const { usedSession } = authHeader(headers);
@@ -318,14 +340,6 @@ const send = (method: string, body?: unknown): RequestInit => ({
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 });
 
-/**
- * Abre um EventSource autenticado.
- *
- * EventSource não permite definir cabeçalhos, então o segredo precisa ir na
- * URL — e URL vai parar no access log do Nginx e no histórico do navegador.
- * Por isso não mandamos o API_TOKEN: pedimos antes um ticket de uso único,
- * válido por 30s, que só serve para abrir este stream.
- */
 export const openStream = async (
   path: string,
   params: Record<string, string>,
@@ -337,7 +351,61 @@ export const openStream = async (
 
 const asArray = <T>(data: unknown): T[] => (Array.isArray(data) ? (data as T[]) : []);
 
-// Espelha database.AuditLog do backend (/api/audit).
+export const apiErrorMessage = (err: unknown, fallback: string): string => {
+  try {
+    const message = (JSON.parse((err as Error).message) as { error?: unknown }).error;
+    return typeof message === 'string' && message ? message : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+export type AlertStatus = 'open' | 'acked' | 'resolved';
+export type AlertDelivery = 'pendente' | 'enviado' | 'falhou';
+
+export interface AlertItem {
+  id: number;
+  key: string;
+  severity: string;
+  text: string;
+  status: AlertStatus;
+  server_id: string | null;
+  site_id: number | null;
+  rule_id: number | null;
+  created_at: string;
+  acked_at: string | null;
+  acked_by: string | null;
+  resolved_at: string | null;
+  delivery: AlertDelivery;
+  attempts: number;
+  next_attempt_at: string | null;
+  last_attempt_at: string | null;
+  last_error: string;
+}
+
+export interface Readiness {
+  status: string;
+  db?: string;
+  degradado?: string[];
+  alertas?: string;
+  alertas_detalhe?: string;
+  alertas_falhos?: number;
+  logs_descartados?: number;
+}
+
+export interface AlertSummary {
+  open: number;
+  acked: number;
+  falhou: number;
+}
+
+export interface AlertQuery {
+  status?: AlertStatus | 'all';
+  limit?: number;
+  from?: string;
+  to?: string;
+}
+
 export interface AuditEntry {
   id: number;
   at: string;
@@ -351,9 +419,7 @@ export interface AuditEntry {
   target_id: string;
   target_label: string;
   site_id: number | null;
-  /** ok, denied ou error. */
   result: string;
-  /** JSON serializado montado por allowlist no backend. */
   detail: string;
 }
 
@@ -369,7 +435,6 @@ export interface AuditQuery {
   action?: string;
   result?: string;
   site_id?: string;
-  /** RFC3339; o backend recusa qualquer outro formato com 400. */
   from?: string;
   to?: string;
   limit?: number;
@@ -392,10 +457,43 @@ export const api = {
     };
   },
 
+  readiness(signal?: AbortSignal) {
+    return request<Readiness>('/readyz', { signal });
+  },
+
+  async alerts(query: AlertQuery = {}, signal?: AbortSignal): Promise<AlertItem[]> {
+    const params = new URLSearchParams();
+    for (const [chave, valor] of Object.entries(query)) {
+      if (valor !== undefined && valor !== '') params.set(chave, String(valor));
+    }
+    const qs = params.toString();
+    return asArray<AlertItem>(await request<unknown>(`/api/alerts${qs ? `?${qs}` : ''}`, { signal }));
+  },
+
+  async alertsSummary(signal?: AbortSignal): Promise<AlertSummary> {
+    const data = await request<Partial<AlertSummary>>('/api/alerts/summary', { signal });
+    return { open: data.open ?? 0, acked: data.acked ?? 0, falhou: data.falhou ?? 0 };
+  },
+
+  ackAlert(id: number) {
+    return request<AlertItem>(`/api/alerts/ack?id=${id}`, send('POST'));
+  },
+
+  resolveAlert(id: number) {
+    return request<AlertItem>(`/api/alerts/resolve?id=${id}`, send('POST'));
+  },
+
   async liveMetrics(signal?: AbortSignal): Promise<LiveMetrics> {
     const data = await request<Partial<LiveMetrics>>('/api/metrics/live', { signal });
     return {
-      servers: data.servers ?? [],
+      servers: (data.servers ?? []).map((s) => ({
+        ...s,
+        cpu: s.cpu ?? null,
+        load1: s.load1 ?? null,
+        net_rx_bps: s.net_rx_bps ?? null,
+        net_tx_bps: s.net_tx_bps ?? null,
+        rtt_ms: s.rtt_ms ?? null,
+      })),
       containers: data.containers ?? [],
       load_balancing: data.load_balancing ?? [],
     };
@@ -404,11 +502,51 @@ export const api = {
   async history(
     serverId: string,
     metric: HistoryMetric,
-    range: HistoryRange,
+    janela: HistoryWindow,
     signal?: AbortSignal,
   ): Promise<HistoryPoint[]> {
-    const params = new URLSearchParams({ server_id: serverId, metric, range });
+    const params = new URLSearchParams({ server_id: serverId, metric });
+    if (typeof janela === 'string') {
+      params.set('range', janela);
+    } else {
+      params.set('from', janela.from);
+      if (janela.to) params.set('to', janela.to);
+    }
     return asArray<HistoryPoint>(await request(`/api/metrics/history?${params}`, { signal }));
+  },
+
+  async dashboards(signal?: AbortSignal): Promise<Dashboard[]> {
+    const list = asArray<Dashboard>(await request('/api/dashboards', { signal }));
+    return list.map((d) => ({ ...d, panels: [...(d.panels ?? [])].sort((a, b) => a.position - b.position) }));
+  },
+
+  createDashboard(body: DashboardInput) {
+    return request<Dashboard>('/api/dashboards', send('POST', body));
+  },
+
+  updateDashboard(id: number, body: DashboardInput) {
+    return request<Dashboard>(`/api/dashboards?id=${id}`, send('PUT', body));
+  },
+
+  deleteDashboard(id: number) {
+    return request<unknown>(`/api/dashboards?id=${id}`, send('DELETE'));
+  },
+
+  async annotations(
+    query: { server_id?: string; from: string; to: string },
+    signal?: AbortSignal,
+  ): Promise<Annotation[]> {
+    const params = new URLSearchParams({ from: query.from, to: query.to });
+    if (query.server_id) params.set('server_id', query.server_id);
+    return asArray<Annotation>(await request(`/api/annotations?${params}`, { signal }));
+  },
+
+  createAnnotation(body: AnnotationInput) {
+    return request<Annotation>('/api/annotations', send('POST', body));
+  },
+
+  deleteAnnotation(id: number) {
+    return request<unknown>(`/api/annotations?id=${id}`, send('DELETE'));
   },
 
   containerAction(serverId: string, containerName: string, action: ContainerAction) {
@@ -446,7 +584,6 @@ export const api = {
     return request<DomainRecord>(`/api/ssl/recheck?id=${id}`, send('POST'));
   },
 
-  /** Domínios que o Nginx atendeu, com marcação de quais já são monitorados. */
   async discoverDomains(signal?: AbortSignal): Promise<DiscoveredDomain[]> {
     return asArray<DiscoveredDomain>(await request('/api/ssl/discover', { signal }));
   },
@@ -480,12 +617,6 @@ export const api = {
     return asArray<LogEntryRecord>(await request(`/api/logs/search?${query}`));
   },
 
-  /**
-   * siteId recorta o inventário na origem. A planta baixa precisa disso: a
-   * paleta de máquinas arrastáveis oferecia hosts de outras unidades, que nunca
-   * resolvem contra uma planta desta. Filtrar no cliente traria o parque inteiro
-   * para descartar no navegador.
-   */
   async networkHosts(signal?: AbortSignal, siteId?: number): Promise<NetworkInventory> {
     const query = siteId ? `?site_id=${siteId}` : '';
     const data = await request<Partial<NetworkInventory>>(`/api/network/hosts${query}`, { signal });
@@ -535,7 +666,6 @@ export const api = {
     return request<{ pins: FloorPlanPin[] }>(`/api/floorplans/${planId}/pins`, send('PUT', { pins }));
   },
 
-  /** Upload multipart: o Content-Type é definido pelo browser, com o boundary. */
   async uploadFloorPlan(name: string, image: File, siteId?: number | null): Promise<FloorPlan> {
     const form = new FormData();
     form.append('name', name);
@@ -553,12 +683,6 @@ export const api = {
     return (await res.json()) as FloorPlan;
   },
 
-  /**
-   * Baixa a imagem da planta como object URL.
-   *
-   * <img src> não envia cabeçalho, então buscar com fetch autenticado é o que
-   * evita o token na URL. Quem chama precisa revogar o URL ao descartar.
-   */
   async floorPlanImageUrl(id: number, signal?: AbortSignal): Promise<string> {
     const headers = new Headers();
     const { usedSession } = authHeader(headers);
@@ -588,9 +712,20 @@ export const api = {
     return request<MeInfo>('/api/auth/me', { signal });
   },
 
+  async devices(): Promise<DeviceRecord[]> {
+    return asArray<DeviceRecord>(await request('/api/devices'));
+  },
+
+  createEnrollToken(body: { kind: DeviceKind; site_id: number }) {
+    return request<EnrollToken>('/api/enroll/tokens', send('POST', body));
+  },
+
+  revokeDevice(deviceId: string) {
+    return request<unknown>(`/api/devices?device_id=${encodeURIComponent(deviceId)}`, send('DELETE'));
+  },
+
   async users(): Promise<UserRecord[]> {
     const list = asArray<UserRecord>(await request('/api/users'));
-    // O backend pode omitir accesses vazio; a UI itera sem checar.
     return list.map((u) => ({ ...u, accesses: u.accesses ?? [] }));
   },
 

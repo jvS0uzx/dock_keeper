@@ -1,3 +1,5 @@
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { Trash2, Plus, KeyRound, Globe, X, ShieldOff } from 'lucide-react';
 import { api, type Site, type UserRecord } from '../lib/api';
@@ -9,15 +11,10 @@ import Select from './ui/Select';
 
 const ROLE_OPTIONS: Role[] = ['viewer', 'operator', 'admin'];
 
-// Mesma ordem do ROLE_OPTIONS, já com o rótulo em pt-BR da lista suspensa.
 const ROLE_SELECT_OPTIONS = ROLE_OPTIONS.map((r) => ({ value: r, label: ROLE_LABELS[r] }));
 
 const emptyForm = { username: '', password: '', role: 'viewer' as Role };
 
-/**
- * Administração de contas do painel. Só o administrador chega aqui — a aba
- * some para os demais e o backend recusa com 403 de qualquer forma.
- */
 const UsersView = () => {
   const session = useSession();
   const dialog = useDialog();
@@ -26,18 +23,21 @@ const UsersView = () => {
   const [form, setForm] = useState({ ...emptyForm });
   const [accesses, setAccesses] = useState<SiteAccess[]>([]);
   const [loading, setLoading] = useState(true);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
 
   const load = useCallback(async () => {
     try {
       const [userList, siteList] = await Promise.all([api.users(), api.sites()]);
       setUsers(userList);
       setSites(siteList);
+      cargaOk();
     } catch (err) {
-      console.error(err);
+      cargaFail(err, 'Falha ao listar as contas.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cargaOk, cargaFail]);
 
   useEffect(() => {
     load();
@@ -52,7 +52,6 @@ const UsersView = () => {
     try {
       message = (JSON.parse(raw) as { error?: string }).error ?? fallback;
     } catch {
-      // Corpo não-JSON: fica com a mensagem genérica.
     }
     dialog.notify(message, 'error');
   };
@@ -144,7 +143,6 @@ const UsersView = () => {
   const removeAccess = (index: number) =>
     setAccesses((prev) => prev.filter((_, i) => i !== index));
 
-  // A aba some do menu, mas a tela ainda pode ser alcançada por estado antigo.
   if (session.role !== 'admin') {
     return (
       <div className="p-8 h-full flex flex-col items-center justify-center text-text-mut gap-3">
@@ -156,6 +154,7 @@ const UsersView = () => {
 
   return (
     <div className="p-8 anim-rise">
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
       <div className="page-header">
         <div>
           <h1 className="page-title">Usuários do painel</h1>
@@ -275,7 +274,7 @@ const UsersView = () => {
           {loading ? (
             <p className="text-sm text-text-mut">Carregando...</p>
           ) : users.length === 0 ? (
-            <p className="text-sm text-text-mut">Nenhuma conta cadastrada.</p>
+            carga.error && !carga.lastOk ? null : <p className="text-sm text-text-mut">Nenhuma conta cadastrada.</p>
           ) : (
             <div className="overflow-x-auto custom-scrollbar">
               <table className="table-base min-w-[720px]">

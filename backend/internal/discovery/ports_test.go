@@ -2,8 +2,6 @@ package discovery
 
 import "testing"
 
-// ParsePorts existe para reinferir o tipo quando o operador destrava um host,
-// lendo a coluna open_ports que guarda a lista como texto.
 func TestParsePorts(t *testing.T) {
 	casos := map[string][]int{
 		"22,80,443":    {22, 80, 443},
@@ -30,8 +28,6 @@ func TestParsePorts(t *testing.T) {
 	}
 }
 
-// Destravar um host precisa devolvê-lo ao mesmo tipo que a varredura inferiria,
-// e é este par de funções que faz isso sem esperar o próximo ciclo.
 func TestParsePortsAlimentaDeviceType(t *testing.T) {
 	casos := map[string]string{
 		"80,443,9100": TypePrinter,

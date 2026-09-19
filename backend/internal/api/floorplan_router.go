@@ -5,11 +5,6 @@ import (
 	"strings"
 )
 
-// floorPlanRouter despacha as rotas sob /api/floorplans/{id}.
-//
-// O net/http do Go casa "/api/floorplans/" por prefixo e não extrai variáveis
-// de caminho, então o sufixo é resolvido aqui em vez de espalhar o parsing
-// pelos handlers.
 func floorPlanRouter(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/floorplans/")
 

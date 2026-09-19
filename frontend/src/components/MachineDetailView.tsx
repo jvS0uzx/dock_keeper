@@ -5,9 +5,11 @@ import {
 import {
   ArrowLeft, Cpu, MemoryStick, HardDrive, Thermometer, Activity, Clock,
   User, Wifi, Network, MonitorSmartphone, Terminal, ScrollText, RefreshCw,
+  ArrowDownToLine, ArrowUpFromLine, Timer,
 } from 'lucide-react';
 import {
   api,
+  apiErrorMessage,
   type HistoryMetric,
   type HistoryRange,
   type LogEntryRecord,
@@ -15,16 +17,23 @@ import {
   type ServerLiveStat,
   type Site,
 } from '../lib/api';
-import { formatGB, formatDateTime } from '../lib/format';
+import { formatGB, formatDateTime, formatLatency, formatLoad, formatPercent, formatRate } from '../lib/format';
 import {
   HANDSHAKE_LABEL,
+  HISTORY_METRICS,
   NO_HANDSHAKE_HINT,
+  NO_NETWORK_HINT,
+  NO_RTT_HINT,
   NO_TEMPERATURE_HINT,
   formatHandshake,
+  formatMetricValue,
   formatTemperature,
+  isRateMetric,
 } from '../lib/metrics';
 import Select from './ui/Select';
 import { useNavigation } from './ui/navigation-context';
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
 
 interface MachineDetailViewProps {
   serverId: string;
@@ -34,31 +43,15 @@ const LIVE_POLL_MS = 10000;
 const HISTORY_POLL_MS = 30000;
 const LOG_LIMIT = 50;
 
-// Limiares de alerta visual. Mesmos valores usados na lista de estações, para
-// o operador não ver uma máquina "amarela" na lista e "normal" no detalhe.
 const USAGE_WARN = 75;
 const USAGE_CRITICAL = 90;
 const TEMP_WARN = 70;
 const TEMP_CRITICAL = 85;
 
-const METRICS: { key: HistoryMetric; label: string; unit: string }[] = [
-  { key: 'cpu', label: 'CPU', unit: '%' },
-  { key: 'mem', label: 'Memória', unit: '%' },
-  { key: 'disk', label: 'Disco', unit: '%' },
-  { key: 'load', label: 'Load', unit: '' },
-  // Temperatura só passou a valer no gráfico agora: antes o backend
-  // recusava a métrica e apenas as estações tinham o dado. O stream SSH
-  // passou a ler os sensores do host (achado 5 do QA).
-  { key: 'temperature', label: 'Temperatura', unit: '°C' },
-  // A chave enviada à API continua 'latency': renomeá-la quebraria o endpoint
-  // de histórico, que a recebe como parâmetro. Só o rótulo foi corrigido.
-  { key: 'latency', label: HANDSHAKE_LABEL, unit: 'ms' },
-];
+const METRICS = HISTORY_METRICS;
 
 const RANGES: HistoryRange[] = ['1h', '6h', '24h', '7d'];
 
-// Linha de referência do gráfico: o mesmo limiar de atenção das demais telas.
-// Só aparece quando a série chega perto dele — sem esticar o domínio à toa.
 const METRIC_THRESHOLD: Partial<Record<HistoryMetric, number>> = {
   cpu: USAGE_WARN,
   mem: USAGE_WARN,
@@ -66,8 +59,6 @@ const METRIC_THRESHOLD: Partial<Record<HistoryMetric, number>> = {
   temperature: TEMP_WARN,
 };
 
-// Mesmos rótulos do inventário de rede, para o tipo não mudar de nome entre
-// as telas.
 const DEVICE_LABELS: Record<string, string> = {
   printer: 'Impressora',
   windows: 'Estação Windows',
@@ -111,7 +102,6 @@ interface StatProps {
   value: string;
   hint?: string;
   accent?: string;
-  // Explica por que o valor está ausente, sem gastar linha no cartão.
   title?: string;
   Icon: typeof Cpu;
 }
@@ -152,6 +142,12 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
   const [inventory, setInventory] = useState<NetworkHostView | null>(null);
   const [logs, setLogs] = useState<LogEntryRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const live = useLoadStatus();
+  const { ok: liveOk, fail: liveFail } = live;
+  const [sitesError, setSitesError] = useState<string | null>(null);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const [metric, setMetric] = useState<HistoryMetric>('cpu');
   const [range, setRange] = useState<HistoryRange>('1h');
@@ -161,18 +157,17 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
   const activeMetric = METRICS.find((m) => m.key === metric) ?? METRICS[0];
   const threshold = METRIC_THRESHOLD[metric];
 
-  // Estado ao vivo da máquina. O endpoint devolve o parque inteiro; o recorte
-  // por id acontece aqui porque não há rota de servidor individual.
   const fetchLive = useCallback(async (signal?: AbortSignal) => {
     try {
       const data = await api.liveMetrics(signal);
       setMachine(data.servers.find((s) => s.id === serverId) ?? null);
+      liveOk();
     } catch (err) {
-      if (!signal?.aborted) console.error(err);
+      if (!signal?.aborted) liveFail(err, 'Falha ao ler a máquina.');
     } finally {
       setLoading(false);
     }
-  }, [serverId]);
+  }, [serverId, liveOk, liveFail]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -184,31 +179,38 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
     };
   }, [fetchLive]);
 
-  // Unidade e logs mudam pouco: uma leitura por máquina aberta basta.
-  //
-  // Nem sites() nem searchLogs() aceitam AbortSignal, então a guarda de
-  // desmontagem é uma flag — abortar aqui seria um controller sem ouvinte.
   useEffect(() => {
     let cancelled = false;
 
     api.sites()
-      .then((list) => { if (!cancelled) setSites(list); })
-      .catch(() => {});
+      .then((list) => {
+        if (cancelled) return;
+        setSites(list);
+        setSitesError(null);
+      })
+      .catch((err) => { if (!cancelled) setSitesError(apiErrorMessage(err, 'Falha ao ler as unidades.')); });
     api.searchLogs({ server_id: serverId, limit: String(LOG_LIMIT) })
-      .then((list) => { if (!cancelled) setLogs(list); })
-      .catch(() => {});
+      .then((list) => {
+        if (cancelled) return;
+        setLogs(list);
+        setLogsError(null);
+      })
+      .catch((err) => { if (!cancelled) setLogsError(apiErrorMessage(err, 'Falha ao ler os logs.')); });
 
     return () => { cancelled = true; };
   }, [serverId]);
 
-  // O inventário é indexado por IP, não por id de servidor: o cruzamento só é
-  // possível depois que o estado ao vivo trouxe o endereço da máquina.
   useEffect(() => {
     if (!machine?.host_ip) return;
     const controller = new AbortController();
     api.networkHosts(controller.signal)
-      .then((inv) => setInventory(inv.hosts.find((h) => h.ip === machine.host_ip) ?? null))
-      .catch(() => {});
+      .then((inv) => {
+        setInventory(inv.hosts.find((h) => h.ip === machine.host_ip) ?? null);
+        setInventoryError(null);
+      })
+      .catch((err) => {
+        if (!controller.signal.aborted) setInventoryError(apiErrorMessage(err, 'Falha ao ler o inventário.'));
+      });
     return () => controller.abort();
   }, [machine?.host_ip]);
 
@@ -220,10 +222,11 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
         time: fmtTime(p.ts, range),
         value: Number(p.value.toFixed(2)),
       })));
+      setHistoryError(null);
     } catch (err) {
       if (!signal?.aborted) {
-        console.error(err);
         setHistory([]);
+        setHistoryError(apiErrorMessage(err, 'Falha ao ler o histórico.'));
       }
     } finally {
       setLoadingHistory(false);
@@ -242,8 +245,9 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
 
   const siteName = useMemo(() => {
     if (!machine?.site_id) return 'Sem unidade';
+    if (sitesError) return 'Unidade indisponível';
     return sites.find((s) => s.id === machine.site_id)?.name ?? 'Sem unidade';
-  }, [machine?.site_id, sites]);
+  }, [machine?.site_id, sites, sitesError]);
 
   const backButton = (
     <button
@@ -264,23 +268,28 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
       <div className="p-8 flex flex-col items-start gap-4">
         {backButton}
         <div className="panel p-8 text-sm text-text-mut">
-          Máquina não encontrada. Ela pode ter sido removida do painel ou estar
-          fora do seu alcance de unidade.
+          {live.error ? (
+            <LoadNotice error={live.error} />
+          ) : (
+            <>
+              Máquina não encontrada. Ela pode ter sido removida do painel ou estar
+              fora do seu alcance de unidade.
+            </>
+          )}
         </div>
       </div>
     );
   }
 
-  // Gráfico vazio tem duas causas muito diferentes: ou não houve coleta no
-  // período, ou esta fonte simplesmente não mede a métrica escolhida. Dizer
-  // "sem dados" nos dois casos manda o operador procurar defeito onde não há.
   let emptyChartMessage = 'Sem dados no período selecionado.';
   if (metric === 'latency' && machine.kind !== 'ssh') {
     emptyChartMessage = NO_HANDSHAKE_HINT;
   } else if (metric === 'temperature' && machine.temperature_c === null) {
-    // A leitura instantânea nula é a melhor pista de que a máquina não tem
-    // sensor: se não mede agora, também não mediu no período do gráfico.
     emptyChartMessage = NO_TEMPERATURE_HINT;
+  } else if (metric === 'rtt' && machine.kind !== 'ssh') {
+    emptyChartMessage = NO_RTT_HINT;
+  } else if (isRateMetric(metric) && machine.net_rx_bps === null && machine.net_tx_bps === null) {
+    emptyChartMessage = NO_NETWORK_HINT;
   }
 
   const memPct = machine.mem_total > 0 ? (machine.mem_used / machine.mem_total) * 100 : 0;
@@ -290,6 +299,8 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
     <div className="p-4 md:p-8 flex flex-col gap-6 anim-rise">
       <div className="flex flex-col gap-4">
         {backButton}
+
+        <LoadNotice error={live.error} lastOk={live.lastOk} />
 
         <div className="page-header !mb-0">
           <div>
@@ -316,12 +327,12 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 stagger">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-3 stagger">
         <Stat
           label="CPU"
           Icon={Cpu}
-          value={machine.online ? `${machine.cpu.toFixed(0)}%` : '—'}
-          accent={machine.online ? usageColor(machine.cpu) : 'text-text-faint'}
+          value={machine.online ? formatPercent(machine.cpu) : '—'}
+          accent={machine.online && machine.cpu !== null ? usageColor(machine.cpu) : 'text-text-faint'}
         />
         <Stat
           label="Memória"
@@ -347,8 +358,8 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
         <Stat
           label="Load (1min)"
           Icon={Activity}
-          value={machine.online ? machine.load1.toFixed(2) : '—'}
-          accent={machine.online ? '' : 'text-text-faint'}
+          value={machine.online ? formatLoad(machine.load1) : '—'}
+          accent={machine.online && machine.load1 !== null ? '' : 'text-text-faint'}
         />
         <Stat
           label="Ligada há"
@@ -368,6 +379,27 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
           value={formatHandshake(machine.ssh_handshake_ms)}
           accent={machine.ssh_handshake_ms !== null ? '' : 'text-text-faint'}
           title={machine.ssh_handshake_ms === null ? NO_HANDSHAKE_HINT : undefined}
+        />
+        <Stat
+          label="Latência"
+          Icon={Timer}
+          value={formatLatency(machine.rtt_ms)}
+          accent={machine.rtt_ms !== null ? '' : 'text-text-faint'}
+          title={machine.rtt_ms === null ? NO_RTT_HINT : undefined}
+        />
+        <Stat
+          label="Rede RX"
+          Icon={ArrowDownToLine}
+          value={formatRate(machine.net_rx_bps)}
+          accent={machine.net_rx_bps !== null ? '' : 'text-text-faint'}
+          title={machine.net_rx_bps === null ? NO_NETWORK_HINT : undefined}
+        />
+        <Stat
+          label="Rede TX"
+          Icon={ArrowUpFromLine}
+          value={formatRate(machine.net_tx_bps)}
+          accent={machine.net_tx_bps !== null ? '' : 'text-text-faint'}
+          title={machine.net_tx_bps === null ? NO_NETWORK_HINT : undefined}
         />
       </div>
 
@@ -419,7 +451,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
             <div className="h-full flex items-center justify-center text-sm text-text-faint">Carregando...</div>
           ) : history.length === 0 ? (
             <div className="h-full flex items-center justify-center px-6 text-center text-sm text-text-faint">
-              {emptyChartMessage}
+              {historyError ? <LoadNotice error={historyError} /> : emptyChartMessage}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -442,8 +474,8 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
                   tick={{ fill: 'var(--color-text-faint)', fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
-                  width={48}
-                  unit={activeMetric.unit}
+                  width={isRateMetric(metric) ? 72 : 48}
+                  tickFormatter={(v: number) => formatMetricValue(metric, v)}
                 />
                 <Tooltip
                   contentStyle={{
@@ -455,7 +487,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
                   }}
                   labelStyle={{ color: 'var(--color-text-mut)' }}
                   itemStyle={{ color: 'var(--color-text-hi)' }}
-                  formatter={(value) => [`${value}${activeMetric.unit}`, activeMetric.label]}
+                  formatter={(value) => [formatMetricValue(metric, Number(value)), activeMetric.label]}
                 />
                 {threshold !== undefined && (
                   <ReferenceLine
@@ -482,7 +514,9 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Panel title="Inventário de Rede" Icon={Network}>
-          {!inventory ? (
+          {inventoryError ? (
+            <LoadNotice error={inventoryError} />
+          ) : !inventory ? (
             <p className="text-sm text-text-mut">
               O endereço {machine.host_ip} não aparece no inventário. Ou a varredura
               ainda não passou por esta faixa, ou a máquina está fora dela.
@@ -544,7 +578,9 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
       </div>
 
       <Panel title={`Últimas linhas de log (${logs.length})`} Icon={ScrollText}>
-        {logs.length === 0 ? (
+        {logsError ? (
+          <LoadNotice error={logsError} />
+        ) : logs.length === 0 ? (
           <p className="text-sm text-text-mut">Nenhuma linha de log registrada para esta máquina.</p>
         ) : (
           <div className="max-h-80 overflow-y-auto custom-scrollbar font-mono text-[11px] flex flex-col gap-1">

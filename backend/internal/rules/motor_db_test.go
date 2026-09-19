@@ -16,12 +16,6 @@ const (
 	prefixoRegra = "e9-teste-"
 )
 
-// setupMotorDB liga no Postgres de desenvolvimento. Sem DATABASE_URL o teste é
-// pulado: a suíte precisa passar numa máquina sem banco.
-//
-// A cobertura é de integração porque o que se mede é a travessia inteira —
-// evaluate lê métrica, decide, grava estado e o tick seguinte lê o que ficou
-// gravado. A decisão isolada está coberta pelos testes puros de breachStart.
 func setupMotorDB(t *testing.T) {
 	t.Helper()
 
@@ -58,8 +52,6 @@ func limparMotor(t *testing.T) {
 	database.DB.Unscoped().Where("id = ?", srvDuracao).Delete(&database.Server{})
 }
 
-// criarRegra devolve a regra já gravada, para o teste conhecer o id e poder ler
-// o estado dela depois.
 func criarRegra(t *testing.T, nome string, duracaoSec int) database.AlertRule {
 	t.Helper()
 
@@ -74,12 +66,11 @@ func criarRegra(t *testing.T, nome string, duracaoSec int) database.AlertRule {
 	return regra
 }
 
-// amostra grava uma leitura de CPU mais recente que todas as anteriores.
 func amostra(t *testing.T, cpu float64, idade time.Duration) {
 	t.Helper()
 
 	m := database.MetricServer{
-		ServerID: srvDuracao, CPUUsagePercent: cpu,
+		ServerID: srvDuracao, CPUUsagePercent: &cpu,
 		Timestamp: time.Now().UTC().Add(-idade),
 	}
 	if err := database.DB.Create(&m).Error; err != nil {
@@ -98,9 +89,6 @@ func estadoDe(t *testing.T, regra database.AlertRule) database.AlertState {
 	return st
 }
 
-// capturarLog redireciona o log do processo. Com o Telegram desligado — que é o
-// estado num teste —, alert.Send escreve a mensagem no log, e é assim que o
-// teste observa se o aviso saiu.
 func capturarLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 
@@ -111,9 +99,6 @@ func capturarLog(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-// avisos conta as linhas do log que citam esta regra. Filtra pelo nome porque
-// vários pacotes de teste compartilham o mesmo banco, e outras regras podem
-// estar disparando no mesmo evaluate.
 func avisos(buf *bytes.Buffer, nome, trecho string) int {
 	n := 0
 	for _, linha := range strings.Split(buf.String(), "\n") {
@@ -124,9 +109,6 @@ func avisos(buf *bytes.Buffer, nome, trecho string) int {
 	return n
 }
 
-// Uma regra com duração não dispara na primeira amostra. É o item E9 inteiro:
-// antes, um pico único de compilação ou de backup virava incidente, e o operador
-// aprendia a ignorar o canal.
 func TestRegraComDuracaoSeguraODisparo(t *testing.T) {
 	setupMotorDB(t)
 	regra := criarRegra(t, "segura", 3600)
@@ -148,8 +130,6 @@ func TestRegraComDuracaoSeguraODisparo(t *testing.T) {
 	}
 }
 
-// O controle que impede a correção de virar "nunca dispara": duração zero é o
-// valor de toda regra já cadastrada, e precisa continuar alertando na hora.
 func TestRegraSemDuracaoDisparaNaPrimeiraAmostra(t *testing.T) {
 	setupMotorDB(t)
 	regra := criarRegra(t, "imediata", 0)
@@ -166,9 +146,6 @@ func TestRegraSemDuracaoDisparaNaPrimeiraAmostra(t *testing.T) {
 	}
 }
 
-// A travessia completa do caso "acima, abaixo": a amostra dentro do limite
-// precisa zerar a contagem no banco, senão a violação seguinte herda o tempo já
-// acumulado e "por 5 minutos seguidos" vira "5 minutos somados no dia".
 func TestAmostraDentroDoLimiteZeraAContagemGravada(t *testing.T) {
 	setupMotorDB(t)
 	regra := criarRegra(t, "zera", 3600)
@@ -187,7 +164,6 @@ func TestAmostraDentroDoLimiteZeraAContagemGravada(t *testing.T) {
 	}
 }
 
-// A recuperação sai uma vez, na transição, e não a cada tick com o host normal.
 func TestRecuperacaoSaiUmaVezSo(t *testing.T) {
 	setupMotorDB(t)
 	criarRegra(t, "recupera", 0)
@@ -210,10 +186,6 @@ func TestRecuperacaoSaiUmaVezSo(t *testing.T) {
 	}
 }
 
-// Recuperação só depois de anúncio: um problema que nunca foi comunicado não
-// pode gerar um "voltou ao normal" que o operador não entende. É também o que
-// contém o flapping — o anúncio passa pelo cooldown, então o par
-// alerta/recuperação não acontece mais de uma vez por janela.
 func TestRecuperacaoNaoSaiSemAlertaAnterior(t *testing.T) {
 	setupMotorDB(t)
 	criarRegra(t, "silenciosa", 3600)

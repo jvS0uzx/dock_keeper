@@ -1,9 +1,3 @@
-// Package auth cuida de usuários, sessões e papéis do painel.
-//
-// Convive com o API_TOKEN em vez de substituí-lo: o token continua servindo
-// para tráfego máquina-a-máquina (agente, coletor, script), enquanto pessoas
-// entram com usuário e senha e recebem um papel. Trocar tudo de uma vez
-// derrubaria as integrações já instaladas.
 package auth
 
 import (
@@ -21,22 +15,19 @@ import (
 	"gorm.io/gorm"
 )
 
-// Papéis, do menor para o maior privilégio.
 const (
-	RoleViewer   = "viewer"   // só leitura
-	RoleOperator = "operator" // + ações em container, varredura, cadastro
-	RoleAdmin    = "admin"    // + usuários e servidores
+	RoleViewer   = "viewer"
+	RoleOperator = "operator"
+	RoleAdmin    = "admin"
 )
 
 var roleRank = map[string]int{RoleViewer: 0, RoleOperator: 1, RoleAdmin: 2}
 
-// ValidRole diz se o papel é conhecido.
 func ValidRole(r string) bool {
 	_, ok := roleRank[r]
 	return ok
 }
 
-// Allows diz se quem tem `has` alcança o nível `needs`.
 func Allows(has, needs string) bool {
 	h, ok := roleRank[has]
 	if !ok {
@@ -46,17 +37,11 @@ func Allows(has, needs string) bool {
 	return ok && h >= n
 }
 
-// Access é uma concessão de papel num escopo: SiteID nulo vale para todas as
-// unidades e para o que não tem unidade (VPS, painel Dev); SiteID preenchido
-// vale só para aquela unidade.
 type Access struct {
 	SiteID *uint  `json:"site_id"`
 	Role   string `json:"role"`
 }
 
-// rankOf trata papel desconhecido (e o vazio) como abaixo de qualquer papel
-// válido. Sem isso o viewer — rank zero — nunca venceria o vazio numa
-// comparação de mapa, que também devolve zero para chave ausente.
 func rankOf(role string) int {
 	if r, ok := roleRank[role]; ok {
 		return r
@@ -64,8 +49,6 @@ func rankOf(role string) int {
 	return -1
 }
 
-// MaxRole é o maior papel do usuário em qualquer escopo. Usado no gate grosso
-// de rota; o recorte fino por unidade acontece nos handlers.
 func MaxRole(accesses []Access) string {
 	best := ""
 	for _, a := range accesses {
@@ -76,8 +59,6 @@ func MaxRole(accesses []Access) string {
 	return best
 }
 
-// HasGlobal diz se o usuário tem alguma concessão sem unidade — quem não tem
-// nunca enxerga o escopo "none" (VPS/Dev) nem o parque inteiro.
 func HasGlobal(accesses []Access) bool {
 	for _, a := range accesses {
 		if a.SiteID == nil {
@@ -87,7 +68,6 @@ func HasGlobal(accesses []Access) bool {
 	return false
 }
 
-// GlobalRole é o maior papel entre as concessões globais ("" se não houver).
 func GlobalRole(accesses []Access) string {
 	best := ""
 	for _, a := range accesses {
@@ -98,9 +78,6 @@ func GlobalRole(accesses []Access) string {
 	return best
 }
 
-// RoleForSite resolve o papel efetivo num alvo. Alvo sem unidade (nil) só é
-// alcançado por concessão global; alvo com unidade aceita a concessão global
-// ou a da própria unidade — vence a maior.
 func RoleForSite(accesses []Access, siteID *uint) string {
 	best := GlobalRole(accesses)
 	if siteID == nil {
@@ -114,12 +91,10 @@ func RoleForSite(accesses []Access, siteID *uint) string {
 	return best
 }
 
-// CanSeeSite diz se o alvo é visível — qualquer papel enxerga.
 func CanSeeSite(accesses []Access, siteID *uint) bool {
 	return RoleForSite(accesses, siteID) != ""
 }
 
-// SiteIDs lista as unidades citadas nas concessões (sem as globais).
 func SiteIDs(accesses []Access) []uint {
 	var ids []uint
 	seen := map[uint]bool{}
@@ -132,12 +107,14 @@ func SiteIDs(accesses []Access) []uint {
 	return ids
 }
 
-// SessionTTL é a duração da sessão. Curta o bastante para uma aba esquecida
-// não virar acesso permanente, longa o bastante para um turno de trabalho.
-const SessionTTL = 12 * time.Hour
+const DefaultSessionTTL = 12 * time.Hour
 
-// Hash de descarte usado para gastar o mesmo tempo quando o usuário não
-// existe. Sem isso o tempo de resposta revelaria quais nomes estão cadastrados.
+var sessionTTL = DefaultSessionTTL
+
+func Configure() {
+	sessionTTL = database.EnvDuration("SESSION_TTL", DefaultSessionTTL)
+}
+
 const dummyHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
 
 var (
@@ -146,15 +123,9 @@ var (
 	ErrWeakPassword       = errors.New("a senha precisa de ao menos 10 caracteres")
 	ErrInvalidRole        = errors.New("papel inválido: use viewer, operator ou admin")
 
-	// ErrSessionStore aparece quando não há onde gravar a sessão. É erro de
-	// infraestrutura, não de credencial: quem chama não deve traduzi-lo para
-	// "usuário ou senha inválidos", que mandaria a pessoa procurar defeito na
-	// própria senha.
 	ErrSessionStore = errors.New("armazenamento de sessão indisponível")
 )
 
-// Session é um login ativo. Role é o papel MÁXIMO entre as concessões — o
-// recorte por unidade vem de Accesses.
 type Session struct {
 	Token     string    `json:"token"`
 	UserID    uint      `json:"user_id"`
@@ -164,7 +135,6 @@ type Session struct {
 	Accesses  []Access  `json:"accesses"`
 }
 
-// HashPassword gera o hash bcrypt, validando o tamanho mínimo antes.
 func HashPassword(plain string) (string, error) {
 	if len([]rune(strings.TrimSpace(plain))) < 10 {
 		return "", ErrWeakPassword
@@ -173,7 +143,6 @@ func HashPassword(plain string) (string, error) {
 	return string(hash), err
 }
 
-// Login confere as credenciais e abre uma sessão.
 func Login(username, password string) (Session, error) {
 	var user database.User
 	err := database.DB.
@@ -187,10 +156,6 @@ func Login(username, password string) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
-	// O bcrypt vem antes da conferência de Active. Recusar a conta desativada
-	// primeiro respondia em microssegundos enquanto senha errada e usuário
-	// inexistente gastavam 60-100 ms, e esse intervalo entrega a quem está de
-	// fora que a conta existe. A resposta HTTP dos dois erros já é a mesma.
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
 		return Session{}, ErrInvalidCredentials
 	}
@@ -208,8 +173,6 @@ func Login(username, password string) (Session, error) {
 	return CreateSession(user.ID, user.Username, accesses)
 }
 
-// loadAccesses busca as concessões por unidade. Usuário sem nenhuma linha
-// mantém o comportamento antigo: o papel da conta vale globalmente.
 func loadAccesses(user database.User) ([]Access, error) {
 	var rows []database.UserSiteAccess
 	if err := database.DB.Where("user_id = ?", user.ID).Find(&rows).Error; err != nil {
@@ -225,30 +188,13 @@ func loadAccesses(user database.User) ([]Access, error) {
 	return accesses, nil
 }
 
-// lastSeenRefresh evita uma escrita por requisição. Marcar o último uso a cada
-// chamada transformaria toda leitura autenticada num UPDATE; o valor serve para
-// o administrador saber se a sessão está viva, não para contabilidade.
 const lastSeenRefresh = 5 * time.Minute
 
-// tokenHash reduz o token à chave de busca.
-//
-// SHA-256 e não bcrypt de propósito: o token tem 256 bits vindos de
-// crypto/rand, então não existe dicionário a testar, e a busca acontece em toda
-// requisição autenticada — um KDF caro cobraria os 60-100 ms do bcrypt por
-// requisição sem comprar segurança nenhuma.
 func tokenHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
 
-// CreateSession abre uma sessão já com as concessões resolvidas. Exportada
-// para o Login, para os testes e para um futuro SSO.
-//
-// O parâmetro accesses vale para a sessão devolvida agora; a autorização das
-// requisições seguintes é relida do banco a cada Lookup. Quem chama isto com
-// concessões que não existem em user_site_accesses recebe uma sessão que não se
-// sustenta na próxima requisição — foi assim que os testes que fabricavam
-// sessão para usuário inexistente pararam de funcionar.
 func CreateSession(userID uint, username string, accesses []Access) (Session, error) {
 	if database.DB == nil {
 		return Session{}, ErrSessionStore
@@ -266,13 +212,10 @@ func CreateSession(userID uint, username string, accesses []Access) (Session, er
 		UserID:    userID,
 		Username:  username,
 		Role:      MaxRole(accesses),
-		ExpiresAt: now.Add(SessionTTL),
+		ExpiresAt: now.Add(sessionTTL),
 		Accesses:  accesses,
 	}
 
-	// A poda acompanha a criação, no mesmo padrão do ticketStore. Sessão
-	// vencida só se acumula enquanto gente entra, então quem entra paga a
-	// conta e a tabela não precisa de rotina própria.
 	purgeExpiredSessions(now)
 
 	row := database.UserSession{
@@ -290,17 +233,6 @@ func CreateSession(userID uint, username string, accesses []Access) (Session, er
 	return session, nil
 }
 
-// Lookup devolve a sessão do token, se ainda válida.
-//
-// A linha da tabela é só a credencial: quem a pessoa é e o que ela alcança sai
-// do estado ATUAL do banco a cada chamada. Congelar as concessões no momento do
-// login faria remover o acesso de alguém a uma unidade só valer no próximo
-// login — e "revoguei e continuou entrando" é o pior defeito possível num
-// controle de acesso.
-//
-// Falha fechado em toda dúvida: banco fora, linha ausente, conta apagada ou
-// desativada devolvem sessão inválida. É o mesmo precedente de sessionFrom, que
-// devolve sessão sem concessão em vez de conceder.
 func Lookup(token string) (Session, bool) {
 	if token == "" || database.DB == nil {
 		return Session{}, false
@@ -321,13 +253,9 @@ func Lookup(token string) (Session, bool) {
 	err := database.DB.First(&user, row.UserID).Error
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		// A conta sumiu: a sessão não tem mais dono e morre junto.
 		deleteSession(row.TokenHash)
 		return Session{}, false
 	case err != nil:
-		// Banco indisponível é falha de autenticação, não sucesso — e não é
-		// motivo para destruir a sessão de ninguém: a falha passa, a sessão
-		// precisa continuar existindo quando o banco voltar.
 		return Session{}, false
 	}
 	if !user.Active {
@@ -352,7 +280,6 @@ func Lookup(token string) (Session, bool) {
 	}, true
 }
 
-// Logout invalida a sessão.
 func Logout(token string) {
 	if token == "" || database.DB == nil {
 		return
@@ -360,12 +287,6 @@ func Logout(token string) {
 	deleteSession(tokenHash(token))
 }
 
-// RevokeUser derruba todas as sessões de um usuário — usado ao desativar ou
-// trocar o papel de alguém, para a mudança valer na hora.
-//
-// Continua existindo mesmo com as concessões sendo relidas a cada requisição:
-// reler cobre mudança de alcance, mas quem foi desativado ou teve o papel
-// rebaixado não deve nem terminar a requisição em curso.
 func RevokeUser(userID uint) {
 	if database.DB == nil {
 		return
@@ -390,7 +311,6 @@ func purgeExpiredSessions(now time.Time) {
 	}
 }
 
-// touchSession registra o último uso, no máximo uma vez a cada lastSeenRefresh.
 func touchSession(row database.UserSession, now time.Time) {
 	if now.Sub(row.LastSeenAt) < lastSeenRefresh {
 		return

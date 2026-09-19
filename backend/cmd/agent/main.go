@@ -1,19 +1,19 @@
-// Command agent é um coletor cross-platform que roda em qualquer host
-// (Linux/macOS/Windows) e faz push das métricas do sistema para o painel
-// vd_stats via POST /api/ingest/metrics.
-//
-// É o equivalente ao agente do Zabbix: instalado na estação, ele se anuncia
-// sozinho no primeiro envio — não é preciso cadastrar a máquina antes.
 package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -23,16 +23,12 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
-// Version identifica a build do agente no inventário. Ajuda o suporte a saber
-// quais estações ainda rodam uma versão antiga.
 const Version = "1.1.0"
 
 const (
 	defaultIntervalSec = 5
 	httpTimeout        = 10 * time.Second
 
-	// Janela de amostragem do CPU. Percent(0,...) mede desde a última chamada;
-	// com intervalo curto uma janela explícita dá um valor útil.
 	cpuSampleWindow = 500 * time.Millisecond
 )
 
@@ -46,13 +42,10 @@ type metricsPayload struct {
 	DiskTotal int64   `json:"disk_total"`
 	Uptime    float64 `json:"uptime"`
 
-	// Campos usados pelo painel de suporte: identificam a máquina e o que o
-	// técnico precisa saber antes de ir até ela.
-	//
-	// TemperatureC é ponteiro e sai do JSON quando a máquina não tem sensor
-	// (VM, notebook sem hwmon exposto). Mandar 0 fazia o painel gravar zero e
-	// exibir "0 °C" como se fosse leitura real.
 	TemperatureC *float64 `json:"temperature_c,omitempty"`
+
+	NetRxBps *float64 `json:"net_rx_bps,omitempty"`
+	NetTxBps *float64 `json:"net_tx_bps,omitempty"`
 
 	OS           string `json:"os"`
 	Platform     string `json:"platform"`
@@ -61,67 +54,170 @@ type metricsPayload struct {
 	SiteCode     string `json:"site_code"`
 	AgentVersion string `json:"agent_version"`
 
-	// MachineID identifica a máquina de forma estável. Hostname muda quando
-	// alguém renomeia a estação, e o painel parte o histórico em duas séries
-	// quando isso acontece.
 	MachineID string `json:"machine_id"`
 
-	// Intervalo configurado neste agente. Só ele sabe o valor: o painel deriva
-	// daqui a janela de tolerância antes de dar a máquina como offline.
 	ReportIntervalSec int `json:"report_interval_sec"`
 }
 
-func getenv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
+type agentConfig struct {
+	serverURL string
+	hostname  string
+	siteCode  string
+	interval  time.Duration
+	inseguro  bool
 }
 
-func main() {
-	serverURL := os.Getenv("AGENT_SERVER_URL")
-	if serverURL == "" {
-		log.Fatal("[Agent] AGENT_SERVER_URL não definido")
+func alvoInseguro(bruto string) (bool, error) {
+	endereco, err := url.Parse(strings.TrimSpace(bruto))
+	if err != nil || endereco.Host == "" {
+		return false, fmt.Errorf("AGENT_SERVER_URL inválido: %q", bruto)
 	}
-	defaultHost, _ := os.Hostname()
-	hostname := getenv("AGENT_HOSTNAME", defaultHost)
-	// Código da unidade onde a estação fica. O painel usa para agrupar por
-	// filial sem que o técnico precise cadastrar máquina por máquina.
-	siteCode := strings.ToLower(strings.TrimSpace(os.Getenv("AGENT_SITE")))
+	if endereco.Scheme != "http" {
+		return false, nil
+	}
+	host := endereco.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return false, nil
+	}
+	return true, nil
+}
+
+func loadConfig(getenv func(string) string) (agentConfig, error) {
+	serverURL := strings.TrimRight(strings.TrimSpace(getenv("AGENT_SERVER_URL")), "/")
+	if serverURL == "" {
+		return agentConfig{}, errors.New("AGENT_SERVER_URL não definido")
+	}
+
+	inseguro, err := alvoInseguro(serverURL)
+	if err != nil {
+		return agentConfig{}, err
+	}
+	permitido, _ := strconv.ParseBool(strings.TrimSpace(getenv("ALLOW_INSECURE_HTTP")))
+	if inseguro && !permitido {
+		return agentConfig{}, fmt.Errorf(
+			"AGENT_SERVER_URL usa http:// para um painel remoto (%s): a credencial do dispositivo viajaria em claro. Use https, ou defina ALLOW_INSECURE_HTTP=true se a rede for confiável",
+			serverURL)
+	}
+	hostname := getenv("AGENT_HOSTNAME")
+	if hostname == "" {
+		hostname, _ = os.Hostname()
+	}
 
 	interval := defaultIntervalSec
-	if raw := os.Getenv("AGENT_INTERVAL"); raw != "" {
+	if raw := getenv("AGENT_INTERVAL"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
 			interval = n
 		}
 	}
 
-	endpoint := serverURL + "/api/ingest/metrics"
+	return agentConfig{
+		serverURL: serverURL,
+		hostname:  hostname,
+		siteCode:  strings.ToLower(strings.TrimSpace(getenv("AGENT_SITE"))),
+		interval:  time.Duration(interval) * time.Second,
+		inseguro:  inseguro && permitido,
+	}, nil
+}
+
+func main() {
+	if executarComoServico() {
+		return
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	iniciar(ctx)
+}
+
+func iniciar(ctx context.Context) {
+	cfg, err := loadConfig(os.Getenv)
+	if err != nil {
+		log.Fatalf("[Agent] %v", err)
+	}
+
+	if cfg.inseguro {
+		log.Printf("[Agent] AVISO: %s usa http:// e ALLOW_INSECURE_HTTP=true; a credencial do dispositivo viaja em claro nesta rede", cfg.serverURL)
+	}
+
+	endpoint := cfg.serverURL + "/api/ingest/metrics"
 	client := &http.Client{Timeout: httpTimeout}
 
-	cred, legado := resolverIdentidade(client, serverURL, hostname)
+	cred, legado := resolverIdentidade(client, cfg.serverURL, cfg.hostname)
 	maquina := machineID()
+	intervalSec := int(cfg.interval / time.Second)
 
 	log.Printf("[Agent] v%s iniciando: host=%s maquina=%s unidade=%q destino=%s intervalo=%ds",
-		Version, hostname, maquina, siteCode, endpoint, interval)
+		Version, cfg.hostname, maquina, cfg.siteCode, endpoint, intervalSec)
 
-	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	rede := novoMedidorDeRede()
+	a := &agente{
+		client:   client,
+		endpoint: endpoint,
+		cred:     cred,
+		legado:   legado,
+		interval: cfg.interval,
+		coletar: func() metricsPayload {
+			p := collect(cfg.hostname, cfg.siteCode, intervalSec)
+			p.MachineID = maquina
+			p.NetRxBps, p.NetTxBps = rede.taxas()
+			return p
+		},
+	}
+	a.run(ctx)
+}
+
+type agente struct {
+	client   *http.Client
+	endpoint string
+	cred     credential
+	legado   string
+	interval time.Duration
+	coletar  func() metricsPayload
+}
+
+func (a *agente) run(ctx context.Context) {
+	ticker := time.NewTicker(a.interval)
 	defer ticker.Stop()
 
 	for {
-		payload := collect(hostname, siteCode, interval)
-		payload.MachineID = maquina
-		if err := push(client, endpoint, cred, legado, payload); err != nil {
-			log.Printf("[Agent] erro no envio: %v", err)
-		} else {
-			log.Printf("[Agent] enviado (cpu=%.1f%% mem=%d/%d temp=%s usuário=%q)",
-				payload.CPU, payload.MemUsed, payload.MemTotal, formatTemp(payload.TemperatureC), payload.LoggedUser)
+		payload := a.coletar()
+		if ctx.Err() != nil {
+			log.Println("[Agent] encerrado")
+			return
 		}
-		<-ticker.C
+
+		err := push(ctx, a.client, a.endpoint, a.cred, a.legado, payload)
+		switch {
+		case err == nil:
+			log.Printf("[Agent] enviado (cpu=%.1f%% mem=%d/%d temp=%s rede=%s/%s usuário=%q)",
+				payload.CPU, payload.MemUsed, payload.MemTotal, formatTemp(payload.TemperatureC),
+				formatTaxa(payload.NetRxBps), formatTaxa(payload.NetTxBps), payload.LoggedUser)
+		case ctx.Err() != nil:
+			log.Println("[Agent] encerrado com envio em andamento cancelado")
+			return
+		case a.cred.DeviceID == "" && errors.Is(err, errCredencialRecusada):
+			log.Printf("[Agent] %s; o token compartilhado so e aceito com ALLOW_LEGACY_INGEST_TOKEN=true "+
+				"no painel. Migre para AGENT_ENROLL_TOKEN", err)
+		default:
+			log.Printf("[Agent] %s", descreverFalha(err))
+		}
+
+		select {
+		case <-ctx.Done():
+			log.Println("[Agent] encerrado")
+			return
+		case <-ticker.C:
+		}
 	}
 }
 
-// formatTemp mantém o log legível quando não há sensor, sem inventar um zero.
+func formatTaxa(bps *float64) string {
+	if bps == nil {
+		return "-"
+	}
+	return strconv.FormatFloat(*bps, 'f', 0, 64) + "B/s"
+}
+
 func formatTemp(t *float64) string {
 	if t == nil {
 		return "sem sensor"
@@ -150,7 +246,6 @@ func collect(hostname, siteCode string, intervalSec int) metricsPayload {
 		log.Printf("[Agent] mem indisponível: %v", err)
 	}
 
-	// Load average não existe no Windows; tratamos o erro e mandamos 0.
 	if avg, err := load.Avg(); err == nil {
 		p.Load1 = avg.Load1
 	}
@@ -176,8 +271,6 @@ func collect(hostname, siteCode string, intervalSec int) metricsPayload {
 	return p
 }
 
-// rootPath devolve o ponto de montagem raiz do sistema. No Windows o caminho
-// "/" não existe e disk.Usage falharia.
 func rootPath() string {
 	if os.PathSeparator == '\\' {
 		return "C:\\"
@@ -185,13 +278,6 @@ func rootPath() string {
 	return "/"
 }
 
-// maxTemperature devolve a maior leitura dos sensores, em °C.
-//
-// Interessa ao suporte a pior temperatura da máquina, não a média: é ela que
-// indica estação abafada ou cooler parado. Zero significa indisponível — VM,
-// container e boa parte das máquinas virtuais não expõem sensor.
-// maxTemperature devolve nil quando a máquina não expõe sensor térmico, para o
-// painel distinguir "não medido" de uma leitura real.
 func maxTemperature() *float64 {
 	sensors, err := host.SensorsTemperatures()
 	if err != nil || len(sensors) == 0 {
@@ -200,29 +286,22 @@ func maxTemperature() *float64 {
 
 	var max float64
 	for _, s := range sensors {
-		// Leitura absurda significa sensor com escala errada; descarta em vez
-		// de disparar alarme falso.
 		if s.Temperature > max && s.Temperature < 150 {
 			max = s.Temperature
 		}
 	}
-	// Todos os sensores em zero ou fora de faixa: nenhuma leitura utilizável.
 	if max == 0 {
 		return nil
 	}
 	return &max
 }
 
-// activeUser devolve quem está com sessão aberta na máquina. Vazio quando
-// ninguém está logado ou o sistema não expõe a informação.
 func activeUser() string {
 	users, err := host.Users()
 	if err != nil || len(users) == 0 {
 		return ""
 	}
 
-	// Sessões duplicadas são comuns (vários terminais do mesmo usuário);
-	// devolve nomes distintos para o painel não repetir.
 	seen := make(map[string]bool, len(users))
 	var names []string
 	for _, u := range users {
@@ -235,12 +314,49 @@ func activeUser() string {
 	return strings.Join(names, ", ")
 }
 
-func push(client *http.Client, endpoint string, cred credential, legado string, payload metricsPayload) error {
+var errCredencialRecusada = errors.New("credencial recusada pelo painel")
+
+func errCredencialRecusadaHTTP(status int) error {
+	return &falhaCredencial{status: status}
+}
+
+type falhaCredencial struct{ status int }
+
+func (e *falhaCredencial) Error() string {
+	return errCredencialRecusada.Error() + " (HTTP " + strconv.Itoa(e.status) + ")"
+}
+
+func (e *falhaCredencial) Unwrap() error { return errCredencialRecusada }
+
+type falhaDeRede struct{ err error }
+
+func (e *falhaDeRede) Error() string { return "falha de rede: " + e.err.Error() }
+
+func (e *falhaDeRede) Unwrap() error { return e.err }
+
+func descreverFalha(err error) string {
+	var credencial *falhaCredencial
+	if errors.As(err, &credencial) {
+		return credencial.Error() + "; confira se o dispositivo foi revogado ou emita um novo convite. " +
+			"O agente segue tentando a cada ciclo"
+	}
+	var rede *falhaDeRede
+	if errors.As(err, &rede) {
+		return rede.Error()
+	}
+	var h *httpError
+	if errors.As(err, &h) {
+		return "painel respondeu HTTP " + strconv.Itoa(h.status)
+	}
+	return "erro no envio: " + err.Error()
+}
+
+func push(ctx context.Context, client *http.Client, endpoint string, cred credential, legado string, payload metricsPayload) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -254,14 +370,18 @@ func push(client *http.Client, endpoint string, cred credential, legado string, 
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return &falhaDeRede{err: err}
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return errCredencialRecusadaHTTP(resp.StatusCode)
+	default:
 		return &httpError{status: resp.StatusCode}
 	}
-	return nil
 }
 
 type httpError struct{ status int }

@@ -36,8 +36,6 @@ as telas seguem; os tokens vivem em `frontend/src/index.css` (`@theme`).
 | Raio | `rounded-card` (14px, painéis) · `rounded-ctrl` (10px, controles) |
 | Fonte | `font-sans` (Inter Variable) · `font-mono` (Geist Mono Variable) |
 
-Aliases `vd-*` seguem funcionando durante a migração; código novo não os usa.
-
 ## Padrões de componente
 
 - **Cabeçalho de página:** `.page-header` com `.page-title` + `.page-desc` à

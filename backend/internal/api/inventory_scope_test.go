@@ -17,11 +17,6 @@ const (
 	srvInvB         = "00000000-0000-0000-0000-0000000000b1"
 )
 
-// O índice de servidores da tela de inventário não era recortado: ele lia
-// database.DB.Find(&servers) inteiro. Como Server.HostIP não é único e o
-// inventário passou a admitir o mesmo IP em duas unidades, o host da filial A
-// era anotado com o server_id do servidor homônimo da filial B — a mesma
-// confusão de unidade do marcador da planta baixa, numa segunda tela.
 func TestInventarioNaoAnotaServidorDeOutraUnidade(t *testing.T) {
 	sedeA, sedeB := setupInventarioDB(t)
 
@@ -52,9 +47,6 @@ func TestInventarioNaoAnotaServidorDeOutraUnidade(t *testing.T) {
 			continue
 		}
 		visto = true
-		// O servidor com esse endereço é da unidade B. Para a unidade A esta
-		// máquina não está monitorada, e dizer que está manda o operador parar
-		// de instalar agente numa máquina que não tem nenhum.
 		if h.Monitored {
 			t.Errorf("o host da unidade A saiu como monitorado por causa do servidor da unidade B")
 		}
@@ -100,10 +92,6 @@ func setupInventarioDB(t *testing.T) (uint, uint) {
 		t.Fatalf("criar hosts: %v", err)
 	}
 
-	// O servidor monitorado existe SÓ na unidade B, e a unidade A não tem
-	// nenhum. Cadastrar um em cada faria o índice global escolher entre os dois
-	// por ordem de retorno do banco, e o teste passaria metade das vezes por
-	// acidente — foi assim que a primeira versão dele sobreviveu à mutação.
 	servidor := database.Server{
 		ID: srvInvB, Name: "srv-inv-b", HostIP: ipCompartilhado, Kind: "agent", SiteID: &sedeB.ID,
 	}
@@ -121,8 +109,6 @@ func limparInventario(t *testing.T) {
 	database.DB.Where("code IN ?", []string{"qa-inv-a", "qa-inv-b"}).Delete(&database.Site{})
 }
 
-// comSessaoDaUnidade injeta no contexto uma sessão de viewer restrita a uma
-// unidade, no mesmo formato que requireAuth produz.
 func comSessaoDaUnidade(r *http.Request, siteID uint) *http.Request {
 	sess := auth.Session{
 		UserID:   1,

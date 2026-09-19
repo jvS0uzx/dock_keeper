@@ -7,9 +7,6 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// breachStart é o coração da regra de duração: sem ele, cada avaliação só
-// enxerga a própria amostra e "acima de X por 5 minutos" seria indistinguível
-// de "acima de X agora".
 func TestBreachStartSemEstadoComecaAgora(t *testing.T) {
 	agora := time.Now()
 
@@ -18,8 +15,6 @@ func TestBreachStartSemEstadoComecaAgora(t *testing.T) {
 	}
 }
 
-// Violação observada no tick anterior é a mesma sequência: é o caso normal, e é
-// o que faz a contagem avançar em vez de reiniciar a cada avaliação.
 func TestBreachStartMantemSequenciaContinua(t *testing.T) {
 	agora := time.Now()
 	inicio := agora.Add(-4 * time.Minute)
@@ -34,16 +29,6 @@ func TestBreachStartMantemSequenciaContinua(t *testing.T) {
 	}
 }
 
-// O caso decisivo do E9: acima, abaixo, acima. A amostra dentro do limite zera
-// o estado em flushSettled, e a violação seguinte precisa recomeçar do zero —
-// senão "por 5 minutos seguidos" viraria "5 minutos somados ao longo do dia", e
-// um host oscilando alertaria como se estivesse constantemente ruim.
-//
-// LastBreachAt fica RECENTE de propósito: é o que isola esta guarda da guarda de
-// intervalo. Com as duas marcas zeradas, o intervalo até a época zero já passa
-// de breachGap e o teste passaria mesmo sem a conferência de FirstBreachAt —
-// provando o comportamento por acidente da representação do tempo, não por
-// decisão. Assim, zerar só first_breach_at continua bastando.
 func TestBreachStartZeradoRecomecaAContagem(t *testing.T) {
 	agora := time.Now()
 
@@ -57,9 +42,6 @@ func TestBreachStartZeradoRecomecaAContagem(t *testing.T) {
 	}
 }
 
-// O estado como flushSettled de fato o grava, com as duas marcas zeradas. É o
-// contraponto do teste acima: lá se prova que zerar first_breach_at basta, aqui
-// que o par que o código realmente escreve também recomeça a contagem.
 func TestBreachStartEstadoEncerradoRecomecaAContagem(t *testing.T) {
 	agora := time.Now()
 
@@ -73,8 +55,6 @@ func TestBreachStartEstadoEncerradoRecomecaAContagem(t *testing.T) {
 	}
 }
 
-// Um tick perdido — coleta atrasada, banco lento — não pode zerar uma contagem
-// de cinco minutos. É por isso que a tolerância são dois ticks e não um.
 func TestBreachStartToleraTickPerdido(t *testing.T) {
 	agora := time.Now()
 	inicio := agora.Add(-10 * time.Minute)
@@ -89,10 +69,6 @@ func TestBreachStartToleraTickPerdido(t *testing.T) {
 	}
 }
 
-// O outro buraco, que o zeramento explícito não cobre: enquanto o painel esteve
-// fora do ar nenhuma amostra foi avaliada, então não há registro de interrupção
-// para ler. Sem esta guarda, um reinício depois de uma hora fora dispararia na
-// primeira avaliação como se tivesse observado a hora inteira.
 func TestBreachStartBuracoLongoRecomeca(t *testing.T) {
 	agora := time.Now()
 
@@ -106,9 +82,6 @@ func TestBreachStartBuracoLongoRecomeca(t *testing.T) {
 	}
 }
 
-// A tolerância acompanha o tick configurado: um painel avaliando a cada 5
-// minutos não pode considerar interrompida uma sequência por causa de um piso
-// pensado para ticks de 30 segundos.
 func TestBreachGapAcompanhaOTick(t *testing.T) {
 	original := tickInterval
 	t.Cleanup(func() { tickInterval = original })
@@ -118,8 +91,6 @@ func TestBreachGapAcompanhaOTick(t *testing.T) {
 		t.Errorf("com tick de 5min, a tolerância = %v, esperado 10min", got)
 	}
 
-	// Tick curto não derruba a tolerância abaixo do piso: com 5 s de tick, dois
-	// ticks seriam 10 s, e qualquer soluço zeraria toda contagem em andamento.
 	tickInterval = 5 * time.Second
 	if got := breachGap(); got != 90*time.Second {
 		t.Errorf("com tick de 5s, a tolerância = %v, esperado o piso de 90s", got)

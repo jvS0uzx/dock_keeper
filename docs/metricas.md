@@ -33,6 +33,46 @@ nenhuma amostra da hora tinha sensor — por isso `TemperatureAvg` e
 `TemperatureMax` também são ponteiros. `MemPercentAvg` e `DiskPercentAvg` pelo
 mesmo motivo: o divisor é anulado quando o host reportou total zero.
 
+## CPU do host
+
+No modo SSH a CPU sai da diferença de jiffies do `/proc/stat` entre dois ciclos.
+Enquanto não há diferença — o que acontece no primeiro ciclo depois de conectar —
+o script **não emite a amostra**, em vez de emitir `host_cpu: 0`. O custo é uma
+amostra a menos por reconexão; o ganho é não inventar ociosidade que dispara
+regra `cpu <` em falso. `DOCKKEEPER_PROC_STAT` troca o arquivo lido, e existe
+para o teste.
+
+A coluna acompanha: `MetricServer.CPUUsagePercent` e `LoadAvg1` são ponteiros, e a
+amostra sem medição grava `NULL`. O live devolve `null`, o histórico pula o ponto e
+a tendência ignora a amostra na média, como já acontece com temperatura, rede e RTT.
+
+No agente, `cpu` é **opcional** no push. Um payload sem o campo é aceito e grava
+`NULL`, porque a amostra ainda traz memória, disco e rede, e recusá-la inteira
+perderia esses números. Zero enviado de propósito continua valendo como zero, que é
+o caso da máquina ociosa: `NULL` é ausência de medição, `0` é medição de ociosidade.
+Regra de alerta só avalia o que foi medido, então `cpu < 90` não dispara com `NULL`.
+
+## Tráfego de rede
+
+`MetricServer.NetRxBps` e `NetTxBps` são a taxa de bytes recebidos e enviados,
+em **bytes por segundo**, somando as interfaces físicas da máquina.
+
+No modo SSH o script lê `/proc/net/dev` a cada ciclo e divide a diferença pelo
+tempo entre duas leituras, como faz com a CPU. A primeira amostra depois de
+conectar não tem leitura anterior e sai **sem** o campo, assim como a amostra em
+que algum contador voltou para trás (reinício de interface) ou em que o
+`/proc/net/dev` não pôde ser lido. O relógio vem de `date +%s%N`; um `date` sem
+nanossegundo (BusyBox) deixa a rede sempre ausente, nunca errada.
+
+No agente, os dois campos são opcionais em `POST /api/ingest/metrics`. Ausente ou
+negativo é gravado como `NULL`. A tendência guarda `net_rx_avg` e `net_tx_avg`,
+médias que ignoram as amostras nulas.
+
+Ficam fora da soma as interfaces cujo nome começa com `lo`, `veth`, `docker`,
+`br-` ou `virbr`: loopback, pares de container e bridges. Somadas, elas contariam
+o tráfego de um container duas vezes — uma na `veth`, outra na placa física. O
+agente de estação usa a mesma lista.
+
 ## Handshake SSH — não é latência
 
 `MetricServer.SSHHandshakeMs` é o tempo de **abrir a sessão SSH inteira**: TCP
@@ -51,8 +91,33 @@ A coluna no banco continua `ping_latency_ms` **de propósito**: renomeá-la fari
 `NULL` quando a fonte não mede — o agente de push não abre sessão SSH, então
 nunca preenche este campo.
 
-RTT de verdade exigiria um prober separado, ICMP ou TCP periódico, que **não
-existe** no projeto.
+Para latência de rede, use o `rtt_ms`, medido pelo prober descrito abaixo.
+
+## RTT
+
+`MetricServer.RTTMs` é o tempo de ida e volta de um `keepalive@openssh.com` na
+conexão SSH que a coleta já mantém aberta, em milissegundos. É o número a ler como
+latência de rede: sem conexão nova, sem troca de chaves, só uma requisição global
+do SSH e a resposta do servidor.
+
+A cada `RTT_PROBE_INTERVAL` (30 s) o painel manda o keepalive, com timeout de 3 s,
+e guarda a última medida em memória. Cada amostra gravada pela coleta leva a
+medida do momento. Sem resposta, ou sem conexão ativa, o valor é `NULL`, nunca 0.
+A tendência guarda `rtt_avg` e `rtt_max`. Servidor que só reporta por agente de push
+fica sem RTT: o painel não tem conexão SSH com ele.
+
+**O keepalive também detecta conexão meio-aberta.** Quando um NAT ou firewall
+derruba a conexão em silêncio, o stream de métricas ficava parado esperando dado
+até o timeout do TCP, que pode levar muitos minutos. Agora, depois de
+`SSH_KEEPALIVE_MAX_MISSES` (3) keepalives seguidos sem resposta, o painel fecha a
+conexão, registra no log que a tratou como morta, e a reconexão segue o backoff
+normal.
+
+`RTT_PROBE=false` desliga só a gravação do RTT. O keepalive continua rodando,
+porque a detecção de conexão morta não depende dele.
+
+Não há linha no `auth.log` do host: o keepalive viaja dentro da sessão já
+autenticada.
 
 ## Janela de "online"
 
@@ -109,6 +174,11 @@ incremental. Sem esse limite inferior, cada passada varria a tabela inteira e
 reescrevia todos os baldes de todos os servidores — custo crescendo com o
 tamanho do histórico, para reescrever dado que não mudou.
 
+O histórico lê a tendência em toda janela acima de 24 h, fixa ou customizada: um
+ponto por hora até 30 dias, a média de 6 horas até 90 dias e a média do dia acima
+disso, até o teto de 400 dias da retenção padrão. Os parâmetros estão em
+[`api.md`](api.md).
+
 A **primeira** passada depois do boot é completa, sem a janela. Sem isso, um
 painel que ficou fora do ar mais que 3 horas teria o bruto daquele período
 apagado pela poda antes de virar tendência.
@@ -118,7 +188,7 @@ apagado pela poda antes de virar tendência.
 `GET /api/metrics/history` **omite** o ponto quando não há medição, em vez de
 devolver zero. A leitura da tendência filtra com `WHERE <coluna> IS NOT NULL`.
 
-Isso vale para a temperatura e para o handshake. Um gráfico com buraco diz "não
+Isso vale para a temperatura, o tráfego de rede e o handshake. Um gráfico com buraco diz "não
 medi aqui"; um gráfico no chão diz "medi zero", e as duas coisas são diferentes.
 
 ## Containers
@@ -145,3 +215,35 @@ descoberta de SSL só sabia devolver a topologia inteira ou lista vazia.
 Linha gravada antes disso fica sem unidade e some sozinha em 7 dias, pela
 retenção. Inventar uma unidade para linha cuja origem o sistema nunca registrou
 seria adivinhação gravada como fato.
+
+O status gravado é um balde: os códigos acompanhados (500, 502, 503, 504, 429,
+404, 400) ou `200` para qualquer outro. O código real é o primeiro campo de três
+dígitos depois do método e do caminho — antes o parser procurava o código em
+qualquer ponto da linha e classificava `GET /x 200 404` como 404, confundindo o
+tamanho da resposta com o status.
+
+## Gatilhos de alerta sem regra
+
+Além do motor de regras, três avisos saem sozinhos, com o mesmo cooldown por
+chave (`ALERT_COOLDOWN`):
+
+| Aviso | Chave | Quando |
+|---|---|---|
+| `[CRITICO]` stream do nginx caiu | `nginx_down:<servidor>` | A sessão que lê o access log cai, em servidor com `collect_nginx` |
+| `[ALERTA]` upstream com 5xx | `lb_upstream_5xx:<servidor>:<upstream>` | Na janela `LB_WINDOW` (5 min), o upstream recebeu pelo menos `LB_MIN_REQUESTS` (20) requisições e a proporção de 5xx chegou a `LB_ERROR_RATIO` (0,5) |
+| `[ALERTA]` força bruta | `bruteforce:<servidor>:<ip>` | Um mesmo IP de origem acumulou `BRUTEFORCE_THRESHOLD` (10) ou mais tentativas falhas na janela `BRUTEFORCE_WINDOW` (5 min) |
+
+O vigia de força bruta é uma sessão SSH de fundo por servidor, ligada por padrão
+(`AUTHLOG_WATCH`). Ele roda `tail -n 0 -F` no `auth.log` — com `sudo` quando
+`SSH_USE_SUDO` pede — e só **conta** as linhas: nada vai para o banco de logs.
+O `-F` segue o nome do arquivo, então a vigilância sobrevive ao logrotate; o
+`-n 0` começa do fim, então reconectar não reconta falhas antigas. Como é sessão de
+fundo, não entra no limite `SSH_MAX_SESSIONS_PER_HOST`.
+
+Uma tentativa conta uma vez. Contam as linhas `Failed password` e `Invalid user`,
+mas não `Failed password for invalid user`: o sshd registra a tentativa com
+usuário inexistente nas duas formas, e ela já entrou pela linha `Invalid user`.
+
+Motor de regras: além de `cpu`, `mem`, `disk` e `load`, aceita `temperature`,
+`net_rx`, `net_tx` e `rtt`. Amostra sem a medição (`NULL`) é ignorada: não dispara nem
+conta como zero, e também não encerra um alerta aberto.

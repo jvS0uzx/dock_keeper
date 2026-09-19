@@ -11,17 +11,8 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/network"
 )
 
-// Aceita apenas nome de host: rótulos alfanuméricos separados por ponto. O
-// valor vai virar destino de conexão TLS, então não pode carregar esquema,
-// porta, caminho nem espaço.
 var validDomain = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$`)
 
-// sslDomainsHandler faz o CRUD dos domínios monitorados.
-//
-// A leitura é recortada pela unidade do servidor a que o domínio está
-// amarrado. Domínio sem servidor cai fora da subconsulta e só aparece para quem
-// tem concessão global, que não a aplica — mesma regra do log e da regra de
-// alerta, porque o certificado de uma filial diz que sistema ela roda.
 func sslDomainsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -69,7 +60,6 @@ func sslDomainsHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "domínio já cadastrado ou inválido")
 			return
 		}
-		// Checa na hora para o domínio já aparecer com status, sem esperar o worker.
 		go network.CheckAndStore(domain)
 		writeJSON(w, http.StatusCreated, domain)
 
@@ -88,7 +78,6 @@ func sslDomainsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// sslRecheckHandler refaz o handshake de um domínio agora e devolve o registro.
 func sslRecheckHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
@@ -103,14 +92,11 @@ func sslRecheckHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, network.CheckAndStore(domain))
 }
 
-// sslRecheckAllHandler dispara a varredura completa em background.
 func sslRecheckAllHandler(w http.ResponseWriter, r *http.Request) {
 	go network.CheckAllDomains()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "checking"})
 }
 
-// optionalUUID converte string vazia em NULL. O painel manda server_id em
-// branco quando o domínio não está preso a um servidor, e "" não é uuid válido.
 func optionalUUID(raw string) *string {
 	if strings.TrimSpace(raw) == "" {
 		return nil

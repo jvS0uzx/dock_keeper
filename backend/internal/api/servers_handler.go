@@ -20,8 +20,6 @@ type ServerCreateRequest struct {
 	SiteID       *uint  `json:"site_id"`
 }
 
-// serversHandler faz o CRUD de Server. GET lista, POST cadastra e liga o
-// stream SSH na hora, DELETE para o stream e remove.
 func (c Config) serversHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -77,8 +75,6 @@ func (c Config) serversHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "id é obrigatório")
 			return
 		}
-		// O rótulo é lido antes da exclusão: depois dela sobra o uuid, e
-		// "removeu o servidor 3f2a..." não diz nada seis meses adiante.
 		var doomed database.Server
 		found := database.DB.Where("id = ?", id).First(&doomed).Error == nil
 
@@ -95,14 +91,6 @@ func (c Config) serversHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// lookupServer resolve um server_id e já responde o erro HTTP quando falta,
-// não existe ou está fora do alcance da sessão. Todos os endpoints que abrem
-// SSH passam por aqui — é onde o recorte por unidade encosta no acesso remoto.
-//
-// Servidor fora do alcance responde 404 e não 403: 403 confirmaria que aquele
-// servidor existe, e a lista do parque é justamente o que o recorte esconde.
-// Servidor sem unidade (VPS de infraestrutura) só é alcançado por concessão
-// global, como o escopo "none" das demais consultas.
 func lookupServer(w http.ResponseWriter, sess auth.Session, id string) (database.Server, bool) {
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "server_id é obrigatório")
@@ -120,8 +108,6 @@ func lookupServer(w http.ResponseWriter, sess auth.Session, id string) (database
 	return server, true
 }
 
-// sshTarget monta o alvo SSH a partir do registro do banco mais a chave da
-// configuração — a chave é do processo, não do servidor cadastrado.
 func (c Config) sshTarget(s database.Server) ssh.Target {
 	return ssh.Target{
 		ID:           s.ID,

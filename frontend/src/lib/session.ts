@@ -1,15 +1,5 @@
-/**
- * Sessão de usuário do painel.
- *
- * Convive com o VITE_API_TOKEN: o token é a credencial de máquina/dev e segue
- * funcionando; a sessão é a credencial de pessoa, com papel e escopo por
- * unidade. Quando as duas existem, a sessão vence — é ela que diz quem está
- * operando.
- */
-
 export type Role = 'viewer' | 'operator' | 'admin';
 
-/** Acesso concedido ao usuário. site_id null = acesso global (todas as unidades). */
 export interface SiteAccess {
   site_id: number | null;
   role: Role;
@@ -24,10 +14,6 @@ export interface SessionInfo {
   accesses: SiteAccess[];
 }
 
-/**
- * Rótulos exibidos na interface. Os identificadores da API ficam em inglês
- * (projeto open source); o vocabulário do painel é decisão de produto.
- */
 export const ROLE_LABELS: Record<Role, string> = {
   viewer: 'Visualizador',
   operator: 'Suporte TI',
@@ -41,7 +27,6 @@ export const canAdmin = (role: Role): boolean => roleRank[role] >= roleRank.admi
 
 const STORAGE_KEY = 'dockkeeper.session';
 
-/** Lê a sessão guardada, descartando a vencida. Storage pode estar bloqueado. */
 export const loadSession = (): SessionInfo | null => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -56,7 +41,6 @@ export const loadSession = (): SessionInfo | null => {
     if (!Array.isArray(session.accesses)) session.accesses = [];
     return session;
   } catch {
-    // Storage bloqueado ou JSON corrompido: trata como deslogado.
     return null;
   }
 };
@@ -65,7 +49,6 @@ export const saveSession = (session: SessionInfo) => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
   } catch {
-    // Sem storage a sessão vive só nesta aba; o login continua funcionando.
   }
 };
 
@@ -73,9 +56,7 @@ export const clearSession = () => {
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {
-    // Nada a limpar se o storage está bloqueado.
   }
 };
 
-/** Nome do evento disparado quando o backend responde 401 para uma sessão ativa. */
-export const SESSION_EXPIRED_EVENT = 'vd:session-expired';
+export const SESSION_EXPIRED_EVENT = 'dockkeeper:session-expired';

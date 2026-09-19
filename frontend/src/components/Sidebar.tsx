@@ -1,9 +1,11 @@
 import {
-  LayoutDashboard, Box, Globe, Lock, ShieldAlert, Server, LineChart, BellRing,
+  LayoutDashboard, LayoutGrid, Box, Globe, Lock, ShieldAlert, Server, LineChart, BellRing,
   ScrollText, Network, Map, MonitorSmartphone, Building2, Users, LogOut, KeyRound,
-  FileClock,
+  FileClock, FingerprintPattern,
   type LucideIcon,
 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { api } from '../lib/api';
 import { ADMIN_TABS, PANELS, PANEL_IDS, hasGlobalAdmin, type PanelId } from '../lib/panels';
 import { ROLE_LABELS } from '../lib/session';
 import { useSession } from './ui/session-context';
@@ -17,11 +19,10 @@ interface SidebarProps {
   setPanel: (panel: PanelId) => void;
 }
 
-// Catálogo único de telas. Cada painel escolhe quais mostrar e em que ordem,
-// então uma tela usada pelos dois (logs, alertas) é definida uma vez só.
 const TABS: Record<string, { label: string; icon: LucideIcon }> = {
   dashboard: { label: 'Dashboard Geral', icon: LayoutDashboard },
   history: { label: 'Histórico de Métricas', icon: LineChart },
+  dashboards: { label: 'Painéis', icon: LayoutGrid },
   containers: { label: 'Containers', icon: Box },
   nginx: { label: 'Nginx & Tráfego', icon: Globe },
   ssl: { label: 'SSL & Domínios', icon: Lock },
@@ -31,20 +32,39 @@ const TABS: Record<string, { label: string; icon: LucideIcon }> = {
   network: { label: 'Inventário de Rede', icon: Network },
   floorplan: { label: 'Planta Baixa', icon: Map },
   sites: { label: 'Unidades', icon: Building2 },
+  devices: { label: 'Dispositivos', icon: FingerprintPattern },
+  alertas: { label: 'Alertas', icon: BellRing },
   alerts: { label: 'Regras de Alerta', icon: BellRing },
   logs: { label: 'Logs & Busca', icon: ScrollText },
   users: { label: 'Usuários', icon: Users },
   audit: { label: 'Log de Auditoria', icon: FileClock },
 };
 
+const RESUMO_MS = 15000;
+
 const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => {
   const session = useSession();
-  const { siteId, setSiteId, sites } = useSiteScope();
+  const { siteId, setSiteId, sites, sitesError } = useSiteScope();
+  const [alertasAbertos, setAlertasAbertos] = useState(0);
 
-  // Abas de administração somem para quem não tem concessão GLOBAL de admin.
-  // O backend gateia as três com requireGlobalRole(admin), então o papel da
-  // conta não basta: admin de uma filial só receberia 403. Mostrar uma porta
-  // trancada só gera chamado de suporte.
+  useEffect(() => {
+    let vivo = true;
+    const carregar = async () => {
+      try {
+        const resumo = await api.alertsSummary();
+        if (vivo) setAlertasAbertos(resumo.open);
+      } catch {
+        return;
+      }
+    };
+    carregar();
+    const timer = setInterval(carregar, RESUMO_MS);
+    return () => {
+      vivo = false;
+      clearInterval(timer);
+    };
+  }, []);
+
   const visibleTabs = PANELS[panel].tabs.filter(
     (id) => !ADMIN_TABS.has(id) || hasGlobalAdmin(session.accesses),
   );
@@ -76,8 +96,6 @@ const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => 
         </div>
       </div>
 
-      {/* O escopo por unidade só faz sentido no painel de campo: as VPS do
-          painel Dev são infraestrutura e não pertencem a filial nenhuma. */}
       {panel === 'suporte' && (
         <div className="border-b border-line p-3">
           <label htmlFor="sidebar-site" className="eyebrow mb-1.5 block">
@@ -92,6 +110,9 @@ const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => 
               ...sites.map((s) => ({ value: String(s.id), label: s.name })),
             ]}
           />
+          {sitesError && (
+            <p role="alert" className="mt-1.5 text-[11px] text-crit">{sitesError}</p>
+          )}
         </div>
       )}
 
@@ -125,6 +146,14 @@ const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => 
                     className={isActive ? 'text-accent' : 'text-text-faint'}
                   />
                   <span className="truncate">{tab.label}</span>
+                  {id === 'alertas' && alertasAbertos > 0 && (
+                    <span
+                      title={`${alertasAbertos} alerta(s) em aberto`}
+                      className="ml-auto rounded-full bg-crit/15 px-1.5 py-0.5 text-xs font-medium text-crit"
+                    >
+                      {alertasAbertos}
+                    </span>
+                  )}
                 </button>
               </li>
             );

@@ -1,7 +1,10 @@
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { Trash2, Plus } from 'lucide-react';
 import { api, type AlertRuleRecord as AlertRule } from '../lib/api';
 import { relativeTime } from '../lib/format';
+import { RULE_METRIC_LABELS, formatRuleThreshold, isRateMetric } from '../lib/metrics';
 import Select, { type SelectOption } from './ui/Select';
 import { useDialog } from './ui/dialog-context';
 import { useRole } from './ui/session-context';
@@ -12,24 +15,11 @@ interface ServerOption {
   name: string;
 }
 
-const METRIC_LABELS: Record<string, string> = {
-  cpu: 'CPU (%)',
-  mem: 'Memória (%)',
-  disk: 'Disco (%)',
-  load: 'Load',
-};
-
-// Rótulos legíveis para os operadores de comparação da regra.
 const OPERATORS: SelectOption[] = [
   { value: '>', label: 'maior que' },
   { value: '<', label: 'menor que' },
 ];
 
-// Durações oferecidas para a histerese, em segundos.
-//
-// Lista fechada em vez de campo livre: a coluna guarda segundos, mas o operador
-// pensa em minutos, e um campo numérico sem unidade convida a digitar 5 quando
-// se quer 5 minutos. Aqui não há unidade para errar.
 const DURATIONS: SelectOption[] = [
   { value: '0', label: 'Dispara na hora' },
   { value: '60', label: 'Após 1 minuto' },
@@ -40,11 +30,8 @@ const DURATIONS: SelectOption[] = [
   { value: '1800', label: 'Após 30 minutos' },
 ];
 
-// Regra criada antes da coluna existir vem sem o campo; zero é o padrão certo,
-// porque é exatamente o comportamento que ela tinha.
 const durationOf = (rule: AlertRule): number => rule.for_duration_sec ?? 0;
 
-// Rótulo curto para a coluna Condição, no formato que o operador escolheu.
 const durationLabel = (seconds: number): string => {
   if (seconds <= 0) return '';
   const option = DURATIONS.find((d) => d.value === String(seconds));
@@ -52,8 +39,6 @@ const durationLabel = (seconds: number): string => {
   return ` por ${Math.round(seconds / 60)} min`;
 };
 
-// O <Select> guarda um valor só; a unidade é distinguida por prefixo e
-// traduzida para target_site_id no envio, que é como o backend modela.
 const SITE_PREFIX = 'site:';
 
 const emptyForm = {
@@ -73,26 +58,32 @@ const AlertRulesView = () => {
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [servers, setServers] = useState<ServerOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
+  const alvos = useLoadStatus();
+  const { ok: alvosOk, fail: alvosFail } = alvos;
   const [form, setForm] = useState({ ...emptyForm });
 
   const fetchRules = useCallback(async () => {
     try {
       setRules(await api.alertRules());
+      cargaOk();
     } catch (err) {
-      console.error(err);
+      cargaFail(err, 'Falha ao listar as regras.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cargaOk, cargaFail]);
 
   const fetchServers = useCallback(async (signal?: AbortSignal) => {
     try {
       const data = await api.liveMetrics(signal);
       setServers(data.servers.map(({ id, name }) => ({ id, name })));
+      alvosOk();
     } catch (err) {
-      if (!signal?.aborted) console.error(err);
+      if (!signal?.aborted) alvosFail(err, 'Falha ao listar os servidores para o alvo.');
     }
-  }, []);
+  }, [alvosOk, alvosFail]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -149,8 +140,6 @@ const AlertRulesView = () => {
     }
   };
 
-  // A regra por unidade chega com target "*" e target_site_id preenchido; sem
-  // traduzir isso, a tabela mostraria "Todos" para uma regra de uma filial só.
   const targetName = (rule: AlertRule) => {
     if (rule.target_site_id !== null) return `Unidade: ${siteName(rule.target_site_id)}`;
     if (rule.target === '*') return 'Todos';
@@ -159,6 +148,8 @@ const AlertRulesView = () => {
 
   return (
     <div className="p-4 md:p-8 anim-rise">
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
+      <LoadNotice error={alvos.error} lastOk={alvos.lastOk} className="mb-4" />
       <div className="page-header">
         <div>
           <h1 className="page-title">Regras de Alerta</h1>
@@ -169,7 +160,6 @@ const AlertRulesView = () => {
       </div>
 
       <div className={`grid grid-cols-1 gap-6 ${canOperate ? 'lg:grid-cols-3' : ''}`}>
-        {/* O formulário só existe para Suporte TI; Visualizador vê a lista. */}
         {canOperate && (
         <div className="panel p-5 col-span-1 h-fit">
           <h2 className="eyebrow mb-5">Nova regra</h2>
@@ -208,7 +198,7 @@ const AlertRulesView = () => {
                 id="rule-metric"
                 value={form.metric}
                 onChange={(v) => setForm({ ...form, metric: v })}
-                options={Object.entries(METRIC_LABELS).map(([key, label]) => ({ value: key, label }))}
+                options={Object.entries(RULE_METRIC_LABELS).map(([key, label]) => ({ value: key, label }))}
               />
             </div>
             <div className="flex gap-3">
@@ -234,6 +224,11 @@ const AlertRulesView = () => {
                 />
               </div>
             </div>
+            {isRateMetric(form.metric) && (
+              <p className="-mt-2 text-[10px] text-text-faint">
+                Limiar em bytes por segundo: {formatRuleThreshold(form.metric, Number(form.threshold))}.
+              </p>
+            )}
             <div>
               <label htmlFor="rule-duration" className="eyebrow block mb-1.5">
                 Só alertar se persistir
@@ -270,7 +265,7 @@ const AlertRulesView = () => {
           {loading ? (
             <p className="text-sm text-text-faint">Carregando...</p>
           ) : rules.length === 0 ? (
-            <p className="text-sm text-text-faint">Nenhuma regra cadastrada.</p>
+            carga.error && !carga.lastOk ? null : <p className="text-sm text-text-faint">Nenhuma regra cadastrada.</p>
           ) : (
             <div className="overflow-x-auto custom-scrollbar">
               <table className="table-base">
@@ -288,7 +283,6 @@ const AlertRulesView = () => {
                   {rules.map((rule) => (
                     <tr key={rule.id}>
                       <td>
-                        {/* Alternar dispara escrita: Visualizador só vê o estado. */}
                         <button
                           onClick={() => canOperate && handleToggle(rule)}
                           className={canOperate ? '' : 'cursor-default'}
@@ -303,7 +297,7 @@ const AlertRulesView = () => {
                       <td className={rule.enabled ? 'font-medium text-text-hi' : 'font-medium text-text-faint'}>{rule.name}</td>
                       <td className="text-text-mut">{targetName(rule)}</td>
                       <td className={`mono-data text-xs ${rule.enabled ? 'text-text-hi' : 'text-text-faint'}`}>
-                        {METRIC_LABELS[rule.metric] ?? rule.metric} {rule.operator} {rule.threshold}
+                        {RULE_METRIC_LABELS[rule.metric] ?? rule.metric} {rule.operator} {formatRuleThreshold(rule.metric, rule.threshold)}
                         <span className="text-text-faint">{durationLabel(durationOf(rule))}</span>
                       </td>
                       <td className="text-text-faint text-xs">{relativeTime(rule.last_fired)}</td>

@@ -17,13 +17,11 @@ func streamsAtivos(m *ServerManager) int {
 
 func TestManagerNaoDuplicaNemVazaStreams(t *testing.T) {
 	m := &ServerManager{cancelFuncs: make(map[string]context.CancelFunc)}
-	// Chave inexistente: o supervise falha na hora, sem tocar a rede, e fica
-	// aguardando a reconexão — o ciclo de vida do manager não depende do dial.
 	alvo := Target{ID: "s1", Name: "t1", Host: "127.0.0.1", Port: 1, User: "root",
 		KeyPath: filepath.Join(t.TempDir(), "inexistente")}
 
 	m.Start(alvo)
-	m.Start(alvo) // repetido: não pode abrir segundo stream
+	m.Start(alvo)
 	if got := streamsAtivos(m); got != 1 {
 		t.Fatalf("streams ativos = %d, esperado 1", got)
 	}
@@ -36,7 +34,7 @@ func TestManagerNaoDuplicaNemVazaStreams(t *testing.T) {
 	}
 
 	m.Stop("s1")
-	m.Stop("s1") // idempotente
+	m.Stop("s1")
 	if got := streamsAtivos(m); got != 1 {
 		t.Fatalf("após Stop, streams = %d, esperado 1", got)
 	}
@@ -57,7 +55,6 @@ func TestSuperviseAcionaOnErrorEEncerraNoCancelamento(t *testing.T) {
 			execucoes.Add(1)
 			return errors.New("sessão caiu")
 		}
-		// onError cancela: é como o teste escapa do delay de reconexão de 5s.
 		onError := func(error) { cancel() }
 
 		done := make(chan struct{})
@@ -81,8 +78,6 @@ func TestSuperviseAcionaOnErrorEEncerraNoCancelamento(t *testing.T) {
 
 		var notificado atomic.Bool
 		run := func(context.Context, Target) error {
-			// O operador removeu o servidor: a sessão devolve erro, mas o
-			// contexto já morreu — alerta aqui seria ruído de desligamento.
 			cancel()
 			return errors.New("sessão fechada no desligamento")
 		}

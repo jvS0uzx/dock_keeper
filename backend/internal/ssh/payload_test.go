@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// O script remoto omite temperature_c em host sem sensor (VM, container). O
-// ponteiro é o que separa isso de uma leitura real de zero.
 func TestSysPayloadTemperaturaAusente(t *testing.T) {
 	semSensor := `{"uptime":10,"host_cpu":1.5,"mem_used":1,"mem_total":2,"load1":0.1,"disk_root":"1,2","ps":[],"stats":[]}`
 	comSensor := `{"uptime":10,"host_cpu":1.5,"mem_used":1,"mem_total":2,"load1":0.1,"disk_root":"1,2","temperature_c":55.9,"ps":[],"stats":[]}`

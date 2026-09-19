@@ -7,11 +7,6 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// Testes de findOrCreateAgentServer (item N4 do checklist): a parte de
-// armazenamento da chave (unidade, hostname) já era coberta em
-// internal/database; a adoção e a precedência do machine_id, que vivem aqui,
-// não eram.
-
 func setupChaveAgente(t *testing.T) (uint, uint) {
 	t.Helper()
 
@@ -52,9 +47,6 @@ func contarServidores(t *testing.T, nome string) int64 {
 	return n
 }
 
-// Agente que não mandava site_code gravou site_id nulo. Quando ele passa a
-// mandar, o registro antigo tem de ser adotado — abrir linha nova partiria o
-// histórico da mesma máquina em duas séries.
 func TestAgenteAdotaServidorSemUnidade(t *testing.T) {
 	sedeA, _ := setupChaveAgente(t)
 
@@ -75,9 +67,6 @@ func TestAgenteAdotaServidorSemUnidade(t *testing.T) {
 	}
 }
 
-// Dois DESKTOP-01 em filiais diferentes são dois equipamentos. Sob a chave
-// antiga viravam um registro só, com as métricas das duas máquinas serradas na
-// mesma série.
 func TestMesmoHostnameCoexisteEmUnidadesDiferentes(t *testing.T) {
 	sedeA, sedeB := setupChaveAgente(t)
 
@@ -93,7 +82,6 @@ func TestMesmoHostnameCoexisteEmUnidadesDiferentes(t *testing.T) {
 		t.Fatalf("o mesmo registro atendeu duas unidades: %s", naA.ID)
 	}
 
-	// Repetir o push da unidade A devolve o registro dela, não um terceiro.
 	deNovo, err := findOrCreateAgentServer("qa-n4-dup", "", "10.94.2.1", &sedeA)
 	if err != nil {
 		t.Fatalf("repetir na unidade A: %v", err)
@@ -106,8 +94,6 @@ func TestMesmoHostnameCoexisteEmUnidadesDiferentes(t *testing.T) {
 	}
 }
 
-// Renomear a máquina não pode partir o histórico: quando o machine_id existe,
-// ele vence o hostname.
 func TestMachineIDVenceHostname(t *testing.T) {
 	sedeA, _ := setupChaveAgente(t)
 
@@ -131,8 +117,6 @@ func TestMachineIDVenceHostname(t *testing.T) {
 	}
 }
 
-// Quando nada casa, o registro nasce com a unidade, o machine_id e o tipo
-// certos — é o que o upsert do push atualiza depois.
 func TestHostNovoQuandoNadaCasa(t *testing.T) {
 	sedeA, _ := setupChaveAgente(t)
 

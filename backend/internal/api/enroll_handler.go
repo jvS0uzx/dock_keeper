@@ -10,28 +10,25 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/jvS0uzx/dock_keeper/internal/audit"
+	"github.com/jvS0uzx/dock_keeper/internal/config"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
 const (
-	// Validade do convite. Curta de propósito: o token de enrollment viaja fora
-	// de banda — mensagem, script de instalação, papel — e um convite que dura
-	// semanas é um segredo esquecido em algum lugar.
 	enrollTokenTTL = 24 * time.Hour
 
 	kindAgent     = "agent"
 	kindCollector = "collector"
 )
 
-// enrollTokenRequest é o corpo de POST /api/enroll/tokens.
 type enrollTokenRequest struct {
 	SiteID uint   `json:"site_id"`
 	Kind   string `json:"kind"`
 }
 
-// enrollRequest é o corpo de POST /api/enroll, enviado pelo instalador.
 type enrollRequest struct {
 	Token     string `json:"enrollment_token"`
 	MachineID string `json:"machine_id"`
@@ -39,9 +36,6 @@ type enrollRequest struct {
 	Kind      string `json:"kind"`
 }
 
-// enrollTokensHandler emite o convite de uso único para habilitar um
-// dispositivo numa unidade. Admin global: emitir convite é conceder o direito
-// de escrever métrica e inventário de uma filial inteira.
 func (c Config) enrollTokensHandler(w http.ResponseWriter, r *http.Request) {
 	var req enrollTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -83,8 +77,6 @@ func (c Config) enrollTokensHandler(w http.ResponseWriter, r *http.Request) {
 
 	auditTarget(r, "site", strconv.FormatUint(uint64(site.ID), 10), site.Name, &site.ID)
 
-	// O valor em claro sai UMA vez. O banco só tem o hash, então não existe rota
-	// que o releia — perdeu, emite outro.
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"enrollment_token": valor,
 		"site_id":          site.ID,
@@ -93,12 +85,11 @@ func (c Config) enrollTokensHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// enrollHandler troca o convite pela credencial própria do dispositivo.
-//
-// Rota pública: quem chama ainda não tem credencial — é justamente o que vem
-// buscar. A proteção é o convite ser de uso único, ter validade curta e o teto
-// de corpo e o limite de tentativa valerem aqui como em qualquer rota pública.
 func (c Config) enrollHandler(w http.ResponseWriter, r *http.Request) {
+	if !limitarTaxa(w, "enroll-ip:"+clientIP(r, config.Booleano("TRUST_PROXY_HEADERS", false)), tetoDeEnroll()) {
+		return
+	}
+
 	var req enrollRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "corpo inválido")
@@ -125,8 +116,10 @@ func (c Config) enrollHandler(w http.ResponseWriter, r *http.Request) {
 		entrada.Detail["motivo"] = err.Error()
 		audit.Record(entrada)
 
-		// Mensagem única para inexistente, expirado e já usado. Distinguir os
-		// três entrega ao atacante um oráculo sobre quais convites existem.
+		if errors.Is(err, errEnrollKindMismatch) {
+			writeError(w, http.StatusConflict, "o tipo do dispositivo não confere com o do convite; o convite continua válido")
+			return
+		}
 		writeError(w, http.StatusUnauthorized, "convite inválido, expirado ou já utilizado")
 		return
 	}
@@ -144,27 +137,32 @@ func (c Config) enrollHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+var errEnrollKindMismatch = errors.New("kind declarado não confere com o do convite")
+
+var errConviteJaUsado = errors.New("convite consumido por outro dispositivo durante a troca")
+
 type credencialEmitida struct {
 	credencial database.DeviceCredential
 	segredo    string
 }
 
-// trocarConvitePorCredencial faz a queima do convite e a criação da credencial
-// na MESMA transação. Fora dela, dois instaladores concorrentes usam o mesmo
-// convite duas vezes — e o "uso único" vira promessa.
 func trocarConvitePorCredencial(req enrollRequest) (credencialEmitida, error) {
 	var saida credencialEmitida
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		var token database.EnrollmentToken
-		err := tx.Where("token_hash = ? AND used_at IS NULL AND expires_at > ?",
-			hashSecret(strings.TrimSpace(req.Token)), time.Now().UTC()).
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("token_hash = ? AND used_at IS NULL AND expires_at > ?",
+				hashSecret(strings.TrimSpace(req.Token)), time.Now().UTC()).
 			First(&token).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("convite inexistente, expirado ou já usado")
 		}
 		if err != nil {
 			return err
+		}
+		if kind := strings.ToLower(strings.TrimSpace(req.Kind)); kind != "" && kind != token.Kind {
+			return errEnrollKindMismatch
 		}
 
 		deviceID, err := newDeviceID()
@@ -177,9 +175,7 @@ func trocarConvitePorCredencial(req enrollRequest) (credencialEmitida, error) {
 		}
 
 		cred := database.DeviceCredential{
-			DeviceID: deviceID,
-			// A unidade e o tipo saem do CONVITE, não do corpo do pedido: quem
-			// se cadastra não escolhe a que unidade pertence.
+			DeviceID:   deviceID,
 			SiteID:     token.SiteID,
 			Kind:       token.Kind,
 			SecretHash: hashSecret(segredo),
@@ -191,10 +187,14 @@ func trocarConvitePorCredencial(req enrollRequest) (credencialEmitida, error) {
 		}
 
 		agora := time.Now().UTC()
-		if err := tx.Model(&database.EnrollmentToken{}).
+		baixa := tx.Model(&database.EnrollmentToken{}).
 			Where("id = ? AND used_at IS NULL", token.ID).
-			Update("used_at", agora).Error; err != nil {
-			return err
+			Update("used_at", agora)
+		if baixa.Error != nil {
+			return baixa.Error
+		}
+		if baixa.RowsAffected != 1 {
+			return errConviteJaUsado
 		}
 
 		saida = credencialEmitida{credencial: cred, segredo: segredo}
@@ -204,7 +204,6 @@ func trocarConvitePorCredencial(req enrollRequest) (credencialEmitida, error) {
 	return saida, err
 }
 
-// devicesHandler lista e revoga credenciais de dispositivo.
 func (c Config) devicesHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -228,8 +227,6 @@ func (c Config) devicesHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Revoga marcando, não apagando: o rastro de auditoria precisa continuar
-		// apontando para um dispositivo que existiu.
 		agora := time.Now().UTC()
 		if err := database.DB.Model(&database.DeviceCredential{}).
 			Where("device_id = ?", id).

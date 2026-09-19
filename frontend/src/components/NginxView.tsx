@@ -1,8 +1,9 @@
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
 import { useEffect, useState, useMemo } from 'react';
 import { Globe, Server, Network } from 'lucide-react';
 import { api, type LbStat } from '../lib/api';
 
-// Agrega as linhas do LB por upstream para desenhar o diagrama de fluxo.
 interface UpstreamAgg {
   addr: string;
   reqs: number;
@@ -24,12 +25,9 @@ const aggregateUpstreams = (rows: LbStat[]): UpstreamAgg[] => {
   return Object.values(map).sort((a, b) => b.reqs - a.reqs).slice(0, 6);
 };
 
-// Severidade referencia os tokens semânticos do tema — o SVG aceita var().
 const sevColor = (s: UpstreamAgg['severity']) =>
   s === 'error' ? 'var(--color-crit)' : s === 'warn' ? 'var(--color-warn)' : 'var(--color-ok)';
 
-// Diagrama SVG: Load Balancer à esquerda, upstreams à direita, com "pacotes"
-// animados cuja quantidade e velocidade refletem as reqs/5s de cada upstream.
 const TrafficFlow = ({ upstreams }: { upstreams: UpstreamAgg[] }) => {
   const W = 640, H = 260;
   const lbX = 80, lbY = H / 2;
@@ -39,7 +37,6 @@ const TrafficFlow = ({ upstreams }: { upstreams: UpstreamAgg[] }) => {
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
-      {/* nó do Load Balancer */}
       <g>
         <circle cx={lbX} cy={lbY} r="34" fill="var(--color-accent)" fillOpacity="0.08" stroke="var(--color-accent)" strokeOpacity="0.4" />
         <circle cx={lbX} cy={lbY} r="34" fill="none" stroke="var(--color-accent)" strokeOpacity="0.25">
@@ -55,7 +52,6 @@ const TrafficFlow = ({ upstreams }: { upstreams: UpstreamAgg[] }) => {
         const color = sevColor(u.severity);
         const pathId = `flow-${i}`;
         const d = `M ${lbX + 34} ${lbY} C ${(lbX + upX) / 2} ${lbY}, ${(lbX + upX) / 2} ${y}, ${upX - 12} ${y}`;
-        // mais reqs = mais pacotes e mais rápidos
         const dots = Math.min(1 + Math.floor(u.reqs / 3), 6);
         const dur = Math.max(0.7, 2.6 - u.reqs * 0.04);
         return (
@@ -68,7 +64,6 @@ const TrafficFlow = ({ upstreams }: { upstreams: UpstreamAgg[] }) => {
                 </animateMotion>
               </circle>
             ))}
-            {/* nó do upstream */}
             <circle cx={upX} cy={y} r="9" fill={color} fillOpacity="0.15" stroke={color} strokeOpacity="0.6" />
             <circle cx={upX} cy={y} r="3.5" fill={color} />
             <text x={upX + 16} y={y - 4} fill="var(--color-text-hi)" fontSize="10" fontFamily="var(--font-mono)">{u.addr}</text>
@@ -82,15 +77,20 @@ const TrafficFlow = ({ upstreams }: { upstreams: UpstreamAgg[] }) => {
 
 const NginxView = () => {
   const [loadBalancing, setLoadBalancing] = useState<LbStat[]>([]);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
   const upstreams = useMemo(() => aggregateUpstreams(loadBalancing), [loadBalancing]);
 
   useEffect(() => {
     const controller = new AbortController();
     const fetchMetrics = () => {
       api.liveMetrics(controller.signal)
-        .then(data => setLoadBalancing(data.load_balancing))
+        .then(data => {
+          setLoadBalancing(data.load_balancing);
+          cargaOk();
+        })
         .catch(err => {
-          if (!controller.signal.aborted) console.error('Erro API Nginx:', err);
+          if (!controller.signal.aborted) cargaFail(err, 'Falha ao ler o tráfego do Nginx.');
         });
     };
 
@@ -100,10 +100,11 @@ const NginxView = () => {
       clearInterval(interval);
       controller.abort();
     };
-  }, []);
+  }, [cargaOk, cargaFail]);
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden anim-rise">
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
       <div className="page-header flex-col md:flex-row items-start md:items-end">
         <div>
           <h1 className="page-title">Nginx e tráfego</h1>
@@ -112,7 +113,6 @@ const NginxView = () => {
         <span className="badge badge-muted" title="Esta tela não executa ação nenhuma no Nginx">somente leitura</span>
       </div>
 
-      {/* Fluxo de requisições em tempo real: LB para os upstreams */}
       <div className="panel mb-6 p-4">
         <div className="flex items-center gap-2 mb-2">
           <Server size={16} strokeWidth={1.75} className="text-text-faint" />
@@ -121,7 +121,7 @@ const NginxView = () => {
         <div className="h-[260px]">
           {upstreams.length === 0 ? (
             <div className="h-full flex items-center justify-center text-text-mut text-sm">
-              Aguardando tráfego no Load Balancer...
+              {carga.error && !carga.lastOk ? carga.error : 'Aguardando tráfego no Load Balancer...'}
             </div>
           ) : (
             <TrafficFlow upstreams={upstreams} />
@@ -130,7 +130,6 @@ const NginxView = () => {
       </div>
 
       <div className="panel flex flex-col flex-1 min-h-0 overflow-hidden">
-        {/* Toolbar */}
         <div className="p-4 border-b border-line bg-ink-850 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Network size={18} strokeWidth={1.75} className="text-text-faint" />
@@ -142,7 +141,6 @@ const NginxView = () => {
           </span>
         </div>
 
-        {/* Tabela */}
         <div className="flex-1 overflow-auto custom-scrollbar p-4">
           <table className="table-base whitespace-nowrap">
             <thead>
@@ -157,7 +155,7 @@ const NginxView = () => {
               {loadBalancing.length === 0 && (
                 <tr>
                   <td colSpan={4} className="py-8 text-center text-text-mut">
-                    Aguardando tráfego ou nenhum log do Nginx encontrado.
+                    {carga.error && !carga.lastOk ? carga.error : 'Aguardando tráfego ou nenhum log do Nginx encontrado.'}
                   </td>
                 </tr>
               )}

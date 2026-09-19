@@ -11,8 +11,6 @@ func metrica(serverID string, idade time.Duration, agora time.Time) database.Met
 	return database.MetricServer{ServerID: serverID, Timestamp: agora.Add(-idade)}
 }
 
-// O caso que motivou o E8: host reportando corretamente a cada 120 s ficava
-// fora de toda avaliação porque a janela era 60 s fixos.
 func TestRecentMetricsAceitaAgenteLento(t *testing.T) {
 	agora := time.Now()
 	servers := []database.Server{
@@ -27,8 +25,6 @@ func TestRecentMetricsAceitaAgenteLento(t *testing.T) {
 	}
 }
 
-// A correção não pode virar "aceita tudo": métrica velha continua velha, e um
-// host calado precisa continuar suprimindo as regras que dependem dele.
 func TestRecentMetricsDescartaMetricaVelha(t *testing.T) {
 	agora := time.Now()
 	servers := []database.Server{
@@ -47,8 +43,6 @@ func TestRecentMetricsDescartaMetricaVelha(t *testing.T) {
 	}
 }
 
-// Intervalo desconhecido é a coleta por SSH, cujo ritmo o painel não sabe:
-// fica no piso de 30 s, como antes.
 func TestRecentMetricsIntervaloDesconhecidoUsaOPiso(t *testing.T) {
 	agora := time.Now()
 	servers := []database.Server{{ID: "srv-ssh", ReportIntervalSec: 0}}
@@ -64,8 +58,6 @@ func TestRecentMetricsIntervaloDesconhecidoUsaOPiso(t *testing.T) {
 	}
 }
 
-// Métrica de servidor que não está mais cadastrado não pode manter viva a regra
-// que aponta para ele.
 func TestRecentMetricsIgnoraServidorDesconhecido(t *testing.T) {
 	agora := time.Now()
 	servers := []database.Server{{ID: "srv-1", ReportIntervalSec: 30}}
@@ -84,8 +76,6 @@ func TestRecentMetricsIgnoraServidorDesconhecido(t *testing.T) {
 	}
 }
 
-// Cada host responde pela própria janela: um agente rápido calado não pode ser
-// salvo pela tolerância de um agente lento no mesmo tick.
 func TestRecentMetricsJanelaEPorHost(t *testing.T) {
 	agora := time.Now()
 	servers := []database.Server{

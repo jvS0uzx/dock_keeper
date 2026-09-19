@@ -8,9 +8,6 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// Testes que gravam de verdade: seguem o padrão do repositório — pulam sem
-// DATABASE_URL e limpam o que criaram, identificado por um nome inequívoco.
-
 const nomeServidorDeTeste = "zz-teste-ssh-cobertura"
 
 func servidorDeTeste(t *testing.T) database.Server {
@@ -51,9 +48,10 @@ func TestStoreHostMetricPersisteAmostra(t *testing.T) {
 	alvo := Target{ID: srv.ID, Host: srv.HostIP}
 
 	temp := 41.5
+	cpu125, carga05 := 12.5, 0.5
 	payload := SysPayload{
-		Uptime: 3600, HostCPU: 12.5, MemUsed: 100, MemTotal: 200,
-		Load1: 0.5, DiskRoot: "10,100", TemperatureC: &temp,
+		Uptime: 3600, HostCPU: &cpu125, MemUsed: 100, MemTotal: 200,
+		Load1: &carga05, DiskRoot: "10,100", TemperatureC: &temp,
 	}
 	storeHostMetric(alvo, payload, 1200)
 
@@ -103,7 +101,7 @@ func TestStoreContainerMetricsCriaUmaVezEReusaOCache(t *testing.T) {
 			metricas[0].MemUsedBytes, metricas[0].MemLimitBytes)
 	}
 	if metricas[0].CPUUsagePercent != 1.5 {
-		t.Errorf("cpu = %v, esperado 1.5", metricas[0].CPUUsagePercent)
+		t.Errorf("cpu de container = %v, esperado 1.5", metricas[0].CPUUsagePercent)
 	}
 }
 
@@ -134,7 +132,6 @@ func TestLBOriginEFlushRecortamPeloServidor(t *testing.T) {
 		t.Errorf("timestamp no futuro: %v", linha.Timestamp)
 	}
 
-	// flush esvazia o acumulador: um segundo flush não pode duplicar a linha.
 	c.flush()
 	var total int64
 	database.DB.Model(&database.MetricLoadBalancer{}).Where("server_id = ?", srv.ID).Count(&total)
@@ -144,12 +141,59 @@ func TestLBOriginEFlushRecortamPeloServidor(t *testing.T) {
 }
 
 func TestLBOriginServidorInexistenteFicaSemRecorte(t *testing.T) {
-	servidorDeTeste(t) // garante conexão com o banco (ou skip)
+	servidorDeTeste(t)
 
-	// UUID válido que não existe: a consulta falha e a métrica segue sem
-	// unidade em vez de derrubar a coleta.
 	id, site := lbOrigin(Target{ID: "00000000-0000-0000-0000-000000000000", Name: "fantasma"})
 	if id != nil || site != nil {
 		t.Errorf("servidor inexistente devolveu (%v, %v)", id, site)
+	}
+}
+
+func TestAmostraComCincoContainersFazUmInsert(t *testing.T) {
+	srv := servidorDeTeste(t)
+	alvo := Target{ID: srv.ID, Host: srv.HostIP}
+
+	var payload SysPayload
+	for i := range 5 {
+		id := "d10cont" + string(rune('a'+i))
+		payload.PS = append(payload.PS, DockerPSPayload{DockerID: id, Name: id, State: "running", Status: "Up"})
+		payload.Stats = append(payload.Stats, DockerStatsPayload{DockerID: id, CPUPercent: "1.00%", MemUsage: "1MiB / 1GiB"})
+	}
+	storeContainerMetrics(alvo, payload, map[string]string{})
+
+	var linhas, transacoes int64
+	err := database.DB.Raw(`
+		SELECT COUNT(*), COUNT(DISTINCT m.xmin::text)
+		FROM metric_containers m JOIN containers c ON c.id = m.container_id
+		WHERE c.server_id = ?`, srv.ID).Row().Scan(&linhas, &transacoes)
+	if err != nil {
+		t.Fatalf("contar gravações: %v", err)
+	}
+	if linhas != 5 {
+		t.Fatalf("linhas de métrica = %d, esperado 5", linhas)
+	}
+	if transacoes != 1 {
+		t.Errorf("amostra com 5 containers gerou %d INSERTs em metric_containers, esperado 1", transacoes)
+	}
+}
+
+func TestStoreHostMetricGravaRede(t *testing.T) {
+	srv := servidorDeTeste(t)
+	alvo := Target{ID: srv.ID, Host: srv.HostIP}
+
+	rx, tx := 4096.0, 1024.0
+	storeHostMetric(alvo, SysPayload{NetRxBps: &rx, NetTxBps: &tx}, 10)
+	storeHostMetric(alvo, SysPayload{}, 10)
+
+	var linhas []database.MetricServer
+	database.DB.Where("server_id = ?", srv.ID).Order("id asc").Find(&linhas)
+	if len(linhas) != 2 {
+		t.Fatalf("amostras = %d, esperado 2", len(linhas))
+	}
+	if linhas[0].NetRxBps == nil || *linhas[0].NetRxBps != 4096 || linhas[0].NetTxBps == nil || *linhas[0].NetTxBps != 1024 {
+		t.Errorf("rede gravada = (%v, %v), esperado (4096, 1024)", linhas[0].NetRxBps, linhas[0].NetTxBps)
+	}
+	if linhas[1].NetRxBps != nil || linhas[1].NetTxBps != nil {
+		t.Errorf("amostra sem rede gravou (%v, %v); esperado NULL", linhas[1].NetRxBps, linhas[1].NetTxBps)
 	}
 }

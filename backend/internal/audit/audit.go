@@ -1,8 +1,3 @@
-// Package audit grava o rastro atribuível das escritas do painel.
-//
-// Mora fora de internal/api porque internal/ssh também precisa escrever, e
-// internal/api já importa internal/ssh — um pacote de auditoria dentro do HTTP
-// fecharia o ciclo. Aqui os dois lados o importam e ele não importa nenhum.
 package audit
 
 import (
@@ -13,21 +8,14 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// Resultados possíveis de uma ação auditada.
 const (
 	ResultOK     = "ok"
 	ResultDenied = "denied"
 	ResultError  = "error"
 
-	// ResultPending é o estado da linha gravada ANTES da execução, para o caso
-	// que mais importa: o comando que travou a máquina e nunca retornou. Quem
-	// grava só depois perde exatamente esse.
 	ResultPending = "pending"
 )
 
-// Entry é uma ação a registrar. Os campos de ator são preenchidos pelo chamador
-// a partir da sessão; internal/ssh, que não tem sessão, deixa-os vazios e o
-// chamador HTTP os propaga quando a ação nasceu de uma requisição.
 type Entry struct {
 	ActorUserID   *uint
 	ActorUsername string
@@ -44,19 +32,9 @@ type Entry struct {
 	SiteID *uint
 	Result string
 
-	// Detail é montado por allowlist: só os campos que o chamador escolheu
-	// nomear. Nunca receba aqui o corpo da requisição inteiro.
 	Detail map[string]any
 }
 
-// Record grava a linha e devolve o id, ou 0 quando a gravação falha.
-//
-// Falha de auditoria não derruba a requisição: o painel é a ferramenta de quem
-// está apagando incêndio, e recusar a operação por causa de um soluço no banco
-// tira a ferramenta justamente na hora em que ela importa. A contrapartida é
-// que a falha precisa gritar no log — auditoria que falha em silêncio é pior
-// que auditoria nenhuma, porque a ausência da linha passa a significar duas
-// coisas diferentes.
 func Record(e Entry) uint {
 	row := database.AuditLog{
 		At:            time.Now().UTC(),
@@ -89,9 +67,6 @@ func Record(e Entry) uint {
 	return row.ID
 }
 
-// Complete fecha a linha pendente que Record abriu. Detail é mesclado ao que já
-// estava gravado, não substituído: o que se sabia antes da execução (o alvo, os
-// argumentos) continua valendo depois dela.
 func Complete(id uint, result string, detail map[string]any) {
 	if id == 0 || database.DB == nil {
 		return
@@ -113,8 +88,6 @@ func Complete(id uint, result string, detail map[string]any) {
 	}
 }
 
-// encodeDetail sempre devolve JSON válido: a coluna é jsonb e string vazia não
-// é documento, então o INSERT inteiro falharia por causa de um campo acessório.
 func encodeDetail(detail map[string]any) string {
 	if len(detail) == 0 {
 		return "{}"
@@ -148,8 +121,6 @@ func merge(base, novo map[string]any) map[string]any {
 	return base
 }
 
-// truncate corta no limite da coluna. Um User-Agent absurdo não pode fazer o
-// INSERT falhar e levar embora o registro da ação junto.
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s

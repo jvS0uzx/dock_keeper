@@ -10,15 +10,8 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/logstore"
 )
 
-// Quantas linhas de histórico o auth.log entrega antes de passar a acompanhar.
 const authLogTailLines = 20
 
-// StreamAuthLogs acompanha o log de autenticação do host e repassa cada linha
-// por SSE, persistindo no histórico de logs.
-//
-// O caminho é configurável (SSH_AUTH_LOG_PATH) porque o padrão de Debian
-// não vale em RHEL, onde o arquivo é /var/log/secure — e o caminho cravado
-// deixava a tela de Segurança vazia sem nenhum erro aparecer.
 func StreamAuthLogs(ctx context.Context, t Target, w http.ResponseWriter, flusher http.Flusher) error {
 	client, session, err := openSession(t)
 	if err != nil {
@@ -34,7 +27,7 @@ func StreamAuthLogs(ctx context.Context, t Target, w http.ResponseWriter, flushe
 		return err
 	}
 
-	if err := session.Start("tail -n " + strconv.Itoa(authLogTailLines) + " -f " + AuthLogPath()); err != nil {
+	if err := session.Start(authLogCommand(t)); err != nil {
 		return err
 	}
 
@@ -59,7 +52,6 @@ type PortInfo struct {
 	Process  string `json:"process"`
 }
 
-// GetRadarPorts lista as portas em LISTEN do host, com o processo dono.
 func GetRadarPorts(t Target) ([]PortInfo, error) {
 	client, session, err := openSession(t)
 	if err != nil {
@@ -68,7 +60,7 @@ func GetRadarPorts(t Target) ([]PortInfo, error) {
 	defer client.Close()
 	defer session.Close()
 
-	out, err := session.Output("ss -tulnp | grep LISTEN")
+	out, err := session.Output(radarCommand(t))
 	if err != nil {
 		return nil, err
 	}
@@ -82,15 +74,13 @@ func GetRadarPorts(t Target) ([]PortInfo, error) {
 	return ports, nil
 }
 
-// parseSSLine extrai uma porta de uma linha do `ss -tulnp`, no formato
-// "tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:((\"sshd\",pid=1,fd=3))".
 func parseSSLine(line string) (PortInfo, bool) {
 	fields := strings.Fields(line)
 	if len(fields) < 5 {
 		return PortInfo{}, false
 	}
 
-	localAddr := fields[4] // 0.0.0.0:22 ou *:80
+	localAddr := fields[4]
 	port := "unknown"
 	if idx := strings.LastIndex(localAddr, ":"); idx != -1 {
 		port = localAddr[idx+1:]
@@ -106,7 +96,6 @@ func parseSSLine(line string) (PortInfo, bool) {
 	return PortInfo{Protocol: fields[0], State: fields[1], Port: port, Process: process}, true
 }
 
-// processName tira "sshd" de `users:(("sshd",pid=123,fd=3))`.
 func processName(field string) (string, bool) {
 	start := strings.Index(field, `("`)
 	end := strings.Index(field, `",`)
@@ -114,4 +103,20 @@ func processName(field string) (string, bool) {
 		return "", false
 	}
 	return field[start+2 : end], true
+}
+
+func authLogCommand(t Target) string {
+	cmd := "tail -n " + strconv.Itoa(authLogTailLines) + " -f " + AuthLogPath()
+	if useSudo(t) {
+		return sudoPrefix + "/usr/bin/" + cmd
+	}
+	return cmd
+}
+
+func radarCommand(t Target) string {
+	ss := "ss -tulnp"
+	if useSudo(t) {
+		ss = sudoPrefix + "/usr/bin/" + ss
+	}
+	return ss + " | grep LISTEN"
 }

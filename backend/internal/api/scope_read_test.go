@@ -12,11 +12,6 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// Regressão do furo S1. As três rotas de leitura corrigidas aqui — busca de
-// log, descoberta de SSL e lista de regras — não liam a sessão e devolviam o
-// parque inteiro para qualquer visualizador, inclusive um restrito a uma
-// filial.
-
 const (
 	srvDaFilialA = "00000000-0000-0000-0000-00000000a001"
 	srvDaFilialB = "00000000-0000-0000-0000-0000000b0001"
@@ -29,8 +24,6 @@ const (
 
 func ptrSite(id uint) *uint { return &id }
 
-// escopoDaFilial monta o recorte de quem só alcança uma unidade, do mesmo jeito
-// que resolveScope o monta a partir da sessão.
 func escopoDaFilial(id uint) siteScope {
 	return siteScope{filter: true, ids: []uint{id}}
 }
@@ -43,9 +36,6 @@ func nomesDasRegras(rules []database.AlertRule) []string {
 	return out
 }
 
-// TestVisibilidadeDasRegrasPorUnidade cobre as quatro formas de uma regra se
-// amarrar (ou não) a uma unidade. É teste puro de propósito: a decisão de
-// visibilidade não pode depender de banco para ser verificável.
 func TestVisibilidadeDasRegrasPorUnidade(t *testing.T) {
 	const filialA, filialB = uint(1), uint(2)
 
@@ -93,9 +83,6 @@ func TestVisibilidadeDasRegrasPorUnidade(t *testing.T) {
 			},
 		},
 		{
-			// A regra de parque vale também para os hosts da filial escolhida:
-			// escondê-la de quem tem acesso global só porque filtrou a tela
-			// faria sumir justamente a regra que está disparando ali.
 			nome:      "acesso global filtrando uma unidade mantém a regra de parque",
 			scope:     escopoDaFilial(filialA),
 			hasGlobal: true,
@@ -118,10 +105,6 @@ func TestVisibilidadeDasRegrasPorUnidade(t *testing.T) {
 	}
 }
 
-// TestRegraSemUnidadeNaoVazaParaFilial isola o caso que o recorte por SQL
-// deixaria passar: a regra de parque inteiro e a regra cujo servidor alvo já
-// não existe não pertencem a filial nenhuma, então nenhum escopo restrito pode
-// enxergá-las.
 func TestRegraSemUnidadeNaoVazaParaFilial(t *testing.T) {
 	sites := map[string]*uint{srvDaFilialA: ptrSite(1)}
 
@@ -144,8 +127,6 @@ func TestRegraSemUnidadeNaoVazaParaFilial(t *testing.T) {
 	}
 }
 
-// TestRuleSiteIDResolveAUnidadeDoAlvo trava a resolução alvo -> unidade, que é
-// de onde a visibilidade da regra por servidor sai.
 func TestRuleSiteIDResolveAUnidadeDoAlvo(t *testing.T) {
 	sites := map[string]*uint{
 		srvDaFilialA: ptrSite(7),
@@ -184,10 +165,6 @@ func TestRuleSiteIDResolveAUnidadeDoAlvo(t *testing.T) {
 	}
 }
 
-// setupScopeDB liga no Postgres e planta duas filiais com um servidor, uma
-// linha de log e uma regra cada. Sem DATABASE_URL o teste é pulado, no mesmo
-// modelo de internal/database/retention_test.go: a suíte precisa passar numa
-// máquina sem banco.
 func setupScopeDB(t *testing.T) (filialA, filialB uint) {
 	t.Helper()
 
@@ -243,9 +220,6 @@ func setupScopeDB(t *testing.T) (filialA, filialB uint) {
 		}
 	}
 
-	// Um vhost observado em cada filial. Com um só, a descoberta devolveria
-	// lista vazia para o viewer restrito mesmo sem recorte nenhum, e o teste
-	// passaria por acidente — foi o que aconteceu na primeira versão dele.
 	vhosts := []database.MetricLoadBalancer{
 		{
 			UpstreamAddr: "10.90.0.9:443", ServerName: vhostDeTeste, Status: "200",
@@ -265,8 +239,6 @@ func setupScopeDB(t *testing.T) (filialA, filialB uint) {
 	return sedeA.ID, sedeB.ID
 }
 
-// Unscoped no servidor porque Server tem exclusão lógica: sem ele a linha
-// sobrevive com o mesmo id e o teste seguinte esbarra na chave primária.
 func limpaEscopo(t *testing.T) {
 	t.Helper()
 
@@ -278,17 +250,12 @@ func limpaEscopo(t *testing.T) {
 		Delete(&database.MetricLoadBalancer{})
 }
 
-// pedeComoSessao chama o handler com a sessão já no contexto, como o middleware
-// a entrega.
 func pedeComoSessao(h http.HandlerFunc, sess auth.Session, url string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	h(rec, withSession(httptest.NewRequest(http.MethodGet, url, nil), sess))
 	return rec
 }
 
-// TestBuscaDeLogNaoVazaEntreUnidades cobre os dois caminhos que o furo abria:
-// a busca sem server_id, que devolvia os 200 últimos do parque, e a busca com
-// server_id, que entregava o log de qualquer host a quem soubesse o uuid.
 func TestBuscaDeLogNaoVazaEntreUnidades(t *testing.T) {
 	filialA, _ := setupScopeDB(t)
 
@@ -324,8 +291,6 @@ func TestBuscaDeLogNaoVazaEntreUnidades(t *testing.T) {
 	}
 }
 
-// TestListaDeRegrasNaoVazaEntreUnidades exercita AlertRulesHandler inteiro, e
-// não só o filtro puro, para pegar um recorte que deixasse de ser chamado.
 func TestListaDeRegrasNaoVazaEntreUnidades(t *testing.T) {
 	filialA, _ := setupScopeDB(t)
 
@@ -362,13 +327,6 @@ func TestListaDeRegrasNaoVazaEntreUnidades(t *testing.T) {
 	}
 }
 
-// TestDescobertaDeSslRecortaPorUnidade substitui o teste que exigia concessão
-// global nesta rota.
-//
-// Enquanto metric_load_balancers não tinha unidade, a única saída era negar a
-// lista inteira a quem é restrito — e o admin de filial via a tela de descoberta
-// em branco. Com a coluna site_id, o recorte passou a ser possível, e negar
-// virou custo sem contrapartida.
 func TestDescobertaDeSslRecortaPorUnidade(t *testing.T) {
 	filialA, _ := setupScopeDB(t)
 
@@ -385,8 +343,6 @@ func TestDescobertaDeSslRecortaPorUnidade(t *testing.T) {
 	}
 }
 
-// O contraponto: quem tem concessão global continua vendo o parque inteiro.
-// Sem ele, um recorte que negasse tudo passaria no teste acima.
 func TestDescobertaDeSslMostraTudoParaGlobal(t *testing.T) {
 	setupScopeDB(t)
 

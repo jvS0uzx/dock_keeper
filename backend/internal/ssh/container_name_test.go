@@ -10,8 +10,6 @@ func TestValidContainerName(t *testing.T) {
 		}
 	}
 
-	// O hífen inicial é o caso do S9: "-f" e "--rm" passariam a ser lidos pelo
-	// docker como flag, não como o container alvo.
 	invalidos := []string{"-f", "--rm", "-", "_app", ".oculto", "", "a b", "a;id", "a$(id)", "a|b", "../etc"}
 	for _, nome := range invalidos {
 		if validContainerName.MatchString(nome) {

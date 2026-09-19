@@ -8,11 +8,6 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// Bootstrap cria o primeiro administrador se ainda não houver usuário.
-//
-// Sem isso, uma instalação nova não teria como entrar: só um admin cria outro
-// usuário. Roda uma vez — havendo qualquer usuário, não faz nada, então deixar
-// as variáveis no .env não recria nem sobrescreve ninguém.
 func Bootstrap() {
 	var count int64
 	if err := database.DB.Model(&database.User{}).Count(&count).Error; err != nil {

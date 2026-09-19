@@ -1,6 +1,8 @@
 package api
 
 import (
+	"gorm.io/gorm"
+
 	"encoding/json"
 	"log"
 	"net/http"
@@ -23,25 +25,17 @@ type alertRuleRequest struct {
 	DependsOnServerID *string `json:"depends_on_server_id"`
 	TargetSiteID      *uint   `json:"target_site_id"`
 
-	// Segundos que a condição precisa se manter antes de a regra disparar.
-	// Zero mantém o comportamento antigo: uma amostra acima do limite já alerta.
 	ForDurationSec int `json:"for_duration_sec"`
 }
 
-// Teto da duração exigida. Importa mais que o piso: negativo apenas volta ao
-// comportamento antigo, mas um valor absurdo cria uma regra que NUNCA dispara e
-// parece ativa na tela — a falha silenciosa, que é a pior.
 const maxRuleDurationSec = 24 * 60 * 60
 
-var validRuleMetrics = map[string]bool{"cpu": true, "mem": true, "disk": true, "load": true}
+var validRuleMetrics = map[string]bool{
+	"cpu": true, "mem": true, "disk": true, "load": true,
+	"temperature": true, "net_rx": true, "net_tx": true, "rtt": true,
+}
 var validRuleOperators = map[string]bool{">": true, "<": true}
 
-// ruleSiteID devolve a unidade à qual a regra pertence e se ela está de fato
-// amarrada a alguma. O alvo por servidor guarda um uuid em AlertRule.Target,
-// então a unidade só se resolve passando pelo servidor.
-//
-// Alvo cujo servidor não existe mais conta como não amarrado: a regra ficou
-// sem dono e não pode reaparecer no recorte de uma filial qualquer.
 func ruleSiteID(rule database.AlertRule, siteByServer map[string]*uint) (*uint, bool) {
 	if rule.TargetSiteID != nil {
 		return rule.TargetSiteID, true
@@ -53,18 +47,11 @@ func ruleSiteID(rule database.AlertRule, siteByServer map[string]*uint) (*uint, 
 	return nil, false
 }
 
-// visibleRules corta a lista de regras pelo alcance da sessão.
-//
-// O corte não cabe no WHERE porque a unidade de uma regra por servidor mora na
-// tabela de servidores; a lista é curta, então resolve-se em memória com o
-// mesmo siteScope.matches que o restante do painel usa depois de carregar.
 func visibleRules(all []database.AlertRule, scope siteScope, siteByServer map[string]*uint, hasGlobal bool) []database.AlertRule {
 	out := make([]database.AlertRule, 0, len(all))
 	for _, rule := range all {
 		site, bound := ruleSiteID(rule, siteByServer)
 		if !bound {
-			// Regra de parque inteiro ("*" sem unidade) não pertence a filial
-			// nenhuma, e por isso só se mostra a quem tem concessão global.
 			if hasGlobal {
 				out = append(out, rule)
 			}
@@ -77,7 +64,6 @@ func visibleRules(all []database.AlertRule, scope siteScope, siteByServer map[st
 	return out
 }
 
-// serverSites mapeia servidor para unidade, para resolver o alvo das regras.
 func serverSites() (map[string]*uint, error) {
 	var servers []database.Server
 	if err := database.DB.Model(&database.Server{}).Select("id", "site_id").Find(&servers).Error; err != nil {
@@ -90,8 +76,6 @@ func serverSites() (map[string]*uint, error) {
 	return out, nil
 }
 
-// AlertRulesHandler faz o CRUD de AlertRule.
-// GET lista, POST cria, DELETE remove (?id=), PUT/PATCH alterna enabled (?id=).
 func AlertRulesHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -142,7 +126,6 @@ func AlertRulesHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "severidade inválida: use info, warning, high ou critical")
 			return
 		}
-		// Regra que depende dela mesma nunca dispararia.
 		if req.DependsOnServerID != nil && *req.DependsOnServerID == req.Target {
 			writeError(w, http.StatusBadRequest, "a regra não pode depender do próprio alvo")
 			return
@@ -151,8 +134,6 @@ func AlertRulesHandler(w http.ResponseWriter, r *http.Request) {
 			req.Target = "*"
 		}
 		if req.TargetSiteID != nil {
-			// Os dois alvos juntos deixariam o disparo ambíguo: valeria a
-			// unidade ou o servidor?
 			if req.Target != "*" {
 				writeError(w, http.StatusBadRequest, "informe alvo por unidade OU por servidor, não os dois")
 				return
@@ -168,8 +149,6 @@ func AlertRulesHandler(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "unidade inexistente")
 				return
 			}
-			// Target fica "*" para o campo não guardar um alvo concorrente; a
-			// expansão real acontece em rules.resolveTargets.
 			req.Target = "*"
 		}
 		if req.ForDurationSec < 0 {
@@ -240,20 +219,13 @@ func AlertRulesHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "id é obrigatório")
 			return
 		}
-		// O nome sai antes do DELETE; depois dele restaria só o id numérico.
 		var doomed database.AlertRule
 		found := database.DB.Where("id = ?", id).First(&doomed).Error == nil
 
-		if err := database.DB.Where("id = ?", id).Delete(&database.AlertRule{}).Error; err != nil {
+		if err := removerRegra(id); err != nil {
 			log.Printf("[Rules] erro ao remover regra %s: %v", id, err)
 			writeError(w, http.StatusInternalServerError, "falha ao remover regra")
 			return
-		}
-		// O estado da regra some junto. Sem isso, alert_states acumula linha de
-		// regra que não existe mais, e uma regra nova que reaproveitasse o id
-		// herdaria a contagem de duração da antiga.
-		if err := database.DB.Where("rule_id = ?", id).Delete(&database.AlertState{}).Error; err != nil {
-			log.Printf("[Rules] estado da regra %s não foi limpo: %v", id, err)
 		}
 
 		if found {
@@ -263,21 +235,20 @@ func AlertRulesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// auditRuleTarget nomeia a regra e resolve a unidade dela para a auditoria.
-//
-// A unidade de uma regra por servidor não está na própria regra: AlertRule.Target
-// guarda um uuid, e a unidade mora na tabela de servidores. Vale a consulta
-// extra — escrita de regra é ação rara de administrador, e uma auditoria que
-// grava unidade nula em todas as regras por servidor não é recortável justamente
-// para quem administra uma filial.
+func removerRegra(id string) error {
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("id = ?", id).Delete(&database.AlertRule{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("rule_id = ?", id).Delete(&database.AlertState{}).Error
+	})
+}
+
 func auditRuleTarget(r *http.Request, rule database.AlertRule) {
 	auditTarget(r, "alert-rule",
 		strconv.FormatUint(uint64(rule.ID), 10), rule.Name, ruleAuditSite(rule))
 }
 
-// ruleAuditSite devolve a unidade da regra, ou nil quando ela vale para o parque
-// inteiro — ou quando o servidor alvo já não existe, caso em que a regra ficou
-// sem dono e não pode ser atribuída a filial nenhuma.
 func ruleAuditSite(rule database.AlertRule) *uint {
 	if rule.TargetSiteID != nil {
 		return rule.TargetSiteID

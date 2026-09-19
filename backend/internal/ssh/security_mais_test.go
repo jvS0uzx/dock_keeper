@@ -33,9 +33,6 @@ udp   UNCONN 0      0      0.0.0.0:53    0.0.0.0:*    users:(("dnsmasq",pid=9,fd
 	}
 	mu.Unlock()
 
-	// A linha truncada tem menos de cinco campos e cai fora; as outras duas
-	// entram, cada uma com o processo extraído. (Ruído com cinco ou mais
-	// campos passa: em produção o filtro é o grep LISTEN do lado remoto.)
 	if len(ports) != 2 {
 		t.Fatalf("portas = %d, esperado 2: %+v", len(ports), ports)
 	}

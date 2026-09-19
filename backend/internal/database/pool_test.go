@@ -1,14 +1,11 @@
 package database
 
 import (
+	"github.com/jvS0uzx/dock_keeper/internal/config"
 	"testing"
 	"time"
 )
 
-// O achado E1: sem teto configurado o database/sql abre conexão sem limite e as
-// goroutines de coleta somadas aos handlers estouram o max_connections do
-// Postgres. O teto precisa vir do ambiente, e valor inválido não pode desligar
-// o limite em silêncio.
 func TestEnvIntUsaOPadraoQuandoOValorNaoServe(t *testing.T) {
 	casos := []struct {
 		nome     string
@@ -29,8 +26,8 @@ func TestEnvIntUsaOPadraoQuandoOValorNaoServe(t *testing.T) {
 			if c.definido {
 				t.Setenv("DB_MAX_OPEN_CONNS", c.valor)
 			}
-			if got := envInt("DB_MAX_OPEN_CONNS", defaultMaxOpenConns); got != c.esperado {
-				t.Errorf("envInt(%q) = %d, esperado %d", c.valor, got, c.esperado)
+			if got := config.Inteiro("DB_MAX_OPEN_CONNS", defaultMaxOpenConns); got != c.esperado {
+				t.Errorf("config.Inteiro(%q) = %d, esperado %d", c.valor, got, c.esperado)
 			}
 		})
 	}
@@ -55,15 +52,13 @@ func TestEnvDurationUsaOPadraoQuandoOValorNaoServe(t *testing.T) {
 			if c.definido {
 				t.Setenv("DB_CONN_MAX_LIFETIME", c.valor)
 			}
-			if got := envDuration("DB_CONN_MAX_LIFETIME", defaultConnMaxLifetime); got != c.esperado {
-				t.Errorf("envDuration(%q) = %s, esperado %s", c.valor, got, c.esperado)
+			if got := config.Duracao("DB_CONN_MAX_LIFETIME", defaultConnMaxLifetime); got != c.esperado {
+				t.Errorf("config.Duracao(%q) = %s, esperado %s", c.valor, got, c.esperado)
 			}
 		})
 	}
 }
 
-// O padrão precisa caber no max_connections=100 de uma instalação limpa, com
-// folga para uma segunda réplica do painel.
 func TestPadraoDoPoolCabeNumaInstalacaoLimpa(t *testing.T) {
 	if defaultMaxOpenConns*2 >= 100 {
 		t.Errorf("duas réplicas com %d conexões cada não cabem em max_connections=100", defaultMaxOpenConns)

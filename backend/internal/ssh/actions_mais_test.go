@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// O "--" no comando é a segunda camada da defesa do S9: mesmo que a regex de
-// nome afrouxe um dia, o docker deixa de ler o nome como flag.
 func TestRunContainerActionMontaComandoComSeparador(t *testing.T) {
 	var mu sync.Mutex
 	var comando string
@@ -45,7 +43,6 @@ func TestRunContainerActionPropagaFalhaRemota(t *testing.T) {
 	if !strings.Contains(err.Error(), "docker stop falhou") {
 		t.Errorf("erro sem contexto da ação: %v", err)
 	}
-	// A saída volta mesmo no erro: é o que o operador lê para entender a falha.
 	if !strings.Contains(out, "Error response") {
 		t.Errorf("saída do erro perdida: %q", out)
 	}

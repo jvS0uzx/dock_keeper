@@ -8,11 +8,9 @@ import (
 	"time"
 
 	"github.com/jvS0uzx/dock_keeper/internal/alert"
+	"github.com/jvS0uzx/dock_keeper/internal/observabilidade"
+	"github.com/jvS0uzx/dock_keeper/internal/safego"
 )
-
-// Pausa antes de reabrir a sessão SSH. Sem ela um retorno sem erro vira loop
-// apertado de reconexão.
-const reconnectDelay = 5 * time.Second
 
 type ServerManager struct {
 	mu          sync.Mutex
@@ -23,7 +21,6 @@ var Manager = &ServerManager{
 	cancelFuncs: make(map[string]context.CancelFunc),
 }
 
-// Start liga os streams de coleta do alvo, se ainda não estiverem rodando.
 func (m *ServerManager) Start(t Target) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -36,17 +33,25 @@ func (m *ServerManager) Start(t Target) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancelFuncs[t.ID] = cancel
 
-	go supervise(ctx, "metricas", t, StartStream, func(err error) {
-		alert.Notify("host_unreachable:"+t.ID,
-			fmt.Sprintf("[CRITICO] VPS %s (%s) inalcançável: %v", t.Name, t.Host, err))
+	safego.Run(ctx, "ssh:metricas:"+t.Host, func(ctx context.Context) {
+		supervise(ctx, "metricas", t, StartStream, func(err error) {
+			alert.Notify("host_unreachable:"+t.ID,
+				fmt.Sprintf("[CRITICO] VPS %s (%s) inalcançável: %v", t.Name, t.Host, err))
+		})
 	})
 
 	if t.CollectNginx {
-		go supervise(ctx, "nginx", t, StartNginxStream, nil)
+		safego.Run(ctx, "ssh:nginx:"+t.Host, func(ctx context.Context) {
+			supervise(ctx, "nginx", t, StartNginxStream, nginxDownAlert(t))
+		})
+	}
+	if authWatchEnabled() {
+		safego.Run(ctx, "ssh:authlog:"+t.Host, func(ctx context.Context) {
+			supervise(ctx, "authlog", t, StartAuthWatch, nil)
+		})
 	}
 }
 
-// Stop derruba os streams do servidor e esquece o alvo.
 func (m *ServerManager) Stop(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -55,9 +60,9 @@ func (m *ServerManager) Stop(id string) {
 		cancel()
 		delete(m.cancelFuncs, id)
 	}
+	forgetRTT(id)
 }
 
-// StopAll derruba todos os streams — usado no encerramento do processo.
 func (m *ServerManager) StopAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -65,15 +70,19 @@ func (m *ServerManager) StopAll() {
 	for id, cancel := range m.cancelFuncs {
 		cancel()
 		delete(m.cancelFuncs, id)
+		forgetRTT(id)
 	}
 }
 
-// supervise mantém um stream vivo: reabre a sessão sempre que ela cai, até o
-// contexto ser cancelado. onError roda apenas quando a queda foi por erro.
 func supervise(ctx context.Context, label string, t Target, run func(context.Context, Target) error, onError func(error)) {
+	wait := newBackoff(reconnectMax(), jitter)
 	for {
-		if err := run(ctx, t); err != nil && ctx.Err() == nil {
-			log.Printf("[RealTime] stream %s de %s caiu: %v. Reconectando em %s...", label, t.Host, err, reconnectDelay)
+		started := time.Now()
+		err := run(ctx, t)
+		delay := wait.next(time.Since(started))
+		if err != nil && ctx.Err() == nil {
+			observabilidade.ReconexoesSSH.Add(1)
+			log.Printf("[RealTime] stream %s de %s caiu: %v. Reconectando em %s...", label, t.Host, err, delay.Round(time.Second))
 			if onError != nil {
 				onError(err)
 			}
@@ -83,7 +92,7 @@ func supervise(ctx context.Context, label string, t Target, run func(context.Con
 		case <-ctx.Done():
 			log.Printf("[RealTime] parando stream %s de %s", label, t.Host)
 			return
-		case <-time.After(reconnectDelay):
+		case <-time.After(delay):
 		}
 	}
 }

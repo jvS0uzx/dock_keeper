@@ -6,8 +6,6 @@ import LoginView from './LoginView';
 import { loadSession } from '../lib/session';
 import type { SessionInfo } from '../lib/session';
 
-// api é mockado inteiro: a tela de login é a única porta de entrada do painel e
-// precisa ser testável sem backend no ar.
 vi.mock('../lib/api', () => ({
   api: { login: vi.fn() },
 }));
@@ -32,9 +30,6 @@ const preencherEEnviar = async (usuario: string, senha: string) => {
 };
 
 describe('LoginView', () => {
-  // Credencial aceita precisa fazer duas coisas, e as duas importam: avisar o
-  // App (senão a tela de login continua na frente) e persistir a sessão (senão
-  // recarregar a página derruba o usuário de volta para cá).
   it('credencial aceita persiste a sessão e avisa o App', async () => {
     vi.mocked(api.login).mockResolvedValue(sessaoValida);
     const onLogin = vi.fn();
@@ -47,9 +42,6 @@ describe('LoginView', () => {
     expect(loadSession()?.token).toBe('token-de-teste');
   });
 
-  // O backend responde {"error": "..."} e a tela precisa mostrar ESSA mensagem.
-  // Engolir o motivo real deixa o usuário sem saber se errou a senha ou se a
-  // conta está desativada, e o suporte sem saber o que perguntar.
   it('credencial recusada mostra a mensagem que a API devolveu', async () => {
     vi.mocked(api.login).mockRejectedValue(new Error('{"error":"usuário ou senha inválidos"}'));
     const onLogin = vi.fn();
@@ -60,13 +52,9 @@ describe('LoginView', () => {
     const aviso = await screen.findByRole('alert');
     expect(aviso.textContent).toBe('usuário ou senha inválidos');
     expect(onLogin).not.toHaveBeenCalled();
-    // Sessão recusada não pode ficar guardada: o App leria o storage no próximo
-    // carregamento e entraria com uma credencial que o backend já negou.
     expect(loadSession()).toBeNull();
   });
 
-  // Backend fora do ar produz "Failed to fetch", que não é JSON. Repassar isso
-  // cru manda o usuário procurar erro de senha onde o problema é rede.
   it('backend fora do ar produz mensagem sobre a API, não sobre a senha', async () => {
     vi.mocked(api.login).mockRejectedValue(new Error('Failed to fetch'));
 
@@ -77,15 +65,10 @@ describe('LoginView', () => {
     expect(aviso.textContent).toContain('API');
   });
 
-  // O botão fica travado enquanto falta campo. Sem isso o formulário dispara uma
-  // requisição vazia, que o backend recusa — e cada tentativa dessas gasta um
-  // bcrypt e conta no limite de tentativa por IP.
   it('o botão fica desabilitado enquanto usuário ou senha estiverem vazios', async () => {
     const user = userEvent.setup();
     render(<LoginView onLogin={vi.fn()} />);
 
-    // A propriedade do DOM, e não um matcher de jest-dom: uma dependência a
-    // menos para uma asserção que não fica mais legível com ela.
     const botao = screen.getByRole('button', { name: /entrar/i }) as HTMLButtonElement;
     expect(botao.disabled).toBe(true);
 
@@ -96,9 +79,6 @@ describe('LoginView', () => {
     expect(botao.disabled).toBe(false);
   });
 
-  // O aviso de sessão expirada vem do App quando o backend responde 401 numa
-  // sessão que existia. Se ele não aparecer, o usuário é jogado no login sem
-  // explicação e acha que perdeu a senha.
   it('exibe o aviso recebido do App', () => {
     render(<LoginView onLogin={vi.fn()} notice="Sessão expirada. Entre novamente." />);
     expect(screen.getByText('Sessão expirada. Entre novamente.')).toBeTruthy();

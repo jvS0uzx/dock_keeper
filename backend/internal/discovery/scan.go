@@ -1,9 +1,3 @@
-// Package discovery inventaria os hosts ativos de uma rede local.
-//
-// A varredura é um TCP connect scan: para cada IP da faixa tenta abrir conexão
-// numa lista curta de portas comuns. Quem aceita (ou recusa explicitamente com
-// RST) está ligado. Não usa ICMP nem ARP cru porque os dois exigem socket raw,
-// ou seja, root — e o painel não precisa disso para inventariar.
 package discovery
 
 import (
@@ -15,28 +9,15 @@ import (
 	"time"
 )
 
-// Portas sondadas por host. Lista curta de propósito: cobre estação Windows
-// (445/3389), Linux (22), impressora (515/631/9100), NAS (5000) e o próprio
-// painel.
-//
-// Precisa conter TODA porta que fingerprint.go usa para classificar. Ela não
-// continha 515, 631 nem 5000, então a varredura local nunca sondava o que a
-// própria tabela de classificação consultava: impressora que só publica 631
-// caía como "web-device", e NAS como estação Windows por causa do 445. O
-// coletor remoto já sondava as doze — a divergência aparecia como o mesmo
-// equipamento mudando de tipo conforme quem o encontrasse.
 var DefaultPorts = []int{22, 80, 135, 139, 443, 445, 515, 631, 3389, 5000, 8080, 9100}
 
 const (
 	DefaultTimeout     = 400 * time.Millisecond
 	DefaultConcurrency = 256
 
-	// Uma faixa maior que /16 são 65 mil hosts: varredura longa demais para o
-	// caso de uso (uma seção da rede) e provavelmente erro de digitação.
 	minPrefixLen = 16
 )
 
-// Host é um endereço que respondeu à varredura.
 type Host struct {
 	IP        string
 	Hostname  string
@@ -44,7 +25,6 @@ type Host struct {
 	OpenPorts []int
 }
 
-// Config parametriza uma varredura.
 type Config struct {
 	CIDRs       []string
 	Ports       []int
@@ -65,11 +45,6 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-// ExpandCIDR devolve os endereços utilizáveis da faixa.
-//
-// Só aceita faixa privada (RFC1918 / CGNAT / link-local): este recurso existe
-// para inventariar a rede da própria seção, e recusar endereço público impede
-// que o painel seja apontado para redes de terceiros.
 func ExpandCIDR(cidr string) ([]string, error) {
 	ip, network, err := net.ParseCIDR(cidr)
 	if err != nil {
@@ -92,8 +67,6 @@ func ExpandCIDR(cidr string) ([]string, error) {
 		ips = append(ips, addr.String())
 	}
 
-	// Em /31 e /32 todo endereço é utilizável; nas demais o primeiro é a rede
-	// e o último é broadcast.
 	if ones < bits-1 && len(ips) > 2 {
 		ips = ips[1 : len(ips)-1]
 	}
@@ -104,7 +77,6 @@ func isPrivate(ip net.IP) bool {
 	return ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLoopback()
 }
 
-// nextIP devolve uma cópia do endereço seguinte, sem alterar o original.
 func nextIP(ip net.IP) net.IP {
 	next := make(net.IP, len(ip))
 	copy(next, ip)
@@ -117,8 +89,6 @@ func nextIP(ip net.IP) net.IP {
 	return next
 }
 
-// Scan varre todas as faixas e devolve os hosts que responderam, ordenados por
-// endereço. Uma faixa inválida não aborta a varredura das outras.
 func Scan(ctx context.Context, cfg Config) ([]Host, []error) {
 	cfg = cfg.withDefaults()
 
@@ -168,9 +138,6 @@ func Scan(ctx context.Context, cfg Config) ([]Host, []error) {
 	}
 	wg.Wait()
 
-	// A tabela ARP é lida depois: foram as conexões TCP desta varredura que a
-	// preencheram. Lendo antes, o MAC de um host novo só apareceria no ciclo
-	// seguinte.
 	arp := arpTable()
 	for i := range found {
 		found[i].MAC = arp[found[i].IP]
@@ -180,7 +147,6 @@ func Scan(ctx context.Context, cfg Config) ([]Host, []error) {
 	return found, errs
 }
 
-// probe testa as portas do host e devolve as que aceitaram conexão.
 func probe(ctx context.Context, ip string, ports []int, timeout time.Duration) []int {
 	var open []int
 	dialer := net.Dialer{Timeout: timeout}
@@ -199,8 +165,6 @@ func probe(ctx context.Context, ip string, ports []int, timeout time.Duration) [
 	return open
 }
 
-// reverseDNS resolve o nome do host, com prazo curto: numa rede sem DNS
-// reverso cada consulta esperaria o timeout inteiro do resolver.
 func reverseDNS(ctx context.Context, ip string) string {
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()

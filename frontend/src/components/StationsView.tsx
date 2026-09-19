@@ -1,19 +1,18 @@
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Search, Thermometer, Cpu, MemoryStick, User, RefreshCw } from 'lucide-react';
 import { api, type ServerLiveStat } from '../lib/api';
-import { formatGB } from '../lib/format';
+import { formatGB, formatPercent } from '../lib/format';
 import { NO_TEMPERATURE, NO_TEMPERATURE_HINT, formatTemperature, isAbove } from '../lib/metrics';
 import { useSiteScope } from './ui/site-scope-context';
 import { useNavigation } from './ui/navigation-context';
 
 const POLL_MS = 10000;
 
-// Limiares de temperatura de CPU para estação de escritório. Acima de 85 °C a
-// máquina já reduz clock; acima de 70 °C costuma indicar ventilação obstruída.
 const TEMP_WARN = 70;
 const TEMP_CRITICAL = 85;
 
-// Percentual a partir do qual CPU ou memória merecem atenção do suporte.
 const USAGE_WARN = 75;
 const USAGE_CRITICAL = 90;
 
@@ -38,35 +37,34 @@ const formatUptime = (seconds: number) => {
   return `${Math.floor(seconds / 60)}min`;
 };
 
-const StatCard = ({ label, value, accent }: { label: string; value: string | number; accent: string }) => (
+const StatCard = ({ label, value, accent, testId }: { label: string; value: string | number; accent: string; testId?: string }) => (
   <div className="stat-card">
-    <div className={`stat-value ${accent}`}>{value}</div>
+    <div className={`stat-value ${accent}`} data-testid={testId}>{value}</div>
     <div className="eyebrow mt-1.5">{label}</div>
   </div>
 );
 
 const StationsView = () => {
-  // A unidade agora é escolhida uma vez na barra lateral e vale para todas as
-  // telas; antes cada uma tinha o próprio filtro e o operador reescolhia.
   const { numericSiteId, siteName } = useSiteScope();
   const { openMachine } = useNavigation();
 
   const [stations, setStations] = useState<ServerLiveStat[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
 
   const fetchData = useCallback(async (signal?: AbortSignal) => {
     try {
       const data = await api.liveMetrics(signal);
-      // Estação é o que reporta por agente; VPS coletada por SSH fica no
-      // painel de infraestrutura.
       setStations(data.servers.filter(s => s.kind === 'agent'));
+      cargaOk();
     } catch (err) {
-      if (!signal?.aborted) console.error(err);
+      if (!signal?.aborted) cargaFail(err, 'Falha ao ler as estações.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cargaOk, cargaFail]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -92,22 +90,19 @@ const StationsView = () => {
     });
   }, [stations, search, numericSiteId]);
 
-  // Os cartões contam dentro do escopo: no painel de uma filial, o número
-  // precisa ser o daquela filial.
   const inScope = useMemo(
     () => stations.filter(s => numericSiteId === null || s.site_id === numericSiteId),
     [stations, numericSiteId],
   );
   const online = inScope.filter(s => s.online).length;
-  // Estação sem sensor não entra na conta: ausência de leitura não é máquina
-  // fria, e tratá-la como zero mascararia o parque que ninguém está medindo.
   const hot = inScope.filter(s => isAbove(s.temperature_c, TEMP_WARN)).length;
   const pressured = inScope.filter(
-    s => s.online && (s.cpu >= USAGE_WARN || (s.mem_total > 0 && (s.mem_used / s.mem_total) * 100 >= USAGE_WARN)),
+    s => s.online && ((s.cpu !== null && s.cpu >= USAGE_WARN) || (s.mem_total > 0 && (s.mem_used / s.mem_total) * 100 >= USAGE_WARN)),
   ).length;
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden anim-rise">
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
       <div className="page-header">
         <div>
           <h1 className="page-title">Estações</h1>
@@ -120,7 +115,7 @@ const StationsView = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 stagger">
         <StatCard label="Estações" value={inScope.length} accent="" />
         <StatCard label="Online" value={online} accent="text-ok" />
-        <StatCard label="CPU ou RAM alta" value={pressured} accent={pressured > 0 ? 'text-warn' : 'text-text-faint'} />
+        <StatCard label="CPU ou RAM alta" value={pressured} accent={pressured > 0 ? 'text-warn' : 'text-text-faint'} testId="estacoes-pressionadas" />
         <StatCard label="Temperatura alta" value={hot} accent={hot > 0 ? 'text-crit' : 'text-text-faint'} />
       </div>
 
@@ -158,7 +153,7 @@ const StationsView = () => {
               {loading && (
                 <tr><td colSpan={10} className="py-8 text-center text-text-faint">Carregando...</td></tr>
               )}
-              {!loading && filtered.length === 0 && (
+              {!loading && filtered.length === 0 && !(carga.error && !carga.lastOk) && (
                 <tr>
                   <td colSpan={10} className="py-8 text-center text-text-faint">
                     Nenhuma estação com agente. Instale o <code className="mono-data text-warn">cmd/agent</code> nas máquinas.
@@ -190,8 +185,11 @@ const StationsView = () => {
                         </span>
                       ) : <span className="text-text-faint">—</span>}
                     </td>
-                    <td className={`text-right mono-data font-medium ${s.online ? usageColor(s.cpu) : 'text-text-faint'}`}>
-                      {s.online ? `${s.cpu.toFixed(0)}%` : '—'}
+                    <td
+                      data-testid="cpu-estacao"
+                      className={`text-right mono-data font-medium ${s.online && s.cpu !== null ? usageColor(s.cpu) : 'text-text-faint'}`}
+                    >
+                      {s.online ? formatPercent(s.cpu) : '—'}
                     </td>
                     <td className="text-right">
                       {s.online && s.mem_total > 0 ? (

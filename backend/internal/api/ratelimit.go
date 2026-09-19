@@ -4,36 +4,22 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jvS0uzx/dock_keeper/internal/config"
 )
 
-// Padrões do limite de login, aplicados quando o ambiente não diz outra coisa.
-//
-// Os dois eixos existem por motivos diferentes e nenhum substitui o outro: o
-// teto por nome contém a força bruta concentrada numa conta, vinda de muitos
-// endereços; o teto por endereço contém a varredura que troca de nome a cada
-// tentativa e, principalmente, impede que a rota vire negação de serviço — cada
-// tentativa custa um bcrypt, e sem teto o atacante compra CPU do servidor de
-// graça.
-//
-// O teto por endereço é folgado de propósito: um escritório inteiro sai por um
-// único IP público, e trancar a rota para todo mundo por causa de um vizinho
-// distraído é pior que o ataque que o número previne.
 const (
 	defaultLoginWindow     = 15 * time.Minute
 	defaultLoginMaxPerIP   = 30
 	defaultLoginMaxPerUser = 8
+	defaultLoginMaxKeys    = 10000
 )
 
-// loginLimiter conta tentativas falhas de login numa janela deslizante.
-//
-// Mora em memória, como o ticketStore e as sessões: reiniciar o painel zera a
-// contagem. Aceitável porque o alvo é encarecer a tentativa às cegas, não
-// manter um histórico — e evita mais uma tabela quente.
 type loginLimiter struct {
 	mu       sync.Mutex
 	failures map[string][]time.Time
@@ -41,8 +27,8 @@ type loginLimiter struct {
 	window  time.Duration
 	maxIP   int
 	maxUser int
+	maxKeys int
 
-	// now é injetável para o teste de janela não depender do relógio de parede.
 	now func() time.Time
 }
 
@@ -52,39 +38,24 @@ func newLoginLimiter(window time.Duration, maxIP, maxUser int) *loginLimiter {
 		window:   window,
 		maxIP:    maxIP,
 		maxUser:  maxUser,
+		maxKeys:  config.Inteiro("LOGIN_RATE_MAX_KEYS", defaultLoginMaxKeys),
 		now:      time.Now,
 	}
 }
 
-// As chaves dos dois eixos dividem o mesmo mapa; o prefixo evita que um usuário
-// chamado "10.0.0.1" consuma a cota do endereço de mesmo nome.
 func ipKey(ip string) string     { return "ip:" + ip }
 func userKey(name string) string { return "user:" + normalizeUsername(name) }
 
-// normalizeUsername repete o tratamento que auth.Login dá ao nome. Sem isso
-// bastaria alternar maiúsculas a cada tentativa para nunca cair no mesmo balde.
 func normalizeUsername(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
-// allowed diz se a tentativa pode custar um bcrypt. Precisa ser chamada antes
-// da conferência de senha, não depois: é ali que está o custo que o limite
-// existe para conter.
-//
-// Não distingue usuário existente de inexistente, porque conta apenas falhas
-// registradas — que os dois casos produzem igualmente. Um nome nunca cadastrado
-// e um nome cadastrado com senha errada chegam ao mesmo 429 no mesmo momento.
 func (l *loginLimiter) allowed(ip, username string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.countLocked(ipKey(ip)) < l.maxIP && l.countLocked(userKey(username)) < l.maxUser
 }
 
-// fail registra a tentativa malsucedida nos dois eixos.
-//
-// O aviso sai no instante em que o teto é atingido, e só nele: registrar cada
-// recusa seguinte daria ao atacante um jeito de encher o disco de log de graça.
-// Como allowed recusa a partir do teto, a contagem nunca o ultrapassa.
 func (l *loginLimiter) fail(ip, username string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -99,22 +70,54 @@ func (l *loginLimiter) fail(ip, username string) {
 		log.Printf("[Auth] a conta %q atingiu o teto de %d tentativas de login na janela",
 			normalizeUsername(username), l.maxUser)
 	}
+
+	l.podarLocked()
 }
 
-// succeed libera a conta que acabou de autenticar, e só ela.
-//
-// A contagem do endereço fica de pé: zerá-la no acerto daria a quem tem uma
-// credencial válida qualquer um jeito de renovar a cota de tentativas contra as
-// outras contas, bastando intercalar o próprio login.
+func (l *loginLimiter) podarLocked() {
+	if l.maxKeys <= 0 || len(l.failures) <= l.maxKeys {
+		return
+	}
+
+	cutoff := l.now().Add(-l.window)
+	for chave, marcas := range l.failures {
+		if len(marcas) == 0 || !marcas[len(marcas)-1].After(cutoff) {
+			delete(l.failures, chave)
+		}
+	}
+	if len(l.failures) <= l.maxKeys {
+		return
+	}
+
+	type candidata struct {
+		chave  string
+		falhas int
+		ultima time.Time
+	}
+	restantes := make([]candidata, 0, len(l.failures))
+	for chave, marcas := range l.failures {
+		restantes = append(restantes, candidata{chave, len(marcas), marcas[len(marcas)-1]})
+	}
+	sort.Slice(restantes, func(i, j int) bool {
+		if restantes[i].falhas != restantes[j].falhas {
+			return restantes[i].falhas < restantes[j].falhas
+		}
+		return restantes[i].ultima.Before(restantes[j].ultima)
+	})
+
+	excedente := len(l.failures) - l.maxKeys
+	for _, c := range restantes[:excedente] {
+		delete(l.failures, c.chave)
+	}
+	log.Printf("[Auth] limitador de login podado: %d chaves descartadas, teto de %d", excedente, l.maxKeys)
+}
+
 func (l *loginLimiter) succeed(username string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.failures, userKey(username))
 }
 
-// countLocked devolve quantas falhas da chave ainda estão dentro da janela e,
-// de passagem, descarta as vencidas. É o que dispensa uma rotina de limpeza:
-// chave que envelheceu some na primeira consulta seguinte.
 func (l *loginLimiter) countLocked(key string) int {
 	cutoff := l.now().Add(-l.window)
 	kept := l.failures[key][:0]
@@ -131,13 +134,6 @@ func (l *loginLimiter) countLocked(key string) int {
 	return len(kept)
 }
 
-// clientIP resolve o endereço de origem da requisição.
-//
-// Cabeçalho de proxy só é lido quando o operador declara que existe proxy à
-// frente: sem essa declaração o cabeçalho vem do próprio cliente, e trocá-lo a
-// cada tentativa contornaria o limite inteiro. Declarado o proxy, vale a última
-// entrada de X-Forwarded-For — é a que o proxy da borda acrescentou, a única da
-// lista que o cliente não escolheu.
 func clientIP(r *http.Request, trustProxy bool) string {
 	if trustProxy {
 		if v := strings.TrimSpace(r.Header.Get("X-Real-IP")); v != "" {
@@ -155,18 +151,73 @@ func clientIP(r *http.Request, trustProxy bool) string {
 	return r.RemoteAddr
 }
 
-func envDuration(key string, def time.Duration) time.Duration {
-	d, err := time.ParseDuration(strings.TrimSpace(os.Getenv(key)))
-	if err != nil || d <= 0 {
-		return def
-	}
-	return d
+const (
+	defaultIngestWindow = time.Minute
+	defaultIngestMax    = 120
+	defaultEnrollMax    = 10
+)
+
+var ingestLimiter = newLoginLimiter(defaultIngestWindow, defaultIngestMax, defaultIngestMax)
+
+func janelaDeIngestao() time.Duration {
+	return config.Duracao("INGEST_RATE_WINDOW", defaultIngestWindow)
 }
 
-func envInt(key string, def int) int {
-	n, err := strconv.Atoi(strings.TrimSpace(os.Getenv(key)))
-	if err != nil || n <= 0 {
-		return def
+func tetoDeIngestao() int {
+	return config.Inteiro("INGEST_RATE_MAX", defaultIngestMax)
+}
+
+func tetoDeEnroll() int {
+	return config.Inteiro("INGEST_RATE_MAX_ENROLL", defaultEnrollMax)
+}
+
+func (l *loginLimiter) usar(chave string, teto int, janela time.Duration) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	agora := l.now()
+	corte := agora.Add(-janela)
+	marcas := l.failures[chave][:0]
+	for _, m := range l.failures[chave] {
+		if m.After(corte) {
+			marcas = append(marcas, m)
+		}
 	}
-	return n
+	l.failures[chave] = marcas
+
+	if len(marcas) >= teto {
+		espera := marcas[0].Add(janela).Sub(agora)
+		if espera < time.Second {
+			espera = time.Second
+		}
+		return false, espera
+	}
+
+	l.failures[chave] = append(marcas, agora)
+	l.podarLocked()
+	return true, 0
+}
+
+func chaveDeIngestao(r *http.Request, cred deviceAuth) string {
+	if cred.DeviceID != "" {
+		return "ingest:" + cred.DeviceID
+	}
+	return "ingest-ip:" + clientIP(r, config.Booleano("TRUST_PROXY_HEADERS", false))
+}
+
+func limitarTaxa(w http.ResponseWriter, chave string, teto int) bool {
+	permitido, espera := ingestLimiter.usar(chave, teto, janelaDeIngestao())
+	if permitido {
+		return true
+	}
+
+	w.Header().Set("Retry-After", strconv.Itoa(int(espera.Seconds()+0.999)))
+	writeError(w, http.StatusTooManyRequests, "limite de envios atingido; tente de novo depois da janela")
+	return false
+}
+
+func zerarLimiteDeIngestao() {
+	ingestLimiter.mu.Lock()
+	defer ingestLimiter.mu.Unlock()
+	clear(ingestLimiter.failures)
 }

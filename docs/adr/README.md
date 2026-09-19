@@ -14,3 +14,7 @@ que costuma sumir quando alguém revisita a escolha meses depois.
 | [006](006-auditoria-mora-na-fronteira.md) | A auditoria mora na fronteira, não nos handlers |
 | [007](007-404-em-vez-de-403.md) | Recurso fora do alcance responde 404, não 403 |
 | [008](008-sse-em-vez-de-websocket.md) | SSE em vez de WebSocket, com ticket de uso único |
+| [009](009-token-compartilhado-desligado-por-padrao.md) | O token compartilhado de ingestão vem desligado |
+| [010](010-dashboards-relacionais-com-dono.md) | Dashboards relacionais, com dono e recorte na leitura |
+| [011](011-alerta-em-fila-persistida.md) | O alerta vira linha no banco antes de virar mensagem |
+| [012](012-migracoes-versionadas-em-sql.md) | Esquema por migração versionada, não por AutoMigrate |

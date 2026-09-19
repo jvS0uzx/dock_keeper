@@ -1,4 +1,7 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { apiErrorMessage } from '../lib/api';
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Plus, Search, ShieldCheck, ShieldAlert, AlertTriangle, RefreshCw, Trash2, Globe, Clock, Download } from 'lucide-react';
 import { api, type DiscoveredDomain, type DomainRecord as DomainItem } from '../lib/api';
 import { relativeTime } from '../lib/format';
@@ -14,9 +17,6 @@ const statusOf = (d: DomainItem): Status => {
   return 'valid';
 };
 
-// Rótulos dos motivos que o backend classifica em internal/network/ssl.go. O
-// backend manda o código estável; o texto vive aqui, para ser reescrito sem
-// mexer na comparação que outro código faz.
 const INVALID_REASON_LABELS: Record<string, string> = {
   expirado: 'Expirado',
   ainda_nao_valido: 'Ainda não válido',
@@ -28,14 +28,11 @@ const INVALID_REASON_LABELS: Record<string, string> = {
   alvo_privado_bloqueado: 'Alvo privado bloqueado',
 };
 
-// Domínio verificado antes de a coluna invalid_reason existir não tem motivo
-// classificado, e continuar mostrando só "Falha" é melhor que inventar um.
 const invalidReasonLabel = (reason: string): string =>
   INVALID_REASON_LABELS[reason] ?? 'Inválido';
 
 const invalidReasonOf = (d: DomainItem): string => d.invalid_reason ?? '';
 
-// Janela que o backend leva para refazer os handshakes antes de persistir.
 const RECHECK_SETTLE_MS = 2500;
 
 const SslView = () => {
@@ -45,31 +42,35 @@ const SslView = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [domains, setDomains] = useState<DomainItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
+  const descoberta = useLoadStatus();
+  const { ok: descobertaOk, fail: descobertaFail } = descoberta;
   const [busy, setBusy] = useState<Record<number, boolean>>({});
   const [checkingAll, setCheckingAll] = useState(false);
-  // Domínios que o Nginx atendeu e ainda não estão sob monitoramento.
   const [discovered, setDiscovered] = useState<DiscoveredDomain[]>([]);
   const [importing, setImporting] = useState(false);
 
-  const fetchDomains = async () => {
+  const fetchDomains = useCallback(async () => {
     try {
       setDomains(await api.domains());
+      cargaOk();
     } catch (e) {
-      console.error(e);
+      cargaFail(e, 'Falha ao listar os domínios.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [cargaOk, cargaFail]);
 
-  const loadDiscovered = async () => {
+  const loadDiscovered = useCallback(async () => {
     try {
       setDiscovered((await api.discoverDomains()).filter(d => !d.monitored));
+      descobertaOk();
     } catch (e) {
-      console.error(e);
+      descobertaFail(e, 'Falha ao ler os domínios atendidos pelo Nginx.');
     }
-  };
+  }, [descobertaOk, descobertaFail]);
 
-  // Polling ao vivo: reflete o que o worker vai persistindo em background.
   useEffect(() => {
     const pending = timeouts.current;
     fetchDomains();
@@ -80,9 +81,8 @@ const SslView = () => {
       pending.forEach(clearTimeout);
       pending.length = 0;
     };
-  }, []);
+  }, [fetchDomains, loadDiscovered]);
 
-  // Agenda um refetch e mantém o handle para cancelar se a tela desmontar.
   const scheduleRefetch = (delay: number, task: () => void = fetchDomains) => {
     timeouts.current.push(window.setTimeout(task, delay));
   };
@@ -93,7 +93,7 @@ const SslView = () => {
       const updated = await api.recheckDomain(id);
       setDomains(prev => prev.map(d => (d.id === id ? updated : d)));
     } catch (e) {
-      console.error(e);
+      dialog.notify(apiErrorMessage(e, 'Falha ao refazer o handshake.'), 'error');
     } finally {
       setBusy(prev => ({ ...prev, [id]: false }));
     }
@@ -122,7 +122,7 @@ const SslView = () => {
     if (!domainName) return;
     try {
       await api.createDomain(domainName);
-      scheduleRefetch(1500); // backend checa na hora
+      scheduleRefetch(1500);
       dialog.notify(`${domainName} entrou no monitoramento.`, 'success');
     } catch (e) {
       console.error(e);
@@ -160,7 +160,6 @@ const SslView = () => {
     try {
       const { imported } = await api.importDomains(nomes);
       dialog.notify(`${imported} domínio(s) entraram no monitoramento.`, 'success');
-      // O handshake roda em background no backend; dá tempo de aparecer.
       scheduleRefetch(RECHECK_SETTLE_MS);
       await loadDiscovered();
     } catch (e) {
@@ -204,6 +203,8 @@ const SslView = () => {
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden anim-rise">
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
+      <LoadNotice error={descoberta.error} lastOk={descoberta.lastOk} className="mb-4" />
       <div className="page-header flex-col md:flex-row md:items-end items-start">
         <div>
           <h1 className="page-title">SSL &amp; Domínios</h1>
@@ -225,7 +226,6 @@ const SslView = () => {
         )}
       </div>
 
-      {/* Resumo */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 stagger">
         {([
           ['valid', 'Válidos', summary.valid, 'text-ok'],
@@ -286,7 +286,7 @@ const SslView = () => {
               {!loading && filteredDomains.length === 0 && (
                 <tr>
                   <td colSpan={canOperate ? 6 : 5} className="py-8 text-center text-text-faint">
-                    Nenhum domínio monitorado.
+                    {carga.error && !carga.lastOk ? carga.error : 'Nenhum domínio monitorado.'}
                     {discovered.length > 0
                       ? ` O Nginx atendeu ${discovered.length} domínio(s) — use "Importar do Nginx" acima.`
                       : ' Cadastre um domínio ou aguarde o balanceador registrar tráfego.'}
@@ -326,8 +326,6 @@ const SslView = () => {
                             <ShieldAlert size={12} strokeWidth={1.75} />
                             {invalidReasonLabel(invalidReasonOf(domain))}
                           </span>
-                          {/* O badge mostra só o motivo mais grave; error_msg lista
-                              todos quando o certificado tem mais de um problema. */}
                           {domain.error_msg && (
                             <p className="text-crit/70 text-[11px] leading-snug whitespace-normal" title={domain.error_msg}>
                               {domain.error_msg}

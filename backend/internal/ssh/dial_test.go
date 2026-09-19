@@ -12,7 +12,6 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-// knownHostsTemporario escreve um known_hosts válido com uma chave descartável.
 func knownHostsTemporario(t *testing.T) string {
 	t.Helper()
 
@@ -42,7 +41,6 @@ func TestResolveHostKeyCallbackSemKnownHostsRecusa(t *testing.T) {
 		t.Error("callback devolvido junto com erro: o dial passaria mesmo assim")
 	}
 
-	// A mensagem tem de ensinar a sair do erro, não só apontá-lo.
 	for _, trecho := range []string{"SSH_KNOWN_HOSTS", "ssh-keyscan", "SSH_INSECURE_HOST_KEY"} {
 		if !strings.Contains(err.Error(), trecho) {
 			t.Errorf("mensagem não cita %q: %v", trecho, err)

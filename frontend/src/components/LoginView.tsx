@@ -5,14 +5,9 @@ import { saveSession, type SessionInfo } from '../lib/session';
 
 interface LoginViewProps {
   onLogin: (session: SessionInfo) => void;
-  /** Aviso exibido acima do formulário (ex: "Sessão expirada"). */
   notice?: string;
 }
 
-/**
- * Tela de entrada do painel. Só aparece quando não há sessão nem token de
- * ambiente — o backend é quem decide se a credencial vale.
- */
 const LoginView = ({ onLogin, notice }: LoginViewProps) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -30,7 +25,6 @@ const LoginView = ({ onLogin, notice }: LoginViewProps) => {
       saveSession(session);
       onLogin(session);
     } catch (err) {
-      // A API devolve {"error": "..."} — extrai a mensagem sem vazar detalhes.
       const raw = (err as Error).message;
       let message = 'Falha no login. Tente novamente.';
       try {

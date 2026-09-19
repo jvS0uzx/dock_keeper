@@ -11,8 +11,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// senhaDeTeste é procurada literalmente na linha gravada. Precisa ser um valor
-// improvável de aparecer por acaso.
 const senhaDeTeste = "senha-que-nao-pode-vazar-8f3a21"
 
 func setupAuditAPI(t *testing.T) {
@@ -30,25 +28,9 @@ func setupAuditAPI(t *testing.T) {
 	t.Cleanup(func() { limparAuditoria(t) })
 }
 
-// limparAuditoria isola cada teste do anterior.
-//
-// Apaga tudo, menos a família que o teste de retenção de internal/database
-// semeia: os dois binários de teste rodam em paralelo contra o mesmo banco, e um
-// DELETE cego levaria embora as linhas que aquele teste acabou de criar.
-//
-// Uma lista de ações exatas não serve: basta um teste vizinho gravar site.delete
-// para a limpeza deixar passar o que a contagem enxerga.
-// familiasDeOutrosPacotes são os prefixos de ação que a limpeza daqui precisa
-// poupar.
-//
-// Os binários de teste de internal/api, internal/audit e internal/database
-// rodam em paralelo contra o mesmo banco. Aqui a limpeza tem que ser cega — o
-// middleware gera linha para rota que ele não conhece, com nome imprevisível —,
-// e um DELETE realmente cego levaria junto as linhas que os outros pacotes
-// semearam segundos antes, quebrando testes que não têm defeito nenhum.
 var familiasDeOutrosPacotes = []string{
-	"retencao-teste.%", // internal/database
-	"teste.%",          // internal/audit
+	"retencao-teste.%",
+	"teste.%",
 }
 
 func limparAuditoria(t *testing.T) {
@@ -71,9 +53,6 @@ func linhasDe(t *testing.T, action string) []database.AuditLog {
 	return linhas
 }
 
-// O teste que justifica a regra de allowlist: a senha vai no CORPO de
-// POST /api/auth/login, e uma auditoria que copiasse o corpo viraria um
-// depósito de senha em claro na mesma tabela que o administrador consulta.
 func TestSenhaDoLoginNaoEntraNaAuditoria(t *testing.T) {
 	setupAuditAPI(t)
 
@@ -101,7 +80,6 @@ func TestSenhaDoLoginNaoEntraNaAuditoria(t *testing.T) {
 	}
 }
 
-// Login recusado é o sinal que a auditoria existe para capturar.
 func TestLoginRecusadoGravaDenied(t *testing.T) {
 	setupAuditAPI(t)
 
@@ -127,8 +105,6 @@ func TestLoginRecusadoGravaDenied(t *testing.T) {
 	}
 }
 
-// Escrita recusada por falta de credencial precisa deixar rastro: é a linha que
-// revela alguém tentando alcançar o que não pode.
 func TestEscritaSemCredencialGravaDenied(t *testing.T) {
 	setupAuditAPI(t)
 
@@ -147,8 +123,6 @@ func TestEscritaSemCredencialGravaDenied(t *testing.T) {
 	}
 }
 
-// GET não pode gerar linha: é o polling do painel, e auditá-lo afogaria a
-// tabela com o que ninguém consulta.
 func TestLeituraNaoGeraLinha(t *testing.T) {
 	setupAuditAPI(t)
 
@@ -166,11 +140,10 @@ func TestLeituraNaoGeraLinha(t *testing.T) {
 	}
 }
 
-// A ingestão é a exceção deliberada: milhares de push por minuto num parque de
-// algumas centenas de hosts. Sucesso não gera linha.
 func TestIngestaoBemSucedidaNaoGeraLinha(t *testing.T) {
 	setupAuditAPI(t)
 	t.Setenv("AGENT_INGEST_TOKEN", "token-de-teste-da-ingestao")
+	t.Setenv("ALLOW_LEGACY_INGEST_TOKEN", "true")
 
 	corpo := `{"hostname":"host-de-teste-auditoria","cpu":1.0,"report_interval_sec":5}`
 	req := httptest.NewRequest(http.MethodPost, "/api/ingest/metrics", strings.NewReader(corpo))
@@ -190,11 +163,10 @@ func TestIngestaoBemSucedidaNaoGeraLinha(t *testing.T) {
 	database.DB.Where("name = ?", "host-de-teste-auditoria").Delete(&database.Server{})
 }
 
-// A recusa da ingestão, ao contrário, é exatamente o que se quer ver: token
-// inválido significa agente forjado ou credencial vazada.
 func TestIngestaoRecusadaGeraLinha(t *testing.T) {
 	setupAuditAPI(t)
 	t.Setenv("AGENT_INGEST_TOKEN", "token-de-teste-da-ingestao")
+	t.Setenv("ALLOW_LEGACY_INGEST_TOKEN", "true")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/ingest/metrics", strings.NewReader(`{}`))
 	req.Header.Set("X-Agent-Token", "token-errado")

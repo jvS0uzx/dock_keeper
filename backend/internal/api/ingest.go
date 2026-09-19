@@ -13,20 +13,20 @@ import (
 	"gorm.io/gorm"
 )
 
-// ingestPayload é o corpo enviado pelo agente de coleta (cmd/agent).
 type ingestPayload struct {
-	Hostname  string  `json:"hostname"`
-	CPU       float64 `json:"cpu"`
-	MemUsed   int64   `json:"mem_used"`
-	MemTotal  int64   `json:"mem_total"`
-	Load1     float64 `json:"load1"`
-	DiskUsed  int64   `json:"disk_used"`
-	DiskTotal int64   `json:"disk_total"`
-	Uptime    float64 `json:"uptime"`
+	Hostname  string   `json:"hostname"`
+	CPU       *float64 `json:"cpu"`
+	MemUsed   int64    `json:"mem_used"`
+	MemTotal  int64    `json:"mem_total"`
+	Load1     *float64 `json:"load1"`
+	DiskUsed  int64    `json:"disk_used"`
+	DiskTotal int64    `json:"disk_total"`
+	Uptime    float64  `json:"uptime"`
 
-	// Ponteiro: o agente omite o campo quando a máquina não tem sensor. Agente
-	// antigo ainda manda 0 nesse caso, tratado em temperatureOf.
 	TemperatureC *float64 `json:"temperature_c"`
+
+	NetRxBps *float64 `json:"net_rx_bps"`
+	NetTxBps *float64 `json:"net_tx_bps"`
 
 	OS           string `json:"os"`
 	Platform     string `json:"platform"`
@@ -35,22 +35,11 @@ type ingestPayload struct {
 	SiteCode     string `json:"site_code"`
 	AgentVersion string `json:"agent_version"`
 
-	// MachineID é o identificador que o agente gera no primeiro boot e persiste
-	// em disco. Vazio em agente antigo, e por isso a chave por hostname continua
-	// existindo como fallback.
 	MachineID string `json:"machine_id"`
 
-	// Intervalo que o agente diz estar usando entre um push e o próximo.
-	// Guardado no Server para derivar a janela de "online" — ver
-	// database.LiveWindowFor.
 	ReportIntervalSec int `json:"report_interval_sec"`
 }
 
-// temperatureOf normaliza a temperatura recebida do agente.
-//
-// Zero vira nulo: nenhuma máquina em operação está a 0 °C, e um agente sem
-// sensor mandava exatamente isso. Gravar o zero fazia o painel exibir "0 °C"
-// como se fosse leitura real.
 func temperatureOf(p ingestPayload) *float64 {
 	if p.TemperatureC == nil || *p.TemperatureC == 0 {
 		return nil
@@ -58,9 +47,13 @@ func temperatureOf(p ingestPayload) *float64 {
 	return p.TemperatureC
 }
 
-// IngestHandler recebe métricas via push de agentes (Kind="agent").
-// Autentica pelo header X-Agent-Token contra a env AGENT_INGEST_TOKEN.
-// Não deve ser registrado com CORS de escrita público sem cuidado; é uma rota máquina-a-máquina.
+func rateOf(v *float64) *float64 {
+	if v == nil || *v < 0 {
+		return nil
+	}
+	return v
+}
+
 func IngestHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -70,7 +63,14 @@ func IngestHandler(w http.ResponseWriter, r *http.Request) {
 
 	cred, err := authenticateDevice(r)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "credencial de dispositivo inválida")
+		refuseDeviceAuth(w, r, err, "ingest.legacy_token_disabled")
+		return
+	}
+	if !cred.allowsKind(kindAgent) {
+		refuseDeviceKind(w, r, cred, "ingest.kind_mismatch", kindAgent, "métrica")
+		return
+	}
+	if !limitarTaxa(w, chaveDeIngestao(r, cred), tetoDeIngestao()) {
 		return
 	}
 
@@ -84,15 +84,11 @@ func IngestHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "hostname required")
 		return
 	}
-
 	hostIP := r.RemoteAddr
 	if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		hostIP = h
 	}
 
-	// A unidade sai da CREDENCIAL, não do corpo. Com o token compartilhado
-	// qualquer portador declarava a filial que quisesse e injetava métrica falsa
-	// nela, disparando ou silenciando alerta de máquina que nem existe.
 	declarada := siteOfAgent(p)
 	if !cred.siteMatches(declarada) {
 		auditIngestSiteMismatch(cred, p, declarada)
@@ -125,10 +121,9 @@ func IngestHandler(w http.ResponseWriter, r *http.Request) {
 		DiskTotalBytes:  p.DiskTotal,
 		UptimeSeconds:   p.Uptime,
 		TemperatureC:    temperatureOf(p),
-		// SSHHandshakeMs fica nulo: o agente faz push por HTTP, não abre
-		// sessão SSH. Antes o campo ia a zero e o gráfico da estação era uma
-		// reta no chão, indistinguível de uma medição de verdade.
-		Timestamp: time.Now().UTC(),
+		NetRxBps:        rateOf(p.NetRxBps),
+		NetTxBps:        rateOf(p.NetTxBps),
+		Timestamp:       time.Now().UTC(),
 	}
 	if err := database.DB.Create(&metric).Error; err != nil {
 		log.Printf("[Ingest] erro ao inserir métrica de %s: %v", p.Hostname, err)
@@ -139,9 +134,6 @@ func IngestHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// siteOfAgent resolve a unidade que o agente declarou. Nulo quando ele não
-// informou, ou informou código que não existe no painel — cadastrar a unidade
-// sozinho deixaria um token vazado poluir o cadastro com filiais inventadas.
 func siteOfAgent(p ingestPayload) *uint {
 	code := strings.ToLower(strings.TrimSpace(p.SiteCode))
 	if code == "" {
@@ -156,22 +148,9 @@ func siteOfAgent(p ingestPayload) *uint {
 	return &site.ID
 }
 
-// findOrCreateAgentServer localiza o host pela chave (unidade, hostname).
-//
-// O hostname sozinho não identifica máquina: dois DESKTOP-01 em filiais
-// diferentes são dois equipamentos, e antes viravam um registro só — com as
-// métricas das duas máquinas serradas na mesma série temporal, cada push
-// sobrescrevendo o IP do outro.
-//
-// A chave definitiva seria um identificador gerado e persistido no próprio
-// agente, porque hostname muda e identificador não. Isso exige mudar o agente e
-// o coletor; até lá, (unidade, hostname) já separa o que estava junto.
 func findOrCreateAgentServer(hostname, machineID, hostIP string, siteID *uint) (database.Server, error) {
 	var server database.Server
 
-	// O identificador de máquina vence o hostname quando existe: hostname muda
-	// quando alguém renomeia o equipamento, e casar por ele parte o histórico da
-	// mesma máquina em duas séries no dia da renomeação.
 	if machineID != "" {
 		q := database.DB.Where("machine_id = ?", machineID)
 		if siteID != nil {
@@ -203,10 +182,6 @@ func findOrCreateAgentServer(hostname, machineID, hostIP string, siteID *uint) (
 		return server, err
 	}
 
-	// Adoção do registro que ainda não tem unidade: antes desta mudança o agente
-	// que não mandava site_code gravava site_id nulo. Quando ele passa a mandar,
-	// abrir linha nova em vez de classificar a antiga partiria o histórico da
-	// mesma máquina em duas séries.
 	if siteID != nil {
 		err = database.DB.Where("name = ? AND site_id IS NULL", hostname).First(&server).Error
 		if err == nil {
@@ -223,17 +198,9 @@ func findOrCreateAgentServer(hostname, machineID, hostIP string, siteID *uint) (
 	return server, database.DB.Create(&server).Error
 }
 
-// hostFacts monta o que muda pouco e vale sobrescrever a cada push: IP atual,
-// sistema, usuário logado e versão do agente.
-//
-// Campo vazio é ignorado — o agente pode não conseguir ler um sensor ou a
-// sessão ativa, e isso não pode apagar o que já se sabia.
 func hostFacts(p ingestPayload, hostIP string, siteID *uint) map[string]any {
 	facts := map[string]any{"host_ip": hostIP, "kind": "agent"}
 
-	// Intervalo só é gravado quando o agente informa: agente antigo manda 0 e
-	// sobrescrever com zero apagaria o valor que uma versão nova já tinha
-	// registrado, devolvendo o host à janela fixa.
 	if p.ReportIntervalSec > 0 {
 		facts["report_interval_sec"] = p.ReportIntervalSec
 	}
@@ -250,9 +217,6 @@ func hostFacts(p ingestPayload, hostIP string, siteID *uint) map[string]any {
 		}
 	}
 
-	// Resolvida antes do upsert, porque agora faz parte da chave do host. Segue
-	// sendo gravada aqui para classificar o registro adotado que ainda estava
-	// sem unidade.
 	if siteID != nil {
 		facts["site_id"] = *siteID
 	}

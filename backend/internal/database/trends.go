@@ -1,66 +1,42 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
 	"time"
+
+	"github.com/jvS0uzx/dock_keeper/internal/safego"
 )
 
-// Retenção da trend. Muito maior que a do dado bruto (7 dias) porque é ela que
-// sustenta o gráfico histórico: 24 linhas por dia por host ocupam pouco.
-// Prazo da tendência agregada. Parametrizável porque é a primeira coisa que um
-// adotante ajusta: quem só quer 90 dias não deve precisar recompilar.
 var trendRetention = RetentionDays("TREND_RETENTION_DAYS", DefaultTrendRetentionDays)
 
-// Janela do rollup incremental. Sem limite inferior a rotina varria
-// metric_servers inteira a cada 15 minutos e reescrevia todos os baldes de
-// todos os hosts via ON CONFLICT DO UPDATE — custo crescendo com o histórico,
-// para reconsolidar horas que não mudaram. Três horas cobrem com folga a hora
-// recém-fechada e a coleta que chegou atrasada.
 const trendRollupWindow = 3 * time.Hour
 
-// StartTrendWorker agrega o histórico bruto em médias horárias.
-//
-// Sem isso, um gráfico de 30 dias varre milhões de linhas de metric_servers a
-// cada abertura de tela.
-//
-// Devolve um canal fechado assim que o primeiro rollup termina. A poda espera
-// por ele: enquanto o bruto não virou trend, apagá-lo destrói histórico que
-// ninguém mais consegue reconstruir.
 func StartTrendWorker(interval time.Duration) <-chan struct{} {
 	ready := make(chan struct{})
 	var once sync.Once
 
-	go func() {
+	safego.Run(context.Background(), "database:trends", func(context.Context) {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		// A primeira passada varre tudo, sem janela. Se o painel ficou fora do ar
-		// por mais tempo que trendRollupWindow, o bruto daquele período ainda não
-		// virou trend — e a poda, que espera justamente este sinal, o apagaria em
-		// seguida.
 		full := true
 		for {
 			rollupTrends(rollupSince(full))
 			full = false
 
-			// Fecha depois da PRIMEIRA passada, com ou sem erro. Um banco
-			// indisponível não pode travar a poda para sempre: tabela crescendo
-			// sem limite derruba o painel inteiro, enquanto o risco que o sinal
-			// evita se restringe ao histórico de quem ficou dias fora do ar.
 			once.Do(func() { close(ready) })
 
 			pruneTrends()
 			<-ticker.C
 		}
-	}()
+	})
 
 	return ready
 }
 
-// rollupSince devolve o limite inferior da agregação: nulo na varredura
-// completa do boot, a janela incremental nas passadas seguintes.
 func rollupSince(full bool) *time.Time {
 	if full {
 		return nil
@@ -69,8 +45,6 @@ func rollupSince(full bool) *time.Time {
 	return &since
 }
 
-// rollupSQL monta a agregação. O WHERE é construído a partir de constantes; o
-// único valor variável entra por placeholder.
 func rollupSQL(since *time.Time) (string, []any) {
 	where := "timestamp < date_trunc('hour', NOW())"
 	args := []any{}
@@ -86,6 +60,8 @@ func rollupSQL(since *time.Time) (string, []any) {
 			mem_percent_avg, disk_percent_avg,
 			load_avg1_avg, load_avg1_max,
 			temperature_avg, temperature_max,
+			net_rx_avg, net_tx_avg,
+			rtt_avg, rtt_max,
 			samples
 		)
 		SELECT
@@ -96,6 +72,8 @@ func rollupSQL(since *time.Time) (string, []any) {
 			AVG(disk_used_bytes::float8 / NULLIF(disk_total_bytes, 0) * 100),
 			AVG(load_avg1), MAX(load_avg1),
 			AVG(NULLIF(temperature_c, 0)), MAX(temperature_c),
+			AVG(net_rx_bps), AVG(net_tx_bps),
+			AVG(rtt_ms), MAX(rtt_ms),
 			COUNT(*)
 		FROM metric_servers
 		WHERE %s
@@ -109,15 +87,14 @@ func rollupSQL(since *time.Time) (string, []any) {
 			load_avg1_max    = EXCLUDED.load_avg1_max,
 			temperature_avg  = EXCLUDED.temperature_avg,
 			temperature_max  = EXCLUDED.temperature_max,
+			net_rx_avg       = EXCLUDED.net_rx_avg,
+			net_tx_avg       = EXCLUDED.net_tx_avg,
+			rtt_avg          = EXCLUDED.rtt_avg,
+			rtt_max          = EXCLUDED.rtt_max,
 			samples          = EXCLUDED.samples
 	`, where), args
 }
 
-// rollupTrends consolida as horas já fechadas.
-//
-// A hora corrente fica de fora: agregá-la gravaria uma média parcial que seria
-// substituída no ciclo seguinte. O ON CONFLICT existe para o caso de a coleta
-// atrasar e completar uma hora já agregada.
 func rollupTrends(since *time.Time) {
 	sql, args := rollupSQL(since)
 

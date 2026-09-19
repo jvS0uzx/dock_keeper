@@ -1,7 +1,7 @@
 # Inventário de rede
 
 Duas fontes alimentam a mesma tabela `network_hosts`: a **varredura local**, dentro
-do painel, e o **coletor remoto** (`vd_collector`), instalado numa máquina de cada
+do painel, e o **coletor remoto** (`dockkeeper_collector`), instalado numa máquina de cada
 filial.
 
 Elas existem porque o painel só enxerga a rede onde ele roda. Uma empresa com dez

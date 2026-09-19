@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/jvS0uzx/dock_keeper/internal/auth"
@@ -15,15 +16,55 @@ type historyPoint struct {
 	Value float64   `json:"value"`
 }
 
-// mapa range -> duração. Define quais janelas são aceitas.
 var historyRanges = map[string]time.Duration{
 	"1h":  1 * time.Hour,
 	"6h":  6 * time.Hour,
 	"24h": 24 * time.Hour,
 	"7d":  7 * 24 * time.Hour,
+	"30d": 30 * 24 * time.Hour,
+	"90d": 90 * 24 * time.Hour,
 }
 
-// expressão SQL da métrica para host (metric_servers).
+const maxCustomSpan = 400 * 24 * time.Hour
+
+func historyWindow(q url.Values, now time.Time) (time.Time, time.Time, string) {
+	rangeKey, from, to := q.Get("range"), q.Get("from"), q.Get("to")
+	if from != "" && rangeKey != "" {
+		return time.Time{}, time.Time{}, "use range ou from/to, não os dois"
+	}
+	if from == "" {
+		if to != "" {
+			return time.Time{}, time.Time{}, "to exige from"
+		}
+		if rangeKey == "" {
+			rangeKey = "1h"
+		}
+		dur, ok := historyRanges[rangeKey]
+		if !ok {
+			return time.Time{}, time.Time{}, "range inválido"
+		}
+		return now.Add(-dur), now, ""
+	}
+
+	start, err := time.Parse(time.RFC3339, from)
+	if err != nil {
+		return time.Time{}, time.Time{}, "from inválido: use data RFC3339"
+	}
+	end := now
+	if to != "" {
+		if end, err = time.Parse(time.RFC3339, to); err != nil {
+			return time.Time{}, time.Time{}, "to inválido: use data RFC3339"
+		}
+	}
+	if !start.Before(end) {
+		return time.Time{}, time.Time{}, "from precisa ser anterior a to"
+	}
+	if end.Sub(start) > maxCustomSpan {
+		return time.Time{}, time.Time{}, "o período passa de 400 dias"
+	}
+	return start, end, ""
+}
+
 func serverMetricExpr(metric string) (string, bool) {
 	switch metric {
 	case "cpu":
@@ -35,22 +76,19 @@ func serverMetricExpr(metric string) (string, bool) {
 	case "load":
 		return "load_avg1", true
 	case "temperature":
-		// Faltava aqui: trendMetricExpr aceitava "temperature", mas a validação
-		// passa antes por esta função, então o gráfico de temperatura devolvia
-		// 400 em qualquer janela e nunca chegou a ser exibido. Só passou a
-		// valer a pena corrigir agora que o stream SSH também mede temperatura
-		// (achado 5) — antes só as estações tinham o dado.
 		return "temperature_c", true
 	case "latency":
-		// A chave da API continua "latency" para não quebrar links e o painel
-		// já publicado; a coluna e o rótulo é que mudaram de nome. O número é
-		// o handshake SSH, não RTT — ver MetricServer.SSHHandshakeMs.
 		return "ping_latency_ms", true
+	case "net_rx":
+		return "net_rx_bps", true
+	case "net_tx":
+		return "net_tx_bps", true
+	case "rtt":
+		return "rtt_ms", true
 	}
 	return "", false
 }
 
-// expressão SQL da métrica para container (metric_containers).
 func containerMetricExpr(metric string) (string, bool) {
 	switch metric {
 	case "cpu":
@@ -61,22 +99,17 @@ func containerMetricExpr(metric string) (string, bool) {
 	return "", false
 }
 
-// bucketExpr escolhe o passo de agregação conforme a janela para não
-// devolver milhares de pontos: <=1h por minuto, <=24h por 5min, >24h por hora.
 func bucketExpr(d time.Duration) string {
 	switch {
 	case d <= time.Hour:
 		return "date_trunc('minute', timestamp)"
 	case d <= 24*time.Hour:
-		// date_trunc não tem passo de 5min; alinha pelo epoch.
 		return "to_timestamp(floor(extract(epoch from timestamp) / 300) * 300)"
 	default:
 		return "date_trunc('hour', timestamp)"
 	}
 }
 
-// HistoryHandler devolve a série temporal agregada (downsampled) de uma métrica.
-// Params: server_id (obrigatório), metric, range (default 1h), container_id (opcional).
 func HistoryHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	serverID := q.Get("server_id")
@@ -85,26 +118,20 @@ func HistoryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rangeKey := q.Get("range")
-	if rangeKey == "" {
-		rangeKey = "1h"
-	}
-	dur, ok := historyRanges[rangeKey]
-	if !ok {
-		writeError(w, http.StatusBadRequest, "range inválido")
+	start, end, invalid := historyWindow(q, time.Now())
+	if invalid != "" {
+		writeError(w, http.StatusBadRequest, invalid)
 		return
 	}
+	dur := end.Sub(start)
 
 	metric := q.Get("metric")
 	containerID := q.Get("container_id")
-	cutoff := time.Now().Add(-dur)
 
-	// Recorte por unidade: a série é endereçada por server_id, então a
-	// visibilidade é a do servidor dono dela.
 	sess := sessionFrom(r)
 	if !auth.HasGlobal(sess.Accesses) {
 		var server database.Server
-		if err := database.DB.Where("id = ?", serverID).First(&server).Error; err != nil {
+		if err := database.From(r.Context()).Where("id = ?", serverID).First(&server).Error; err != nil {
 			writeError(w, http.StatusNotFound, "servidor não encontrado")
 			return
 		}
@@ -131,32 +158,23 @@ func HistoryHandler(w http.ResponseWriter, r *http.Request) {
 		table, valueExpr, filterCol, filterVal = "metric_servers", expr, "server_id", serverID
 	}
 
-	// Janelas longas leem a trend horária em vez do histórico bruto: 24 linhas
-	// por dia por host contra uma a cada 1-2 segundos.
 	if containerID == "" && dur > trendThreshold {
 		if expr, ok := trendMetricExpr(metric); ok {
-			serveFromTrend(w, serverID, expr, cutoff)
+			serveFromTrend(w, r, serverID, expr, start, end)
 			return
 		}
 	}
 
-	// bucket e valueExpr vêm de whitelist; filtros usam placeholders.
-	//
-	// O IS NOT NULL descarta a amostra que a fonte não mediu. Temperatura e
-	// handshake SSH passaram a ser nuláveis (achado 5 do QA) e um balde inteiro
-	// sem medição faria AVG devolver NULL, que não entra num float64. Omitir o
-	// ponto é também o mais honesto: a série fica com um buraco em vez de uma
-	// linha no chão fingindo leitura.
 	sql := fmt.Sprintf(`
 		SELECT %s AS ts, AVG(%s) AS value
 		FROM %s
-		WHERE %s = ? AND timestamp >= ? AND (%s) IS NOT NULL
+		WHERE %s = ? AND timestamp >= ? AND timestamp <= ? AND (%s) IS NOT NULL
 		GROUP BY ts
 		ORDER BY ts ASC
 	`, bucketExpr(dur), valueExpr, table, filterCol, valueExpr)
 
 	var points []historyPoint
-	if err := database.DB.Raw(sql, filterVal, cutoff).Scan(&points).Error; err != nil {
+	if err := database.From(r.Context()).Raw(sql, filterVal, start, end).Scan(&points).Error; err != nil {
 		log.Printf("[History] erro na consulta: %v", err)
 		writeError(w, http.StatusInternalServerError, "falha ao consultar o histórico")
 		return
@@ -168,10 +186,8 @@ func HistoryHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, points)
 }
 
-// Acima desta janela a consulta passa a ler a trend agregada.
 const trendThreshold = 24 * time.Hour
 
-// trendMetricExpr mapeia a métrica para a coluna já agregada.
 func trendMetricExpr(metric string) (string, bool) {
 	switch metric {
 	case "cpu":
@@ -184,23 +200,38 @@ func trendMetricExpr(metric string) (string, bool) {
 		return "load_avg1_avg", true
 	case "temperature":
 		return "temperature_avg", true
+	case "net_rx":
+		return "net_rx_avg", true
+	case "net_tx":
+		return "net_tx_avg", true
+	case "rtt":
+		return "rtt_avg", true
 	}
-	// latency não é agregada: só interessa ao vivo.
 	return "", false
 }
 
-func serveFromTrend(w http.ResponseWriter, serverID, column string, cutoff time.Time) {
-	var points []historyPoint
-	// Mesma razão do caminho bruto: temperature_avg é nulo na hora em que
-	// nenhum host da amostra tinha sensor, e NULL não cabe num float64.
-	sql := fmt.Sprintf(`
-		SELECT bucket AS ts, %s AS value
-		FROM metric_server_trends
-		WHERE server_id = ? AND bucket >= ? AND %s IS NOT NULL
-		ORDER BY bucket ASC
-	`, column, column)
+func trendBucketExpr(d time.Duration) string {
+	switch {
+	case d <= 30*24*time.Hour:
+		return "bucket"
+	case d <= 90*24*time.Hour:
+		return "to_timestamp(floor(extract(epoch from bucket) / 21600) * 21600)"
+	default:
+		return "to_timestamp(floor(extract(epoch from bucket) / 86400) * 86400)"
+	}
+}
 
-	if err := database.DB.Raw(sql, serverID, cutoff).Scan(&points).Error; err != nil {
+func serveFromTrend(w http.ResponseWriter, r *http.Request, serverID, column string, start, end time.Time) {
+	var points []historyPoint
+	sql := fmt.Sprintf(`
+		SELECT %s AS ts, AVG(%s) AS value
+		FROM metric_server_trends
+		WHERE server_id = ? AND bucket >= ? AND bucket <= ? AND %s IS NOT NULL
+		GROUP BY ts
+		ORDER BY ts ASC
+	`, trendBucketExpr(end.Sub(start)), column, column)
+
+	if err := database.From(r.Context()).Raw(sql, serverID, start, end).Scan(&points).Error; err != nil {
 		log.Printf("[History] erro na consulta de trend: %v", err)
 		writeError(w, http.StatusInternalServerError, "falha ao consultar o histórico")
 		return

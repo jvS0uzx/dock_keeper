@@ -8,19 +8,11 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// IPs fora de qualquer rede real usada pelo projeto, para o teste não colidir
-// com o inventário de verdade.
 const (
 	testIPKnown   = "10.255.255.1"
 	testIPUnnamed = "10.255.255.2"
 )
 
-// setupDB liga no Postgres de desenvolvimento. Sem DATABASE_URL o teste é
-// pulado: a suíte precisa passar numa máquina sem banco.
-//
-// Esta cobertura existe porque o bug que ela pega — FirstOrCreate montando o
-// WHERE com first_seen/last_seen e estourando o índice único de ip — só
-// aparece contra um banco de verdade, na segunda varredura.
 func setupDB(t *testing.T) {
 	t.Helper()
 
@@ -58,7 +50,6 @@ func TestPersistUpsertNaoDuplica(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	// Segunda varredura: é aqui que o FirstOrCreate estourava o índice único.
 	persist([]Host{{IP: testIPKnown, Hostname: "PC-RH", MAC: "aa:bb:cc:dd:ee:ff", OpenPorts: []int{445, 3389, 22}}}, nil)
 
 	var count int64
@@ -79,8 +70,6 @@ func TestPersistUpsertNaoDuplica(t *testing.T) {
 	}
 }
 
-// Um DNS reverso que falhou ou um ARP incompleto não podem apagar o que já se
-// sabia sobre o host.
 func TestPersistNaoApagaNomeNemMACConhecidos(t *testing.T) {
 	setupDB(t)
 
@@ -96,8 +85,6 @@ func TestPersistNaoApagaNomeNemMACConhecidos(t *testing.T) {
 	}
 }
 
-// O caminho inverso: host que apareceu sem nome ganha o nome quando o DNS
-// reverso passa a responder.
 func TestPersistPreencheNomeDescobertoDepois(t *testing.T) {
 	setupDB(t)
 
@@ -119,5 +106,5 @@ func TestPersistPreencheNomeDescobertoDepois(t *testing.T) {
 
 func TestPersistVazioNaoFazNada(t *testing.T) {
 	setupDB(t)
-	persist(nil, nil) // não pode entrar em pânico nem gerar INSERT sem linhas
+	persist(nil, nil)
 }

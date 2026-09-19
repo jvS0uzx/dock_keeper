@@ -1,8 +1,11 @@
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Clock, Filter, Globe, Server, Database, Activity, ArrowRight, HardDrive } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { api, type ContainerLiveStat, type HistoryRange, type LbStat, type ServerLiveStat } from '../lib/api';
 import { formatBytes, formatGB } from '../lib/format';
+import { mediaDefinida } from '../lib/agregado';
 import { deriveUpstreams, splitUpstreams, totalRequests, type UpstreamNode } from '../lib/upstream';
 import Select, { type SelectOption } from './ui/Select';
 
@@ -12,7 +15,6 @@ const HISTORY_POLL_MS = 30000;
 const ERROR_STATUSES = ['500', '502', '503', '504', '400', '404'];
 
 
-// IPs das VPS de destino do Load Balancer. Vem do .env porque muda por ambiente.
 const TARGET_IPS: string[] = (import.meta.env.VITE_TARGET_VPS_IPS || '')
   .split(',')
   .map((ip: string) => ip.trim())
@@ -20,12 +22,8 @@ const TARGET_IPS: string[] = (import.meta.env.VITE_TARGET_VPS_IPS || '')
 
 const LB_IP: string = import.meta.env.VITE_LB_IP || '';
 
-const Gauge = ({ value, title }: { value: number; title: string }) => {
-  const clamped = Math.max(0, Math.min(value, 100));
-  // Arco SVG com um único degradê verde -> amarelo -> vermelho ao longo do
-  // percurso: o preenchimento revela a faixa por strokeDashoffset, então o
-  // ponteiro "viaja" pelas cores com transição suave em vez de trocar de cor
-  // por degrau de limiar.
+const Gauge = ({ value, title, detalhe }: { value: number | null; title: string; detalhe?: string }) => {
+  const clamped = value === null ? 0 : Math.max(0, Math.min(value, 100));
   const R = 78;
   const comprimento = Math.PI * R;
   const off = comprimento * (1 - clamped / 100);
@@ -60,23 +58,19 @@ const Gauge = ({ value, title }: { value: number; title: string }) => {
             style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.4, 0, 0.2, 1)' }}
           />
         </svg>
-        <div className="absolute inset-x-0 bottom-0 flex justify-center">
-          <span className="stat-value text-3xl">{value.toFixed(1)}%</span>
+        <div className="absolute inset-x-0 bottom-0 flex flex-col items-center">
+          <span className={`stat-value text-3xl ${value === null ? 'text-text-faint' : ''}`}>
+            {value === null ? '—' : `${value.toFixed(1)}%`}
+          </span>
+          {detalhe && <span className="text-xs text-text-faint">{detalhe}</span>}
         </div>
       </div>
     </div>
   );
 };
 
-// Traço aceso da malha: âmbar OPACO pré-misturado com o fundo do painel.
-// Com strokeOpacity translúcido, duas curvas que compartilham âncora somavam
-// alpha e as pontas ficavam mais vibrantes que o meio; opaco não empilha.
 const TRACO_ATIVO = 'color-mix(in srgb, var(--color-accent) 45%, var(--color-ink-900))';
 
-// O Nginx reporta o upstream pelo IP da malha (Tailscale), e o cadastro guarda
-// o IP público — não há igualdade direta. Caso exato primeiro; senão o último
-// octeto, que na convenção desta infra se preserva entre as duas faixas, e só
-// quando aponta para UM servidor. Ambíguo fica sem nome, que é mais honesto.
 const nomeDoUpstream = (host: string, servers: ServerLiveStat[]): string | null => {
   const exato = servers.find((s) => s.host_ip === host);
   if (exato) return exato.name;
@@ -86,14 +80,9 @@ const nomeDoUpstream = (host: string, servers: ServerLiveStat[]): string | null 
 };
 
 const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: ServerLiveStat[] }) => {
-  // Os nós vêm do que o Nginx reporta, não da lista do .env: se os endereços
-  // divergirem (troca de rede, VPN), o diagrama continua mostrando a verdade.
   const nodes = useMemo(() => deriveUpstreams(stats, TARGET_IPS), [stats]);
   const total = totalRequests(stats);
 
-  // Um nó por balanceador que reportou métrica na janela. server_id vazio é
-  // métrica anterior à coluna e cai num LB único — a topologia com N
-  // balanceadores e M upstreams se desenha sozinha a partir do dado.
   const lbs = useMemo(() => {
     const byId = new Map<string, { id: string; reqs: number; ups: Map<string, number> }>();
     for (const stat of stats) {
@@ -113,10 +102,6 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
       .map((lb) => ({ ...lb, label: name(lb.id) }));
   }, [stats, servers]);
 
-  // O SVG desenha em pixels medidos do container — nada de viewBox esticado,
-  // que transformava o ponto de luz numa elipse borrada. Linhas e caixas usam
-  // a MESMA distribuição vertical, então a aresta termina no centro exato da
-  // caixa com qualquer quantidade de nós de cada lado.
   const areaRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   useEffect(() => {
@@ -134,10 +119,6 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
   const height = Math.max(208, Math.max(lbs.length, nodes.length, 1) * 76);
 
   const { w, h } = size;
-  // Âncoras em pixel: borda direita do círculo de entrada, laterais da caixa
-  // do LB e borda esquerda do cartão de upstream.
-  // 1px por baixo da borda de cada caixa: a linha nasce e morre COLADA no
-  // elemento (as caixas ficam acima do SVG no z-index e cobrem a emenda).
   const xIn = 55;
   const xLbIn = w / 2 - 27;
   const xLbOut = w / 2 + 27;
@@ -216,8 +197,6 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
               );
             })}
             {nodes.map((node, ui) => {
-              // Upstream conhecido sem aresta na janela: linha apagada até o
-              // primeiro LB, para o caminho ocioso continuar visível.
               if (lbs.some((lb) => lb.ups.has(node.addr))) return null;
               const yUp = py(rowY(ui, nodes.length));
               const yLb = py(rowY(0, lbs.length));
@@ -329,9 +308,6 @@ const groupTrafficByProject = (stats: LbStat[], nodes: UpstreamNode[]): ProjectT
     data.total += s.requests_count;
     if (ERROR_STATUSES.includes(s.status)) data.errors += s.requests_count;
 
-    // Uma linha pode citar mais de um upstream quando o Nginx refaz a
-    // requisição; conta em todos os que aparecem, e no cache local só quando
-    // não houve upstream nenhum.
     const addrs = splitUpstreams(s.upstream_addr).filter((a) => known.has(a));
     if (addrs.length === 0) {
       data.local += s.requests_count;
@@ -447,6 +423,10 @@ export default function Dashboard() {
   const [servers, setServers] = useState<ServerLiveStat[]>([]);
   const [containers, setContainers] = useState<ContainerLiveStat[]>([]);
   const [loadBalancing, setLoadBalancing] = useState<LbStat[]>([]);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
+  const disco = useLoadStatus();
+  const { ok: discoOk, fail: discoFail } = disco;
 
   const [selectedServerId, setSelectedServerId] = useState('all');
   const [historyRange, setHistoryRange] = useState<HistoryRange>('1h');
@@ -468,9 +448,10 @@ export default function Dashboard() {
           setServers(data.servers);
           setContainers(data.containers);
           setLoadBalancing(data.load_balancing);
+          cargaOk();
         })
         .catch((err) => {
-          if (!controller.signal.aborted) console.error('Erro API:', err);
+          if (!controller.signal.aborted) cargaFail(err, 'Falha ao ler as métricas ao vivo.');
         });
     };
     fetchMetrics();
@@ -479,10 +460,8 @@ export default function Dashboard() {
       clearInterval(interval);
       controller.abort();
     };
-  }, []);
+  }, [cargaOk, cargaFail]);
 
-  // Série real de disco. Só existe para um host específico: o endpoint de
-  // histórico agrega por server_id, não há série consolidada do cluster.
   useEffect(() => {
     if (selectedServerId === 'all') {
       setDiskHistory([]);
@@ -497,7 +476,10 @@ export default function Dashboard() {
             value: Number(p.value.toFixed(1)),
           }))),
         )
-        .catch(() => {});
+        .then(() => discoOk())
+        .catch((err) => {
+          if (!controller.signal.aborted) discoFail(err, 'Falha ao ler o histórico de disco.');
+        });
     };
     fetchHistory();
     const interval = setInterval(fetchHistory, HISTORY_POLL_MS);
@@ -505,7 +487,7 @@ export default function Dashboard() {
       clearInterval(interval);
       controller.abort();
     };
-  }, [selectedServerId, historyRange]);
+  }, [selectedServerId, historyRange, discoOk, discoFail]);
 
   const activeServer = selectedServerId === 'all' ? null : servers.find((s) => s.id === selectedServerId) ?? null;
   const scopedServers = activeServer ? [activeServer] : servers;
@@ -513,8 +495,10 @@ export default function Dashboard() {
 
   const filteredContainers = selectedServerId === 'all' ? containers : containers.filter((c) => c.server_id === selectedServerId);
 
-  // Métricas de host: média de CPU e razão real de RAM/disco dos hosts em escopo.
-  const cpuPercent = onlineServers.length > 0 ? onlineServers.reduce((acc, s) => acc + s.cpu, 0) / onlineServers.length : 0;
+  const cpuMedia = mediaDefinida(onlineServers.map((s) => s.cpu));
+  const cpuDetalhe = cpuMedia.considerados === cpuMedia.total
+    ? undefined
+    : `média de ${cpuMedia.considerados} de ${cpuMedia.total} hosts`;
 
   const memUsed = onlineServers.reduce((acc, s) => acc + s.mem_used, 0);
   const memTotal = onlineServers.reduce((acc, s) => acc + s.mem_total, 0);
@@ -527,7 +511,6 @@ export default function Dashboard() {
   const isUp = onlineServers.length > 0;
   const offlineCount = scopedServers.length - onlineServers.length;
 
-  // Um host pode aparecer por mais de um registro; o filtro é por IP.
   const uniqueServers = useMemo(() => {
     const byIp = new Map<string, ServerLiveStat>();
     servers.forEach((s) => {
@@ -545,6 +528,8 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-full px-4 pb-4 pt-2 md:px-6 md:pb-6 md:pt-3 lg:px-8 lg:pb-8 lg:pt-4 anim-rise">
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
+      <LoadNotice error={disco.error} lastOk={disco.lastOk} className="mb-4" />
       <div className="panel p-4 flex flex-wrap items-center gap-6 mb-6 relative z-50">
         <div className="flex items-center gap-3">
           <Filter size={16} strokeWidth={1.75} className="text-text-faint" />
@@ -608,7 +593,7 @@ export default function Dashboard() {
           {selectedServerId === 'all' && <LoadBalancerFlow stats={loadBalancing} servers={servers} />}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-6 h-56 stagger">
-            <Gauge value={cpuPercent} title="CPU do host" />
+            <Gauge value={cpuMedia.media} title="CPU do host" detalhe={cpuDetalhe} />
             <Gauge value={memPercent} title="Memória" />
             <Gauge value={diskPercent} title="Disco" />
           </div>
@@ -714,7 +699,7 @@ export default function Dashboard() {
               ) : (
                 <div className="flex-1 mt-2 overflow-y-auto custom-scrollbar flex flex-col gap-3">
                   {onlineServers.length === 0 && (
-                    <div className="text-xs text-text-faint">Nenhum host online reportando disco.</div>
+                    <div className="text-xs text-text-faint">{carga.error && !carga.lastOk ? carga.error : 'Nenhum host online reportando disco.'}</div>
                   )}
                   {onlineServers.map((s) => {
                     const pct = s.disk_total > 0 ? (s.disk_used / s.disk_total) * 100 : 0;

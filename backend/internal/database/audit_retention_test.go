@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-// A tabela de métrica chama a coluna de "timestamp" e a auditoria a chama de
-// "at". Um SQL com o nome cravado apagaria as linhas erradas, ou nenhuma.
 func TestPruneBatchSQLUsaAColunaPedida(t *testing.T) {
 	sql := pruneBatchSQL("audit_logs", "at")
 
@@ -53,9 +51,6 @@ func contarAuditoria(t *testing.T, action string) int64 {
 	return n
 }
 
-// O prazo da auditoria é próprio e muito mais longo que o das métricas: métrica
-// de duas semanas atrás não responde nada, auditoria antiga é o que se consulta
-// depois de um incidente descoberto meses depois.
 func TestPodaDaAuditoriaRespeitaOPrazoProprio(t *testing.T) {
 	setupAuditRetentionDB(t)
 
@@ -78,8 +73,6 @@ func TestPodaDaAuditoriaRespeitaOPrazoProprio(t *testing.T) {
 	}
 }
 
-// A retenção de métrica é de dias. Se ela alcançasse a auditoria, a evidência
-// sumiria antes de alguém saber que precisava dela.
 func TestRetencaoDeMetricaNaoAlcancaAAuditoria(t *testing.T) {
 	setupAuditRetentionDB(t)
 
@@ -91,7 +84,6 @@ func TestRetencaoDeMetricaNaoAlcancaAAuditoria(t *testing.T) {
 		t.Fatalf("criar linha de teste: %v", err)
 	}
 
-	// Sete dias de métrica, um ano de auditoria: os prazos que o painel usa.
 	prune(7*24*time.Hour, 365*24*time.Hour)
 
 	if n := contarAuditoria(t, "retencao-teste.recente"); n != 1 {

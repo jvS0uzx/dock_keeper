@@ -1,17 +1,49 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Search, Play, Square, RefreshCw, Terminal, X, Cpu, MemoryStick, ChevronDown, ChevronRight, Folder } from 'lucide-react';
-import { api, openStream, type ContainerLiveStat } from '../lib/api';
+import { api, type ContainerLiveStat } from '../lib/api';
+import { useStreamComReconexao } from './ui/stream-reconnect';
 import { formatBytes } from '../lib/format';
+import {
+  groupContainers,
+  loadContainerPrefs,
+  saveContainerPrefs,
+  type ContainerPrefs,
+  type ContainerSortField,
+  type SortDirection,
+} from '../lib/containers';
+import Select from './ui/Select';
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
 import { useDialog } from './ui/dialog-context';
 import { useRole } from './ui/session-context';
 
 const MAX_LOG_LINES = 100;
 
+const SORT_OPTIONS = [
+  { value: 'name-asc', label: 'Nome, A a Z' },
+  { value: 'name-desc', label: 'Nome, Z a A' },
+  { value: 'cpu-desc', label: 'CPU, maior primeiro' },
+  { value: 'cpu-asc', label: 'CPU, menor primeiro' },
+  { value: 'mem-desc', label: 'Memória, maior primeiro' },
+  { value: 'mem-asc', label: 'Memória, menor primeiro' },
+];
+
 const ContainersView = () => {
   const dialog = useDialog();
   const { canOperate } = useRole();
   const [containers, setContainers] = useState<ContainerLiveStat[]>([]);
+  const live = useLoadStatus();
+  const { ok: liveOk, fail: liveFail } = live;
   const [search, setSearch] = useState('');
+  const [prefs, setPrefs] = useState<ContainerPrefs>(loadContainerPrefs);
+
+  const updatePrefs = (patch: Partial<ContainerPrefs>) => {
+    setPrefs((prev) => {
+      const next = { ...prev, ...patch };
+      saveContainerPrefs(next);
+      return next;
+    });
+  };
 
   const [selectedContainer, setSelectedContainer] = useState<ContainerLiveStat | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -23,8 +55,13 @@ const ContainersView = () => {
     const controller = new AbortController();
     const fetchMetrics = () => {
       api.liveMetrics(controller.signal)
-        .then(data => setContainers(data.containers))
-        .catch(() => {});
+        .then(data => {
+          setContainers(data.containers);
+          liveOk();
+        })
+        .catch(err => {
+          if (!controller.signal.aborted) liveFail(err, 'Falha ao ler os containers.');
+        });
     };
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 3000);
@@ -32,42 +69,18 @@ const ContainersView = () => {
       clearInterval(interval);
       controller.abort();
     };
-  }, []);
+  }, [liveOk, liveFail]);
+
+  const logStream = useStreamComReconexao({
+    path: '/api/containers/logs/stream',
+    params: selectedContainer
+      ? { server_id: selectedContainer.server_id, container_name: selectedContainer.name }
+      : null,
+    onMessage: (data) => setLogs(prev => [...prev, data].slice(-MAX_LOG_LINES)),
+  });
 
   useEffect(() => {
-    if (!selectedContainer) return;
-
     setLogs([]);
-
-    // O ticket é buscado de forma assíncrona: se a tela fechar antes da
-    // resposta, o stream nem chega a ser aberto.
-    let source: EventSource | null = null;
-    let cancelled = false;
-
-    openStream('/api/containers/logs/stream', {
-      server_id: selectedContainer.server_id,
-      container_name: selectedContainer.name,
-    })
-      .then(es => {
-        if (cancelled) {
-          es.close();
-          return;
-        }
-        source = es;
-        es.onmessage = (event) => {
-          setLogs(prev => [...prev, event.data].slice(-MAX_LOG_LINES));
-        };
-        es.onerror = () => {
-          setLogs(prev => [...prev, '[Conexão de Logs Encerrada]']);
-          es.close();
-        };
-      })
-      .catch(() => setLogs(['[Falha ao autorizar o stream de logs]']));
-
-    return () => {
-      cancelled = true;
-      source?.close();
-    };
   }, [selectedContainer]);
 
   useEffect(() => {
@@ -78,9 +91,6 @@ const ContainersView = () => {
 
   const toggleProject = (project: string) => {
     setExpandedProjects(prev => ({
-      // O projeto nasce aberto sem chave no mapa. Inverter `prev[project]`
-      // direto gravava `true` no primeiro clique — que também é aberto — e o
-      // operador precisava clicar duas vezes para fechar.
       ...prev,
       [project]: prev[project] === false,
     }));
@@ -109,18 +119,10 @@ const ContainersView = () => {
     }
   };
 
-  const groupedContainers = useMemo(() => {
-    const filtered = containers.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
-    const groups: Record<string, ContainerLiveStat[]> = {};
-
-    filtered.forEach(c => {
-      const proj = c.project || 'Sem Projeto (Avulsos)';
-      if (!groups[proj]) groups[proj] = [];
-      groups[proj].push(c);
-    });
-
-    return groups;
-  }, [containers, search]);
+  const groupedContainers = useMemo(
+    () => groupContainers(containers, { ...prefs, search }),
+    [containers, prefs, search],
+  );
 
   const liveSelected = selectedContainer ? containers.find(c => c.docker_id === selectedContainer.docker_id) || selectedContainer : null;
 
@@ -144,13 +146,37 @@ const ContainersView = () => {
       </div>
 
       <div className="panel p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="eyebrow">Projetos e containers · {containers.length}</h2>
-          <span className="badge badge-ok">
-            <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse"></span>
-            ao vivo
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <h2 className="eyebrow">Projetos e containers · {containers.length}</h2>
+            <span className="badge badge-ok">
+              <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse"></span>
+              ao vivo
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-xs text-text-mut">
+              <input
+                type="checkbox"
+                checked={prefs.hideStopped}
+                onChange={(e) => updatePrefs({ hideStopped: e.target.checked })}
+              />
+              Ocultar parados
+            </label>
+            <Select
+              ariaLabel="Ordenar por"
+              className="w-56"
+              value={`${prefs.sortBy}-${prefs.direction}`}
+              onChange={(v) => {
+                const [sortBy, direction] = v.split('-') as [ContainerSortField, SortDirection];
+                updatePrefs({ sortBy, direction });
+              }}
+              options={SORT_OPTIONS}
+            />
+          </div>
         </div>
+
+        <LoadNotice error={live.error} lastOk={live.lastOk} className="mb-3" />
 
         <div className="overflow-x-auto custom-scrollbar">
           <table className="table-base min-w-[800px]">
@@ -165,17 +191,18 @@ const ContainersView = () => {
               </tr>
             </thead>
             <tbody>
-              {Object.keys(groupedContainers).length === 0 ? (
+              {groupedContainers.length === 0 ? (
+                live.error && !live.lastOk ? null : (
                 <tr>
                   <td colSpan={6} className="py-8 text-center text-text-mut">Nenhum container encontrado.</td>
                 </tr>
+                )
               ) : (
-                Object.entries(groupedContainers).map(([project, projContainers]) => {
-                  const isExpanded = expandedProjects[project] !== false; // default true
+                groupedContainers.map(({ project, containers: projContainers, cpuTotal, memTotal }) => {
+                  const isExpanded = expandedProjects[project] !== false;
 
                   return (
                     <React.Fragment key={project}>
-                      {/* Linha do projeto */}
                       <tr
                         className="bg-ink-900 cursor-pointer"
                         onClick={() => toggleProject(project)}
@@ -184,15 +211,18 @@ const ContainersView = () => {
                           {isExpanded ? <ChevronDown size={16} strokeWidth={1.75} /> : <ChevronRight size={16} strokeWidth={1.75} />}
                         </td>
                         <td colSpan={5}>
-                          <div className="flex items-center gap-2.5">
+                          <div className="flex flex-wrap items-center gap-2.5" data-testid={`projeto-${project}`}>
                             <Folder size={14} strokeWidth={1.75} className="text-text-faint" />
                             <span className="font-semibold text-text-hi">{project}</span>
                             <span className="badge badge-muted">{projContainers.length} containers</span>
+                            <span className="ml-auto flex items-center gap-4 text-xs text-text-mut">
+                              <span className="mono-data">CPU {cpuTotal.toFixed(1)}%</span>
+                              <span className="mono-data">Mem {formatBytes(memTotal)}</span>
+                            </span>
                           </div>
                         </td>
                       </tr>
 
-                      {/* Linhas dos containers */}
                       {isExpanded && projContainers.map((c) => {
                         const memUsedStr = formatBytes(c.mem_used);
                         const memLimitStr = formatBytes(c.mem_limit);
@@ -205,7 +235,7 @@ const ContainersView = () => {
                             <td>
                               <div className="flex items-center gap-3">
                                 <div className="w-5 h-px bg-line" />
-                                <span className="mono-data text-text-hi">{c.name}</span>
+                                <span className="mono-data text-text-hi" data-testid="container-nome">{c.name}</span>
                               </div>
                             </td>
                             <td>
@@ -247,7 +277,6 @@ const ContainersView = () => {
                                 >
                                   <Terminal size={16} strokeWidth={1.75} />
                                 </button>
-                                {/* Start/stop/restart mudam a infraestrutura: só Suporte TI para cima. */}
                                 {canOperate && (isRunning ? (
                                   <>
                                     <button
@@ -291,7 +320,6 @@ const ContainersView = () => {
         </div>
       </div>
 
-      {/* Modal de logs */}
       {selectedContainer && liveSelected && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="panel w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden shadow-pop">
@@ -309,7 +337,6 @@ const ContainersView = () => {
               </button>
             </div>
 
-            {/* Consumo isolado do container */}
             {liveSelected.state === 'running' && (
               <div className="grid grid-cols-2 gap-3 p-4 border-b border-line bg-ink-900">
                 <div className="flex items-center gap-3 p-3 rounded-ctrl border border-line bg-ink-850">
@@ -331,10 +358,18 @@ const ContainersView = () => {
               </div>
             )}
 
-            {/* Terminal de logs */}
+            {logStream.reconectando && (
+              <div role="status" className="flex items-center gap-2 border-b border-line bg-ink-850 px-4 py-2 text-xs text-warn">
+                <RefreshCw size={13} strokeWidth={1.75} className="animate-spin" />
+                Conexão de logs caiu. Reconectando...
+              </div>
+            )}
+
             <div className="flex-1 bg-ink-950 p-4 overflow-y-auto font-mono text-xs text-text leading-relaxed custom-scrollbar">
               {logs.length === 0 ? (
-                <div className="text-text-faint">Conectando ao container via SSH e puxando os logs...</div>
+                <div className="text-text-faint">
+                  {logStream.reconectando ? 'Reconectando ao container...' : 'Conectando ao container via SSH e puxando os logs...'}
+                </div>
               ) : (
                 logs.map((log, i) => <div key={i} className="whitespace-pre-wrap break-all selectable">{log}</div>)
               )}

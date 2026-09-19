@@ -6,25 +6,15 @@ import (
 	"time"
 )
 
-// UUIDs sintéticos, fora de qualquer faixa gerada por gen_random_uuid() na
-// prática, para o teste não tocar container de verdade.
 const (
-	testServerID  = "00000000-0000-0000-0000-0000000000ff"
-	ctStale       = "00000000-0000-0000-0000-0000000000c1"
-	ctActive      = "00000000-0000-0000-0000-0000000000c2"
-	ctFresh       = "00000000-0000-0000-0000-0000000000c3"
-	testRetention = 7 * 24 * time.Hour
-	// Prazo enorme de propósito: estes testes medem a poda de métrica, e
-	// uma retenção curta de auditoria faria a poda apagar linha de outro
-	// teste rodando contra o mesmo banco.
+	testServerID       = "00000000-0000-0000-0000-0000000000ff"
+	ctStale            = "00000000-0000-0000-0000-0000000000c1"
+	ctActive           = "00000000-0000-0000-0000-0000000000c2"
+	ctFresh            = "00000000-0000-0000-0000-0000000000c3"
+	testRetention      = 7 * 24 * time.Hour
 	testAuditRetention = 3650 * 24 * time.Hour
 )
 
-// setupRetentionDB liga no Postgres de desenvolvimento. Sem DATABASE_URL o
-// teste é pulado: a suíte precisa passar numa máquina sem banco.
-//
-// A cobertura é de integração porque o que se testa é a semântica do DELETE com
-// NOT EXISTS entre duas tabelas — nada disso aparece num teste de unidade.
 func setupRetentionDB(t *testing.T) {
 	t.Helper()
 
@@ -76,8 +66,6 @@ func containerExists(t *testing.T, id string) bool {
 	return n > 0
 }
 
-// O caso do achado 8: container apagado na VPS deixa de gerar métrica, some da
-// tela, mas o cadastro ficava para sempre.
 func TestPruneRemoveContainerSemMetricaRecente(t *testing.T) {
 	setupRetentionDB(t)
 
@@ -85,7 +73,7 @@ func TestPruneRemoveContainerSemMetricaRecente(t *testing.T) {
 	velho := agora.Add(-30 * 24 * time.Hour)
 
 	makeContainer(t, ctStale, "morto", velho)
-	makeMetric(t, ctStale, velho) // única métrica, mais velha que a retenção
+	makeMetric(t, ctStale, velho)
 
 	makeContainer(t, ctActive, "vivo", velho)
 	makeMetric(t, ctActive, velho)
@@ -107,8 +95,6 @@ func TestPruneRemoveContainerSemMetricaRecente(t *testing.T) {
 	}
 }
 
-// Container recém-criado ainda não tem amostra. Sem o corte por created_at ele
-// nasceria e morreria na janela entre o cadastro e a primeira coleta.
 func TestPrunePreservaContainerRecemCriado(t *testing.T) {
 	setupRetentionDB(t)
 
@@ -121,13 +107,11 @@ func TestPrunePreservaContainerRecemCriado(t *testing.T) {
 	}
 }
 
-// Métrica cujo container sumiu não aparece em tela nenhuma e nunca volta a ser
-// coletada.
 func TestPruneRemoveMetricaOrfa(t *testing.T) {
 	setupRetentionDB(t)
 
 	orfa := ctActive
-	makeMetric(t, orfa, time.Now().UTC()) // recente, mas sem linha em containers
+	makeMetric(t, orfa, time.Now().UTC())
 
 	prune(testRetention, testAuditRetention)
 
@@ -138,16 +122,12 @@ func TestPruneRemoveMetricaOrfa(t *testing.T) {
 	}
 }
 
-// A poda não pode rodar antes do primeiro rollup: se o painel ficou fora do ar
-// mais que a retenção, apagaria bruto que nunca virou trend.
 func TestRetentionEsperaOSinalDoRollup(t *testing.T) {
 	setupRetentionDB(t)
 
 	makeContainer(t, ctStale, "alvo-da-poda", time.Now().UTC().Add(-30*24*time.Hour))
 
 	ready := make(chan struct{})
-	// Intervalo de uma hora: a única poda que roda neste teste é a do boot, e é
-	// justamente ela que precisa esperar.
 	StartRetentionWorker(testRetention, time.Hour, ready)
 
 	time.Sleep(100 * time.Millisecond)

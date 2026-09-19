@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
+import { useState, useEffect, useRef } from 'react';
 import { Activity, Terminal, RefreshCw, XCircle } from 'lucide-react';
-import { api, openStream, type PortInfo, type ServerLiveStat } from '../lib/api';
+import { api, type PortInfo, type ServerLiveStat } from '../lib/api';
+import { useStreamComReconexao } from './ui/stream-reconnect';
 import Select from './ui/Select';
 
 type AuthLogType = 'error' | 'success' | 'info';
 
 interface AuthLog {
-  // A lista é uma janela deslizante: o índice muda de linha a cada evento,
-  // então precisa de id próprio para o React não remontar tudo.
   id: number;
   time: string;
   raw: string;
@@ -31,31 +32,33 @@ const AUTH_LINE_CLASS: Record<AuthLogType, string> = {
 const SecurityView = () => {
   const [activeTab, setActiveTab] = useState<'radar' | 'auth'>('radar');
   const [servers, setServers] = useState<ServerLiveStat[]>([]);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
+  const radar = useLoadStatus();
+  const { ok: radarOk, fail: radarFail } = radar;
   const [selectedServer, setSelectedServer] = useState<string>('');
 
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [loadingPorts, setLoadingPorts] = useState(false);
 
   const [authLogs, setAuthLogs] = useState<AuthLog[]>([]);
-  const [streamActive, setStreamActive] = useState(false);
+  const lineId = useRef(0);
 
-  // Busca servidores iniciais
   useEffect(() => {
     const controller = new AbortController();
     api.liveMetrics(controller.signal)
       .then(data => {
-        // Filtra o Load Balancer, pois queremos VPS reais para SSH
         const vpsList = data.servers.filter(s => s.name !== 'Load Balancer');
         setServers(vpsList);
         setSelectedServer(prev => prev || vpsList[0]?.id || '');
+        cargaOk();
       })
       .catch(err => {
-        if (!controller.signal.aborted) console.error(err);
+        if (!controller.signal.aborted) cargaFail(err, 'Falha ao listar os servidores.');
       });
     return () => controller.abort();
-  }, []);
+  }, [cargaOk, cargaFail]);
 
-  // Efeito Radar de Portas
   useEffect(() => {
     if (activeTab !== 'radar' || !selectedServer) return;
 
@@ -65,58 +68,35 @@ const SecurityView = () => {
       .then(data => {
         setPorts(data);
         setLoadingPorts(false);
+        radarOk();
       })
       .catch(err => {
         if (controller.signal.aborted) return;
-        console.error(err);
+        setPorts([]);
+        radarFail(err, 'Falha ao ler as portas deste servidor.');
         setLoadingPorts(false);
       });
 
     return () => controller.abort();
-  }, [activeTab, selectedServer]);
+  }, [activeTab, selectedServer, radarOk, radarFail]);
 
-  // Efeito Stream Auth.log
+  const authStream = useStreamComReconexao({
+    path: '/api/security/authlog/stream',
+    params: activeTab === 'auth' && selectedServer ? { server_id: selectedServer } : null,
+    onMessage: (raw) => {
+      const time = new Date().toLocaleTimeString('pt-BR');
+      lineId.current += 1;
+      setAuthLogs(prev => [...prev, { id: lineId.current, time, raw, type: classifyAuthLine(raw) }].slice(-MAX_AUTH_LINES));
+    },
+  });
+
   useEffect(() => {
-    if (activeTab !== 'auth' || !selectedServer) return;
-
     setAuthLogs([]);
-    setStreamActive(true);
-
-    // O ticket é buscado de forma assíncrona: se a aba mudar antes da
-    // resposta, o stream nem chega a ser aberto.
-    let source: EventSource | null = null;
-    let cancelled = false;
-    let lineId = 0;
-
-    openStream('/api/security/authlog/stream', { server_id: selectedServer })
-      .then(es => {
-        if (cancelled) {
-          es.close();
-          return;
-        }
-        source = es;
-        es.onmessage = (event) => {
-          const raw = event.data;
-          const time = new Date().toLocaleTimeString('pt-BR');
-          const entry = { id: ++lineId, time, raw, type: classifyAuthLine(raw) };
-          setAuthLogs(prev => [...prev, entry].slice(-MAX_AUTH_LINES));
-        };
-        es.onerror = () => {
-          es.close();
-          setStreamActive(false);
-        };
-      })
-      .catch(() => setStreamActive(false));
-
-    return () => {
-      cancelled = true;
-      source?.close();
-      setStreamActive(false);
-    };
   }, [activeTab, selectedServer]);
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden anim-rise">
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
       <div className="page-header flex-col md:flex-row md:items-end items-start">
         <div>
           <h1 className="page-title">Segurança &amp; Auditoria</h1>
@@ -139,7 +119,6 @@ const SecurityView = () => {
       </div>
 
       <div className="panel flex flex-col flex-1 min-h-0 overflow-hidden">
-        {/* Tabs */}
         <div className="flex border-b border-line bg-ink-950/60">
           <button
             onClick={() => setActiveTab('radar')}
@@ -155,7 +134,6 @@ const SecurityView = () => {
           </button>
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-auto custom-scrollbar p-4">
           {activeTab === 'radar' ? (
             loadingPorts ? (
@@ -181,15 +159,13 @@ const SecurityView = () => {
                       <span className="mono-data text-text bg-ink-800 border border-line px-2 py-0.5 rounded">{port.process}</span>
                     </td>
                     <td>
-                      {/* Porta em LISTEN para 0.0.0.0 é exatamente o achado que
-                          esta tela existe para mostrar — nunca verde. */}
                       <span className="badge badge-warn">{port.state} 0.0.0.0</span>
                     </td>
                   </tr>
                 ))}
                 {ports.length === 0 && (
                    <tr>
-                     <td colSpan={4} className="py-6 text-center text-text-faint">Nenhuma porta LISTEN exposta encontrada.</td>
+                     <td colSpan={4} className="py-6 text-center text-text-faint">{radar.error ? radar.error : 'Nenhuma porta LISTEN exposta encontrada.'}</td>
                    </tr>
                 )}
               </tbody>
@@ -206,9 +182,13 @@ const SecurityView = () => {
                 </div>
               ))}
               <div className="mt-4 flex items-center text-text-faint gap-2 border-t border-line pt-2">
-                {streamActive ? (
+                {authStream.conectado && (
                   <><RefreshCw size={14} className="animate-spin text-ok" /> <span className="text-ok/80">Túnel SSH aberto. Escutando /var/log/auth.log...</span></>
-                ) : (
+                )}
+                {authStream.reconectando && (
+                  <><RefreshCw size={14} className="animate-spin text-warn" /> <span className="text-warn/90">Conexão caiu. Reconectando ao auth.log...</span></>
+                )}
+                {!authStream.conectado && !authStream.reconectando && (
                   <><XCircle size={14} className="text-crit" /> <span className="text-crit/80">Conexão SSE fechada.</span></>
                 )}
               </div>

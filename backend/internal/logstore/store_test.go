@@ -8,9 +8,6 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// UUIDs sintéticos deste pacote. Prefixo próprio porque os binários de teste de
-// vários pacotes rodam em paralelo contra o mesmo Postgres, e limpeza cega de um
-// já atropelou a de outro nesta base.
 const (
 	srvLogstore      = "00000000-0000-0000-0000-00000000105e"
 	srvLogstoreOutro = "00000000-0000-0000-0000-00000000105f"
@@ -48,31 +45,24 @@ func contarLinhas(t *testing.T, serverID string) int64 {
 	return n
 }
 
-// Os dois chamadores de Save são laços `for scanner.Scan()` sobre `tail -f` de
-// auth.log e de `docker logs`. Os dois fluxos emitem linha em branco o tempo
-// todo, e log_entries é a tabela de maior volume do sistema: sem esta guarda,
-// cada linha vazia vira uma linha gravada, e a poda passa a correr atrás de
-// registro que nunca deveria ter existido.
 func TestLinhaEmBrancoNaoEGravada(t *testing.T) {
 	setupLogstoreDB(t)
 
 	for _, vazia := range []string{"", " ", "\t", "\n", "   \t\n  "} {
 		Save(srvLogstore, "auth", "", vazia)
 	}
+	Flush()
 
 	if n := contarLinhas(t, srvLogstore); n != 0 {
 		t.Errorf("linhas gravadas = %d, esperada nenhuma: linha em branco entrou no histórico", n)
 	}
 }
 
-// O contraponto que impede o teste acima de ser satisfeito por um Save que
-// ignora tudo. Confere também os quatro campos: gravar a linha no lugar do
-// container, ou perder o source, quebraria o filtro da tela de Segurança sem
-// quebrar a contagem.
 func TestLinhaRealEGravadaComOsCamposIntactos(t *testing.T) {
 	setupLogstoreDB(t)
 
 	Save(srvLogstore, "container", "nginx_proxy", "Accepted publickey for root")
+	Flush()
 
 	var entrada database.LogEntry
 	if err := database.DB.Where("server_id = ?", srvLogstore).First(&entrada).Error; err != nil {
@@ -90,14 +80,12 @@ func TestLinhaRealEGravadaComOsCamposIntactos(t *testing.T) {
 	}
 }
 
-// A linha é gravada como veio, sem trim. O TrimSpace existe só para DECIDIR se a
-// linha entra; aplicá-lo ao conteúdo comeria a indentação de stack trace e de
-// log multilinha de container, que é justamente o que se lê quando algo quebrou.
 func TestIndentacaoDaLinhaEPreservada(t *testing.T) {
 	setupLogstoreDB(t)
 
 	const comIndentacao = "    at main.handler (server.go:42)"
 	Save(srvLogstore, "container", "app", comIndentacao)
+	Flush()
 
 	var entrada database.LogEntry
 	if err := database.DB.Where("server_id = ?", srvLogstore).First(&entrada).Error; err != nil {
@@ -108,21 +96,13 @@ func TestIndentacaoDaLinhaEPreservada(t *testing.T) {
 	}
 }
 
-// A linha é carimbada no instante da chamada. Não é preciosismo: quem define o
-// horário aqui é o Go, não o Postgres, e um Timestamp deixado no valor zero
-// grava o ano 1 — a linha nasce velha e a primeira passada da retenção a apaga,
-// então o histórico simplesmente não existiria e nada acusaria erro.
-//
-// A conferência é do INSTANTE, não do fuso: a coluna é `timestamp with time
-// zone`, então o Postgres normaliza a gravação e time.Now() e time.Now().UTC()
-// produzem exatamente o mesmo valor. O .UTC() no código é estilo defensivo, não
-// guarda de correção — um teste de fuso aqui passaria nos dois estados.
 func TestLinhaECarimbadaNoInstanteDaChamada(t *testing.T) {
 	setupLogstoreDB(t)
 
 	antes := time.Now().UTC()
 	Save(srvLogstore, "auth", "", "linha para conferir o horário")
 	depois := time.Now().UTC()
+	Flush()
 
 	var entrada database.LogEntry
 	if err := database.DB.Where("server_id = ?", srvLogstore).First(&entrada).Error; err != nil {
@@ -130,20 +110,12 @@ func TestLinhaECarimbadaNoInstanteDaChamada(t *testing.T) {
 	}
 
 	gravado := entrada.Timestamp.UTC()
-	// Um segundo de folga nas pontas absorve o arredondamento do Postgres.
 	if gravado.Before(antes.Add(-time.Second)) || gravado.After(depois.Add(time.Second)) {
 		t.Errorf("timestamp = %s, fora da janela [%s, %s] da chamada",
 			gravado, antes, depois)
 	}
 }
 
-// Save é chamada de dentro de um `for scanner.Scan()`. Uma linha que o banco
-// recuse não pode derrubar o laço: o stream inteiro morreria por causa de uma
-// linha, e a tela pararia de receber sem nenhum erro visível.
-//
-// O ServerID é `type:uuid`, então um valor que não seja UUID produz um erro real
-// do Postgres — o mesmo caminho de "o banco recusou a linha", sem precisar
-// derrubar a conexão compartilhada com os outros pacotes.
 func TestErroDoBancoNaoDerrubaOChamador(t *testing.T) {
 	setupLogstoreDB(t)
 
@@ -154,17 +126,9 @@ func TestErroDoBancoNaoDerrubaOChamador(t *testing.T) {
 	}()
 
 	Save("isto-nao-e-um-uuid", "auth", "", "linha que o banco vai recusar")
+	Flush()
 }
 
-// A poda apaga o que é velho e preserva o que é recente. Uma inversão do sinal
-// no cálculo do corte apagaria exatamente o inverso — o histórico recente, que é
-// o que se consulta — e não quebraria nada visível até alguém procurar um log de
-// ontem e não achar.
-//
-// Cuidado ao mexer: o DELETE de StartRetention é global, não recortado por
-// server_id. maxAge de 24h com os demais pacotes semeando log em time.Now()
-// mantém o corte longe das linhas deles; semear linha antiga em outro pacote
-// passaria a interferir aqui.
 func TestPodaApagaOVelhoEPreservaORecente(t *testing.T) {
 	setupLogstoreDB(t)
 
@@ -179,9 +143,6 @@ func TestPodaApagaOVelhoEPreservaORecente(t *testing.T) {
 		}
 	}
 
-	// Intervalo longo de propósito: o laço poda UMA vez e fica bloqueado no
-	// ticker. Sem isso a goroutine — que não tem como ser parada — ficaria
-	// apagando a tabela durante o resto da suíte.
 	StartRetention(24*time.Hour, time.Hour)
 
 	esperarPoda(t, srvLogstore)
@@ -194,9 +155,6 @@ func TestPodaApagaOVelhoEPreservaORecente(t *testing.T) {
 	}
 }
 
-// esperarPoda aguarda a goroutine da retenção rodar a primeira passada. Sondar é
-// preferível a dormir um valor fixo: o teste termina assim que a poda acontece,
-// e falha com mensagem própria se ela não acontecer.
 func esperarPoda(t *testing.T, serverID string) {
 	t.Helper()
 

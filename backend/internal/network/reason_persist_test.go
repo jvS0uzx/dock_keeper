@@ -44,10 +44,6 @@ func lerDominio(t *testing.T, id uint) database.Domain {
 	return d
 }
 
-// servidorTLSConfiavel sobe um TLS local e aponta a verificação para ele, com o
-// certificado dele nas raízes. É o que permite exercitar CheckAndStore no
-// caminho do certificado VÁLIDO sem sair para a internet — e o caminho válido é
-// justamente onde mora o defeito de não limpar o motivo anterior.
 func servidorTLSConfiavel(t *testing.T) {
 	t.Helper()
 
@@ -69,13 +65,9 @@ func servidorTLSConfiavel(t *testing.T) {
 	t.Setenv("SSL_EXTRA_CA", caminho)
 }
 
-// O motivo precisa chegar ao banco: enquanto a coluna não existia, a
-// classificação morria em SSLInfo e a tela só recebia a frase de error_msg.
 func TestMotivoDaInvalidezEPersistido(t *testing.T) {
 	setupDominioDB(t)
 
-	// Sem SSL_EXTRA_CA o certificado do servidor local não é confiável, então a
-	// verificação classifica o motivo em vez de aprovar.
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer ts.Close()
 	_, porta, err := net.SplitHostPort(ts.Listener.Addr().String())
@@ -100,10 +92,6 @@ func TestMotivoDaInvalidezEPersistido(t *testing.T) {
 	}
 }
 
-// O defeito que este teste existe para impedir: gravar o motivo só quando há
-// problema deixa o domínio verde exibindo, para sempre, a causa da falha
-// anterior. A renovação de certificado é justamente o momento em que ninguém
-// olha de novo.
 func TestRenovacaoLimpaOMotivoAnterior(t *testing.T) {
 	setupDominioDB(t)
 	servidorTLSConfiavel(t)
@@ -113,7 +101,6 @@ func TestRenovacaoLimpaOMotivoAnterior(t *testing.T) {
 		t.Fatalf("criar domínio: %v", err)
 	}
 
-	// Estado sujo, como o de um domínio que falhou num ciclo anterior.
 	if err := database.DB.Model(&database.Domain{}).Where("id = ?", d.ID).
 		Updates(map[string]any{
 			"valid":          false,

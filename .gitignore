@@ -1,22 +1,14 @@
-# Segredos. Sem barra, então casa em qualquer nível: .env, backend/.env,
-# frontend/.env, backend/deploy/agent/agent.env. O glob cobre a categoria
-# inteira em vez de um nome por vez — um arquivo terminado em .env rastreado é
-# convite a preencher com o valor real e commitar sem perceber.
 *.env
 !*.env.exemplo
 !*.env.example
 *.pem
 *.key
 
-# Anotação pessoal de trabalho, não faz parte do projeto.
 notes.txt
 
-# Sistema e editor
 .DS_Store
 .idea/
 *.swp
 
-# Saída de build. Cada subprojeto repete o que é dele em backend/.gitignore e
-# frontend/.gitignore; estas linhas cobrem quem compilar da raiz.
 dist/
 build/

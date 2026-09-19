@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// Zero não é temperatura de máquina em operação: é o agente sem sensor. Gravá-lo
-// fazia o painel exibir "0 °C" como se fosse leitura.
 func TestTemperatureOfDescartaZero(t *testing.T) {
 	zero := 0.0
 	real := 41.5
@@ -23,7 +21,6 @@ func TestTemperatureOfDescartaZero(t *testing.T) {
 	}
 }
 
-// O painel precisa receber null, não 0, para a tela escrever "sem sensor".
 func TestServerLiveStatSerializaNulo(t *testing.T) {
 	b, err := json.Marshal(ServerLiveStat{ID: "x"})
 	if err != nil {

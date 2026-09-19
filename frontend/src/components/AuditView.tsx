@@ -18,9 +18,6 @@ const RESULTS: SelectOption[] = [
   { value: 'pending', label: 'Em execução' },
 ];
 
-// Famílias de ação, pelo prefixo que o backend usa. O filtro casa a família
-// inteira, então "container" traz start, stop e restart sem o operador precisar
-// decorar o verbo.
 const ACTIONS: SelectOption[] = [
   { value: '', label: 'Todas' },
   { value: 'auth', label: 'Autenticação' },
@@ -38,11 +35,6 @@ const ACTIONS: SelectOption[] = [
   { value: 'ingest', label: 'Ingestão' },
 ];
 
-/**
- * O resultado é a coluna que o administrador varre primeiro: "recusado" é o que
- * ele procura quando desconfia de alguma coisa, e precisa saltar da tabela sem
- * ele ter que ler texto.
- */
 const RESULT_STYLES: Record<string, { label: string; className: string; Icon: typeof CircleCheck }> = {
   ok: { label: 'Aceito', className: 'badge-ok', Icon: CircleCheck },
   denied: { label: 'Recusado', className: 'badge-crit', Icon: CircleSlash },
@@ -65,10 +57,6 @@ const ResultBadge = ({ result }: { result: string }) => {
   );
 };
 
-/**
- * O detalhe chega como JSON serializado. Imprimi-lo cru numa célula produz uma
- * linha ilegível que ninguém lê — e o detalhe é justamente o que explica a ação.
- */
 const DetailCells = ({ detail }: { detail: string }) => {
   let parsed: Record<string, unknown>;
   try {
@@ -102,9 +90,6 @@ const AuditView = () => {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
 
-  // Os filtros aplicados, separados dos campos do formulário: sem isso, mudar
-  // um campo e paginar traria a página seguinte de uma busca que não é a que
-  // está na tela.
   const [applied, setApplied] = useState<AuditQuery>({});
   const [offset, setOffset] = useState(0);
 
@@ -138,8 +123,6 @@ const AuditView = () => {
     return () => controller.abort();
   }, [applied, offset, carregar]);
 
-  // O <input type="datetime-local"> devolve "2026-08-22T14:30", sem fuso; o
-  // backend exige RFC3339 e recusa o resto com 400.
   const paraRFC3339 = (local: string): string | undefined => {
     if (!local) return undefined;
     const date = new Date(local);

@@ -21,15 +21,13 @@ func TestIsValidContainerNameExpoeARegra(t *testing.T) {
 	}
 }
 
-// sessaoSemStdin cobre o único caminho de runScript que a sessaoFalsa do
-// collect_config_test não alcança: a falha ao abrir o stdin.
 type sessaoSemStdin struct{}
 
 func (sessaoSemStdin) StdinPipe() (io.WriteCloser, error) { return nil, errors.New("sem stdin") }
 func (sessaoSemStdin) Start(string) error                 { return nil }
 
 func TestRunScriptPropagaFalhaDoStdin(t *testing.T) {
-	if err := runScript(sessaoSemStdin{}, "x"); err == nil {
+	if err := runScript(sessaoSemStdin{}, Target{}, "x"); err == nil {
 		t.Fatal("falha do StdinPipe foi engolida")
 	}
 }
@@ -64,8 +62,6 @@ func TestLBCounterAcumulaPorChave(t *testing.T) {
 }
 
 func TestLBCounterFlushVazioNaoTocaOBanco(t *testing.T) {
-	// Sem linha pendente o flush não pode ir ao banco — este teste roda com
-	// database.DB nulo e um Create aqui seria pânico.
 	c := newLBCounter(nil, nil)
 	c.flush()
 }
@@ -96,8 +92,6 @@ func TestStreamDockerLogsTransmiteAsDuasSaidas(t *testing.T) {
 		mu.Lock()
 		comando = cmd
 		mu.Unlock()
-		// docker logs manda a saída da aplicação também em stderr; o stream
-		// tem de repassar as duas pontas.
 		return respostaExec{stdout: "app de pé\n", stderr: "warn: cache frio\n"}
 	})
 
@@ -122,8 +116,6 @@ func TestStreamDockerLogsTransmiteAsDuasSaidas(t *testing.T) {
 
 func TestStartStreamToleraPayloadInvalido(t *testing.T) {
 	alvo := alvoComServidor(t, func(string) respostaExec {
-		// Linha que não é JSON tem de ser pulada sem derrubar o stream — é o
-		// contrato com o stream_metrics.sh, que tolera linha suja.
 		return respostaExec{stdout: "isto não é json\n", consomeStdin: true}
 	})
 

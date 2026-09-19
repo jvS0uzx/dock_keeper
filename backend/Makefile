@@ -1,9 +1,3 @@
-# Cross-compile do agente de estacao (cmd/agent).
-#
-# CGO_ENABLED=0 gera binario estatico, sem dependencia de libc do destino —
-# essencial para instalar em estacoes heterogeneas. -s -w tira simbolos e
-# DWARF, reduzindo o tamanho do binario distribuido.
-
 BIN_DIR := dist
 LDFLAGS := -s -w
 

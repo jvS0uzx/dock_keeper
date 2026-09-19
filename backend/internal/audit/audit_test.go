@@ -28,9 +28,6 @@ func limpar(t *testing.T) {
 	database.DB.Where("action LIKE ?", "teste.%").Delete(&database.AuditLog{})
 }
 
-// A coluna é jsonb: string vazia não é documento JSON válido, e o INSERT
-// inteiro falharia por causa de um campo acessório — levando embora o registro
-// da ação junto com o detalhe.
 func TestDetalheVazioGravaObjetoVazio(t *testing.T) {
 	setupAuditDB(t)
 
@@ -73,8 +70,6 @@ func TestDetalheSobreviveAoRoundTrip(t *testing.T) {
 	}
 }
 
-// Complete precisa MESCLAR: o que se sabia antes da execução — alvo,
-// argumentos — continua valendo depois dela, e um Update cru apagaria tudo.
 func TestCompleteMesclaODetalheAnterior(t *testing.T) {
 	setupAuditDB(t)
 
@@ -108,8 +103,6 @@ func TestCompleteMesclaODetalheAnterior(t *testing.T) {
 	}
 }
 
-// Um User-Agent absurdo não pode fazer o INSERT estourar o size da coluna e
-// levar embora o registro da ação junto.
 func TestUserAgentGiganteNaoDerrubaORegistro(t *testing.T) {
 	setupAuditDB(t)
 
@@ -124,8 +117,6 @@ func TestUserAgentGiganteNaoDerrubaORegistro(t *testing.T) {
 	}
 }
 
-// Sem resultado explícito a linha nasce pendente, nunca em branco: "" não
-// distinguiria "ainda executando" de "não sabemos".
 func TestResultadoVazioViraPendente(t *testing.T) {
 	setupAuditDB(t)
 

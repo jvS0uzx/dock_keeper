@@ -7,11 +7,8 @@ import (
 	"time"
 )
 
-// noSleep substitui a pausa entre lotes para o teste não esperar de verdade.
 func noSleep(time.Duration) {}
 
-// O achado E6: o DELETE sem LIMIT trava a tabela inteira numa tacada. A poda
-// precisa sair em lotes até esgotar.
 func TestPruneBatchedRepeteAteOLoteVirIncompleto(t *testing.T) {
 	respostas := []int64{pruneBatchSize, pruneBatchSize, 137}
 	var chamadas int
@@ -44,8 +41,6 @@ func TestPruneBatchedRepeteAteOLoteVirIncompleto(t *testing.T) {
 	}
 }
 
-// Lote incompleto significa que acabou o que havia para apagar; insistir seria
-// uma varredura a mais por tabela a cada ciclo.
 func TestPruneBatchedParaNoPrimeiroLoteIncompleto(t *testing.T) {
 	var chamadas int
 	exec := func(string, ...any) (int64, error) {
@@ -61,13 +56,11 @@ func TestPruneBatchedParaNoPrimeiroLoteIncompleto(t *testing.T) {
 	}
 }
 
-// Uma base antiga não pode prender a rotina de retenção por horas na primeira
-// passada: o teto devolve o controle e o restante sai no ciclo seguinte.
 func TestPruneBatchedRespeitaOTetoDeLotes(t *testing.T) {
 	var chamadas int
 	exec := func(string, ...any) (int64, error) {
 		chamadas++
-		return pruneBatchSize, nil // sempre cheio: nunca esgota sozinho
+		return pruneBatchSize, nil
 	}
 
 	total, err := pruneBatched(exec, "metric_servers", "timestamp", time.Now(), noSleep)
@@ -82,8 +75,6 @@ func TestPruneBatchedRespeitaOTetoDeLotes(t *testing.T) {
 	}
 }
 
-// Erro no meio do laço devolve o que já foi apagado: o número entra no log e
-// não pode virar zero só porque o último lote falhou.
 func TestPruneBatchedDevolveOParcialNoErro(t *testing.T) {
 	falha := errors.New("conexão perdida")
 	var chamadas int

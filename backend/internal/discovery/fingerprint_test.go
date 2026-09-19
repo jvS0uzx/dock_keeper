@@ -25,8 +25,6 @@ func TestDeviceType(t *testing.T) {
 	}
 }
 
-// 9100 identifica impressora melhor que 80, que qualquer equipamento com
-// interface web também abre. A ordem da lista precisa refletir isso.
 func TestDeviceTypePrioridade(t *testing.T) {
 	if got := DeviceType([]int{80, 443, 445, 9100}); got != TypePrinter {
 		t.Errorf("impressora com SMB foi classificada como %q", got)

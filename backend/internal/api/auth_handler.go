@@ -13,8 +13,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// loginHandler troca usuário e senha por um token de sessão.
-// É a única rota, junto de /healthz, que não exige credencial prévia.
 func (c Config) loginHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username string `json:"username"`
@@ -25,9 +23,6 @@ func (c Config) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// O limite é conferido antes de auth.Login porque o custo que ele contém
-	// está lá dentro: um bcrypt de 60 a 100 ms por tentativa, que sem teto
-	// torna a rota uma negação de serviço não autenticada e barata.
 	ip := clientIP(r, c.TrustProxyHeaders)
 	if !c.logins.allowed(ip, req.Username) {
 		w.Header().Set("Retry-After", strconv.Itoa(int(c.logins.window.Seconds())))
@@ -38,8 +33,6 @@ func (c Config) loginHandler(w http.ResponseWriter, r *http.Request) {
 	session, err := auth.Login(req.Username, req.Password)
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials), errors.Is(err, auth.ErrUserInactive):
-		// Mesma resposta nos dois casos: dizer "usuário desativado" confirmaria
-		// que o nome existe.
 		c.logins.fail(ip, req.Username)
 		writeError(w, http.StatusUnauthorized, "usuário ou senha inválidos")
 		return
@@ -54,14 +47,11 @@ func (c Config) loginHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, session)
 }
 
-// logoutHandler encerra a sessão atual.
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
 	auth.Logout(bearerToken(r))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// meHandler devolve quem está autenticado e com qual papel, para o painel
-// esconder o que a pessoa não pode fazer.
 func (c Config) meHandler(w http.ResponseWriter, r *http.Request) {
 	if session, ok := auth.Lookup(bearerToken(r)); ok {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -72,7 +62,6 @@ func (c Config) meHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	// Chegou aqui autenticado sem sessão: é o API_TOKEN de máquina.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"username": "api-token",
 		"role":     auth.RoleAdmin,
@@ -81,19 +70,16 @@ func (c Config) meHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// userView é o usuário com as concessões por unidade anexadas.
 type userView struct {
 	database.User
 	Accesses []auth.Access `json:"accesses"`
 }
 
-// accessPayload é a lista de concessões enviada no create/update.
 type accessPayload []struct {
 	SiteID *uint  `json:"site_id"`
 	Role   string `json:"role"`
 }
 
-// validateAccesses confere papéis e existência das unidades citadas.
 func validateAccesses(payload accessPayload) ([]database.UserSiteAccess, error) {
 	rows := make([]database.UserSiteAccess, 0, len(payload))
 	for _, a := range payload {
@@ -112,24 +98,47 @@ func validateAccesses(payload accessPayload) ([]database.UserSiteAccess, error) 
 	return rows, nil
 }
 
-// replaceAccesses troca o conjunto de concessões do usuário numa transação.
-func replaceAccesses(userID uint, rows []database.UserSiteAccess) error {
+func criarUsuarioComAcessos(user *database.User, rows []database.UserSiteAccess) error {
 	return database.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ?", userID).Delete(&database.UserSiteAccess{}).Error; err != nil {
+		if err := tx.Create(user).Error; err != nil {
 			return err
 		}
-		if len(rows) == 0 {
-			return nil
-		}
-		for i := range rows {
-			rows[i].UserID = userID
-			rows[i].ID = 0
-		}
-		return tx.Create(&rows).Error
+		return replaceAccessesTx(tx, user.ID, rows)
 	})
 }
 
-// usersHandler faz o CRUD de usuários. Só admin chega aqui.
+func removerUsuario(user database.User) error {
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ?", user.ID).Delete(&database.UserSiteAccess{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("owner_user_id = ?", user.ID).Delete(&database.Dashboard{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&user).Error
+	})
+}
+
+func replaceAccesses(userID uint, rows []database.UserSiteAccess) error {
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		return replaceAccessesTx(tx, userID, rows)
+	})
+}
+
+func replaceAccessesTx(tx *gorm.DB, userID uint, rows []database.UserSiteAccess) error {
+	if err := tx.Where("user_id = ?", userID).Delete(&database.UserSiteAccess{}).Error; err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	for i := range rows {
+		rows[i].UserID = userID
+		rows[i].ID = 0
+	}
+	return tx.Create(&rows).Error
+}
+
 func usersHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -177,6 +186,7 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 		Username string        `json:"username"`
 		Password string        `json:"password"`
 		Role     string        `json:"role"`
+		Active   *bool         `json:"active"`
 		Accesses accessPayload `json:"accesses"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -209,15 +219,14 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user := database.User{Username: username, PasswordHash: hash, Role: req.Role, Active: true}
-	if err := database.DB.Create(&user).Error; err != nil {
-		log.Printf("[Auth] erro ao criar o usuário %q: %v", username, err)
-		writeError(w, http.StatusConflict, "usuário já existe")
-		return
+	active := true
+	if req.Active != nil {
+		active = *req.Active
 	}
-	if err := replaceAccesses(user.ID, accessRows); err != nil {
-		log.Printf("[Auth] erro ao gravar acessos de %q: %v", username, err)
-		writeError(w, http.StatusInternalServerError, "usuário criado, mas falhou ao gravar os acessos")
+	user := database.User{Username: username, PasswordHash: hash, Role: req.Role, Active: active}
+	if err := criarUsuarioComAcessos(&user, accessRows); err != nil {
+		log.Printf("[Auth] erro ao criar o usuário %q: %v", username, err)
+		writeError(w, http.StatusConflict, "usuário já existe ou os acessos são inválidos")
 		return
 	}
 	accesses := make([]auth.Access, 0, len(accessRows))
@@ -294,8 +303,6 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Troca de papel, desativação ou mudança de alcance precisa valer agora,
-	// não no fim da sessão.
 	auth.RevokeUser(user.ID)
 	auditUserTarget(r, user)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
@@ -311,37 +318,20 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := database.DB.Where("user_id = ?", user.ID).Delete(&database.UserSiteAccess{}).Error; err != nil {
-		log.Printf("[Auth] erro ao remover acessos do usuário %d: %v", user.ID, err)
-		writeError(w, http.StatusInternalServerError, "falha ao remover o usuário")
-		return
-	}
-	if err := database.DB.Delete(&user).Error; err != nil {
+	if err := removerUsuario(user); err != nil {
 		log.Printf("[Auth] erro ao remover o usuário %d: %v", user.ID, err)
 		writeError(w, http.StatusInternalServerError, "falha ao remover o usuário")
 		return
 	}
 	auth.RevokeUser(user.ID)
-	// O usuário foi carregado por userFromQuery antes da exclusão, então o nome
-	// ainda existe aqui — depois deste ponto sobraria só o id.
 	auditUserTarget(r, user)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// auditUserTarget nomeia o usuário afetado na linha de auditoria.
-//
-// A unidade fica nula de propósito: um usuário não pertence a uma unidade, ele
-// tem concessões em várias. Escolher uma delas para o campo site_id faria a
-// consulta por unidade mentir — mostraria a criação de um administrador global
-// como se fosse evento de uma filial.
-//
-// Só o nome entra, nunca a senha nem o hash: esta linha vai para a mesma tabela
-// que o administrador consulta.
 func auditUserTarget(r *http.Request, user database.User) {
 	auditTarget(r, "user", strconv.FormatUint(uint64(user.ID), 10), user.Username, nil)
 }
 
-// isLastAdmin evita que a instalação fique sem ninguém capaz de administrar.
 func isLastAdmin(user database.User) bool {
 	if user.Role != auth.RoleAdmin {
 		return false

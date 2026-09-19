@@ -66,7 +66,7 @@ Bem menos exigente, porque o agente mede pela biblioteca e não por shell:
 | Nenhuma biblioteca externa | Binário estático, `CGO_ENABLED=0` |
 | Alcance de rede ao painel | Só saída; nada precisa estar aberto na máquina |
 | `/etc/machine-id` | Preferido; há dois níveis de fallback |
-| Permissão de escrita no diretório da credencial | `/etc/vd-agent/` no Linux, `%ProgramData%\vd-agent\` no Windows |
+| Permissão de escrita no diretório da credencial | `/etc/dockkeeper-agent/` no Linux, `%ProgramData%\dockkeeper-agent\` no Windows |
 | systemd | Só para o instalador `install.sh`; o binário roda sozinho |
 
 ## No host do painel
@@ -90,7 +90,7 @@ Quem depende dela precisa de uma destas saídas:
 
 - `network_mode: host` no serviço do backend — o que descarta a rede do compose,
   e o nome `postgres` deixa de resolver como host do banco;
-- o coletor remoto `vd_collector` rodando **fora** do container.
+- o coletor remoto `dockkeeper_collector` rodando **fora** do container.
 
 O `docker-compose.yml` traz essa decisão comentada, e o padrão é **não** usar
 `network_mode: host`: a maioria das instalações usa o coletor, e ligá-lo por

@@ -9,10 +9,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// A unicidade do inventário é imposta pelo Postgres, num índice de expressão
-// que nenhuma tag do GORM descreve. Verificar isso sem banco testaria a string
-// do DDL, não o comportamento — por isso o teste é de integração e pula sem
-// DATABASE_URL, como o de retenção.
 func setupInventoryDB(t *testing.T) {
 	t.Helper()
 
@@ -79,9 +75,6 @@ func upsertHost(t *testing.T, siteID uint, hostname string) error {
 	}).Create(&host).Error
 }
 
-// O achado E2: 192.168.0.0/24 existe em toda filial. Com o índice único global
-// no IP, o mesmo endereço em duas unidades disputava uma linha só e cada
-// coletor sobrescrevia o host do outro a cada ciclo.
 func TestMesmoIPEmUnidadesDiferentesCoexiste(t *testing.T) {
 	setupInventoryDB(t)
 
@@ -105,8 +98,6 @@ func TestMesmoIPEmUnidadesDiferentesCoexiste(t *testing.T) {
 	}
 }
 
-// O ciclo seguinte do mesmo coletor atualiza a linha da unidade dele, sem criar
-// duplicata e sem tocar na outra unidade.
 func TestSegundoCicloAtualizaSoAPropriaUnidade(t *testing.T) {
 	setupInventoryDB(t)
 
@@ -139,9 +130,6 @@ func TestSegundoCicloAtualizaSoAPropriaUnidade(t *testing.T) {
 	}
 }
 
-// Host sem unidade continua único pelo IP: o COALESCE do índice existe
-// justamente porque o Postgres trataria cada NULL como um valor distinto e
-// deixaria o coletor inserir uma linha nova a cada ciclo.
 func TestHostSemUnidadeNaoDuplica(t *testing.T) {
 	setupInventoryDB(t)
 
@@ -164,10 +152,6 @@ func TestHostSemUnidadeNaoDuplica(t *testing.T) {
 	}
 }
 
-// O achado E3: dois DESKTOP-01 em filiais diferentes são duas máquinas. A
-// separação depende de a coluna de unidade participar da busca do upsert — o
-// que este teste cobre do lado do armazenamento; o caminho HTTP fica com
-// findOrCreateAgentServer, em internal/api.
 func TestMesmoHostnameEmUnidadesDiferentesCoexiste(t *testing.T) {
 	setupInventoryDB(t)
 

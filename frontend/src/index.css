@@ -1,14 +1,6 @@
 @import "tailwindcss";
 
-/*
- * Sistema de design do DockKeeper — "sala de controle sóbria".
- * Uma única cor de acento (âmbar); verde, vermelho e azul são SEMÂNTICOS
- * (ok/crítico/informativo) e nunca decoração. Todo valor de cor vive aqui:
- * componente não usa hex inline. O contrato completo está em
- * docs/frontend-design.md.
- */
 @theme {
-  /* Superfícies em camadas: cada nível sobe uma elevação. */
   --color-ink-950: #0a0a0c;
   --color-ink-900: #0f0f13;
   --color-ink-850: #141419;
@@ -16,40 +8,27 @@
   --color-ink-750: #1f1f28;
   --color-ink-700: #262631;
 
-  /* Bordas sólidas (para quando alpha sobre imagem/chart não serve). */
   --color-line: #26262e;
   --color-line-hi: #34343e;
 
-  /* Hierarquia de texto. */
   --color-text-hi: #f4f4f5;
   --color-text: #cfcfd6;
   --color-text-mut: #8b8b96;
   --color-text-faint: #5f5f6a;
 
-  /* Acento único da marca. */
   --color-accent: #f59e0b;
   --color-accent-hi: #fbbf24;
 
-  /* Semântica de estado — o único lugar onde verde/vermelho/azul existem. */
   --color-ok: #34d399;
   --color-warn: #f59e0b;
   --color-crit: #f87171;
   --color-info: #60a5fa;
 
-  /* Aliases legados — mantidos até a última tela migrar; não usar em código novo. */
-  --color-vd-900: #0a0a0c;
-  --color-vd-800: #141419;
-  --color-vd-700: #1f1f28;
-  --color-vd-yellow: #f59e0b;
-  --color-vd-green: #34d399;
-  --color-vd-text: #cfcfd6;
-  --color-vd-textMuted: #8b8b96;
-
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", monospace;
 
-  --radius-card: 0.875rem;   /* 14px — cartões e painéis */
-  --radius-ctrl: 0.625rem;   /* 10px — botões, inputs, selects */
+  --radius-card: 0.875rem;
+  --radius-ctrl: 0.625rem;
 
   --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.6);
   --shadow-pop: 0 16px 48px -16px rgba(0, 0, 0, 0.75);
@@ -64,15 +43,11 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 
-    /* Painel de leitura, não editor: o ponteiro nunca vira barra de texto ("|")
-       sobre rótulos, métricas e badges — isso sugeria campo digitável. */
     cursor: default;
     -webkit-user-select: none;
     user-select: none;
   }
 
-  /* Dados que o operador precisa copiar (IP, nome de container, linha de log)
-     seguem selecionáveis; só o cursor de digitação é que sai. */
   td,
   pre,
   code,
@@ -103,24 +78,17 @@
     cursor: not-allowed;
   }
 
-  /* Números alinham em coluna em qualquer métrica ou tabela. */
   table,
   .tabular {
     font-variant-numeric: tabular-nums;
   }
 
-  /* Foco visível por teclado em tudo que é interativo, sem anel no clique. */
   :focus-visible {
     outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
     outline-offset: 2px;
     border-radius: 4px;
   }
 
-  /* Rede de segurança para algum <select> nativo que escape do componente
-     ui/Select: o widget da lista é desenhado pelo sistema operacional e não há
-     CSS que o padronize entre browsers, mas cor de fundo e de texto das opções
-     o Chromium e o Firefox respeitam — o suficiente para não abrir um painel
-     branco no meio do tema escuro. */
   select,
   select option {
     background-color: var(--color-ink-850);
@@ -133,8 +101,6 @@
 }
 
 @layer components {
-  /* ---- Estrutura de página ---- */
-
   .page-header {
     display: flex;
     align-items: flex-end;
@@ -158,7 +124,6 @@
     max-width: 60ch;
   }
 
-  /* Rótulo de seção — o ÚNICO lugar onde caps espaçado é permitido. */
   .eyebrow {
     color: var(--color-text-faint);
     font-size: 0.6875rem;
@@ -166,8 +131,6 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
-
-  /* ---- Superfícies ---- */
 
   .panel {
     background-color: var(--color-ink-900);
@@ -203,14 +166,11 @@
     line-height: 1.1;
   }
 
-  /* Barra fixa do topo — o único glass da casa, sutil de propósito. */
   .topbar-glass {
     background: color-mix(in srgb, var(--color-ink-950) 78%, transparent);
     backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--color-line);
   }
-
-  /* ---- Controles ---- */
 
   .btn {
     display: inline-flex;
@@ -234,7 +194,6 @@
     background-color: var(--color-accent-hi);
   }
 
-  /* Botão de célula de tabela: mesma família, sem engordar a linha. */
   .btn-sm {
     min-height: 1.75rem;
     padding: 0 0.5rem;
@@ -283,8 +242,6 @@
     outline: none;
   }
 
-  /* ---- Badges de estado ---- */
-
   .badge {
     display: inline-flex;
     align-items: center;
@@ -327,8 +284,6 @@
     color: var(--color-text-mut);
   }
 
-  /* ---- Tabelas ---- */
-
   .table-base {
     width: 100%;
     font-size: 0.8125rem;
@@ -358,7 +313,6 @@
     background-color: var(--color-ink-850);
   }
 
-  /* Dado técnico (IP, hash, nome de container) sempre em mono. */
   .mono-data {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
@@ -367,12 +321,10 @@
 }
 
 @layer utilities {
-  /* Entrada padrão de tela: sobe 6px e assenta. Nada de zoom nem bounce. */
   .anim-rise {
     animation: rise 300ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
   }
 
-  /* Listas entram escalonadas; o teto de 8 evita fila de espera em tabela longa. */
   .stagger > * {
     animation: rise 300ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
   }
@@ -406,8 +358,6 @@
   }
 }
 
-/* ---- Legado em migração: manter até a última tela trocar as classes. ---- */
-
 .glass-panel {
   background-color: color-mix(in srgb, var(--color-ink-900) 92%, transparent);
   border: 1px solid var(--color-line);
@@ -415,7 +365,6 @@
   box-shadow: var(--shadow-panel);
 }
 
-/* Glow aposentado: as classes viram cor semântica pura. */
 .text-glow-green { color: var(--color-ok); text-shadow: none; }
 .text-glow-red { color: var(--color-crit); text-shadow: none; }
 .text-glow-yellow { color: var(--color-warn); text-shadow: none; }

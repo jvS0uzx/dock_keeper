@@ -16,22 +16,13 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-// Infra de teste: um servidor SSH real em loopback. É o que permite cobrir
-// dial, openSession e os streams sem VPS nenhuma — o cliente do pacote conversa
-// com um servidor de verdade, só que respondendo o que o teste mandar.
-
-// respostaExec descreve como o servidor responde a um comando remoto.
 type respostaExec struct {
-	stdout string
-	stderr string
-	status uint32
-	// consomeStdin drena o stdin da sessão — os streams de coleta sobem o
-	// script por `bash -s` e bloqueariam sem um leitor do outro lado.
+	stdout       string
+	stderr       string
+	status       uint32
 	consomeStdin bool
 }
 
-// servidorSSHFake sobe o servidor e devolve endereço e chave pública de host.
-// responder recebe o comando pedido pelo cliente e decide a resposta.
 func servidorSSHFake(t *testing.T, responder func(cmd string) respostaExec) (string, ssh.PublicKey) {
 	t.Helper()
 
@@ -109,14 +100,11 @@ func atendeSessao(ch ssh.Channel, reqs <-chan *ssh.Request, responder func(strin
 		if resp.stderr != "" {
 			io.WriteString(ch.Stderr(), resp.stderr)
 		}
-		// Sem exit-status o session.Wait() do cliente devolve ExitMissingError,
-		// e todo stream terminaria em erro mesmo com a saída certa.
 		ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{resp.status}))
 		return
 	}
 }
 
-// chaveClienteTemporaria grava uma chave privada OpenSSH descartável.
 func chaveClienteTemporaria(t *testing.T) string {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -134,7 +122,6 @@ func chaveClienteTemporaria(t *testing.T) string {
 	return path
 }
 
-// knownHostsPara grava um known_hosts contendo a chave do endereço dado.
 func knownHostsPara(t *testing.T, addr string, pub ssh.PublicKey) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "known_hosts")
@@ -145,10 +132,6 @@ func knownHostsPara(t *testing.T, addr string, pub ssh.PublicKey) string {
 	return path
 }
 
-// usaPoliticaHostKey aponta a política global de host key (memoizada por
-// sync.Once) para o known_hosts dado e devolve tudo ao estado virgem no fim —
-// sem o reset, o primeiro teste que dialasse congelaria a política para o
-// binário inteiro.
 func usaPoliticaHostKey(t *testing.T, knownHosts string) {
 	t.Helper()
 	t.Setenv("SSH_KNOWN_HOSTS", knownHosts)
@@ -163,8 +146,6 @@ func zeraPoliticaHostKey() {
 	hostKeyErr = nil
 }
 
-// alvoComServidor sobe servidor fake, chave de cliente e known_hosts casando, e
-// devolve o Target pronto para dial.
 func alvoComServidor(t *testing.T, responder func(cmd string) respostaExec) Target {
 	t.Helper()
 	addr, hostPub := servidorSSHFake(t, responder)

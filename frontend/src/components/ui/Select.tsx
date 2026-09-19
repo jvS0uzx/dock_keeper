@@ -2,8 +2,6 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 
-// Altura máxima da lista e folga entre ela e o campo, em pixels. Ficam aqui
-// porque o posicionamento em portal é calculado em JavaScript, não em CSS.
 const MAX_LIST_HEIGHT = 256;
 const GAP = 8;
 
@@ -16,27 +14,13 @@ interface SelectProps {
   options: SelectOption[];
   value: string;
   onChange: (value: string) => void;
-  /** Usado por labels externos via htmlFor. */
   id?: string;
-  /** Rótulo acessível quando não há <label> visível apontando para o campo. */
   ariaLabel?: string;
   placeholder?: string;
   disabled?: boolean;
   className?: string;
 }
 
-/**
- * Lista suspensa no tema do painel.
- *
- * O <select> nativo desenha a lista com o widget do sistema operacional —
- * fundo branco, fonte do SO — e não há CSS que padronize isso entre browsers.
- * Como o painel é escuro, a lista aberta ficava destoando. Aqui a lista é
- * marcação própria, então segue a mesma paleta do resto.
- *
- * O que o nativo dava de graça e é reimplementado abaixo: foco por teclado,
- * abrir/fechar com Enter, Espaço e Escape, navegar com as setas, e o vínculo
- * com <label htmlFor>.
- */
 const Select = ({
   options,
   value,
@@ -48,17 +32,12 @@ const Select = ({
   className = '',
 }: SelectProps) => {
   const [isOpen, setIsOpen] = useState(false);
-  // Item sob o cursor do teclado, independente do selecionado.
   const [activeIndex, setActiveIndex] = useState(-1);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  // Posição da lista em coordenadas de viewport. A lista é renderizada em
-  // portal no <body> porque, ancorada no próprio campo, ela era recortada por
-  // qualquer ancestral com overflow — a tabela de usuários, por exemplo, ganhava
-  // barra de rolagem interna em vez de mostrar as opções.
   const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const generatedId = useId();
   const listboxId = `${id ?? generatedId}-listbox`;
@@ -66,8 +45,6 @@ const Select = ({
   const selectedIndex = options.findIndex((o) => o.value === value);
   const selected = selectedIndex >= 0 ? options[selectedIndex] : undefined;
 
-  // Mede o campo para posicionar a lista. Abaixo por padrão; acima quando não
-  // há espaço até o rodapé da janela.
   const measure = useCallback(() => {
     const button = buttonRef.current;
     if (!button) return;
@@ -87,13 +64,6 @@ const Select = ({
     if (isOpen) measure();
   }, [isOpen, measure]);
 
-  // Clique fora fecha. Um overlay cobrindo a tela resolveria, mas bloquearia o
-  // clique em outros campos do formulário — o operador teria que clicar duas
-  // vezes para mudar de campo.
-  //
-  // Rolagem e redimensionamento reposicionam: a lista está no <body> e não
-  // acompanha o campo sozinha. `capture` pega a rolagem de qualquer container
-  // interno, não só a da janela.
   useEffect(() => {
     if (!isOpen) return;
 
@@ -113,7 +83,6 @@ const Select = ({
     };
   }, [isOpen, measure]);
 
-  // Mantém o item ativo visível ao navegar por teclado em lista longa.
   useEffect(() => {
     if (!isOpen || activeIndex < 0) return;
     const item = listRef.current?.children[activeIndex] as HTMLElement | undefined;
@@ -216,7 +185,6 @@ const Select = ({
             left: rect.left,
             width: rect.width,
             maxHeight: MAX_LIST_HEIGHT,
-            // Abre para cima quando o campo está perto do rodapé.
             transform: rect.top < (buttonRef.current?.getBoundingClientRect().top ?? 0)
               ? 'translateY(-100%)'
               : undefined,

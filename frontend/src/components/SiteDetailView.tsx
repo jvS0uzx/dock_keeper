@@ -1,3 +1,5 @@
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft, MonitorSmartphone, Network, Thermometer, ShieldAlert,
@@ -10,14 +12,12 @@ import {
   type ServerLiveStat,
   type Site,
 } from '../lib/api';
-import { relativeTime } from '../lib/format';
+import { formatPercent, relativeTime } from '../lib/format';
 import { NO_TEMPERATURE_HINT, formatTemperature, isAbove } from '../lib/metrics';
 import { useNavigation } from './ui/navigation-context';
 
 const POLL_MS = 15000;
 
-// Mesmos limiares da tela de Estações: acima de 70 °C costuma ser ventilação
-// obstruída, e a partir de 75% de uso a máquina já incomoda o usuário.
 const TEMP_WARN = 70;
 const USAGE_WARN = 75;
 
@@ -52,13 +52,6 @@ const Stat = ({
   </div>
 );
 
-/**
- * Resumo de uma unidade: o nível entre a lista de unidades e a máquina.
- *
- * Reúne numa tela o que o suporte precisa saber ao atender uma filial —
- * quantas máquinas respondem, quais estão sob pressão, o que a varredura
- * encontrou sem agente e quais regras de alerta cobrem o lugar.
- */
 const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
   const { openMachine, goBack } = useNavigation();
 
@@ -67,6 +60,12 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
   const [hosts, setHosts] = useState<NetworkHostView[]>([]);
   const [rules, setRules] = useState<AlertRuleRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
+  const cadastro = useLoadStatus();
+  const { ok: cadastroOk, fail: cadastroFail } = cadastro;
+  const regras = useLoadStatus();
+  const { ok: regrasOk, fail: regrasFail } = regras;
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -76,26 +75,34 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
       ]);
       setStations(live.servers.filter((s) => s.site_id === siteId));
       setHosts(inventory.hosts.filter((h) => h.site_id === siteId));
+      cargaOk();
     } catch (err) {
-      if (!signal?.aborted) console.error(err);
+      if (!signal?.aborted) cargaFail(err, 'Falha ao ler as máquinas da unidade.');
     } finally {
       setLoading(false);
     }
-  }, [siteId]);
+  }, [siteId, cargaOk, cargaFail]);
 
-  // Unidade e regras mudam raramente: buscadas uma vez, fora do polling.
   useEffect(() => {
     let active = true;
     api.sites()
-      .then((list) => active && setSite(list.find((s) => s.id === siteId) ?? null))
-      .catch(() => {});
+      .then((list) => {
+        if (!active) return;
+        setSite(list.find((s) => s.id === siteId) ?? null);
+        cadastroOk();
+      })
+      .catch((err) => { if (active) cadastroFail(err, 'Falha ao ler o cadastro da unidade.'); });
     api.alertRules()
-      .then((list) => active && setRules(list))
-      .catch(() => {});
+      .then((list) => {
+        if (!active) return;
+        setRules(list);
+        regrasOk();
+      })
+      .catch((err) => { if (active) regrasFail(err, 'Falha ao ler as regras de alerta.'); });
     return () => {
       active = false;
     };
-  }, [siteId]);
+  }, [siteId, cadastroOk, cadastroFail, regrasOk, regrasFail]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,12 +115,9 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
   }, [load]);
 
   const online = stations.filter((s) => s.online).length;
-  // Sem sensor não conta como quente nem como fria: é ausência de leitura.
   const hot = stations.filter((s) => isAbove(s.temperature_c, TEMP_WARN)).length;
   const withoutAgent = hosts.filter((h) => !h.monitored).length;
 
-  // Regras que cobrem esta unidade: as globais (target "*") e as que apontam
-  // para ela ou para uma máquina dela.
   const siteRules = useMemo(() => {
     const ids = new Set(stations.map((s) => s.id));
     return rules.filter(
@@ -132,6 +136,8 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
         Voltar
       </button>
 
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
+      <LoadNotice error={cadastro.error} lastOk={cadastro.lastOk} className="mb-4" />
       <div className="page-header flex-col md:flex-row items-start md:items-end">
         <div>
           <h1 className="page-title">{site ? site.name : 'Unidade'}</h1>
@@ -189,7 +195,7 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
                 {stations.length === 0 && (
                   <tr>
                     <td colSpan={7} className="py-8 text-center text-text-mut">
-                      Nenhuma máquina com agente nesta unidade.
+                      {carga.error && !carga.lastOk ? carga.error : 'Nenhuma máquina com agente nesta unidade.'}
                     </td>
                   </tr>
                 )}
@@ -209,8 +215,8 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
                       </td>
                       <td className="text-text-hi font-medium">{s.name}</td>
                       <td className="text-text-mut">{s.last_user || '—'}</td>
-                      <td className={`text-right mono-data ${s.cpu >= USAGE_WARN ? 'text-warn' : 'text-text-hi'}`}>
-                        {s.online ? `${s.cpu.toFixed(0)}%` : '—'}
+                      <td className={`text-right mono-data ${s.cpu !== null && s.cpu >= USAGE_WARN ? 'text-warn' : 'text-text-hi'}`}>
+                        {s.online ? formatPercent(s.cpu) : '—'}
                       </td>
                       <td className={`text-right mono-data ${memPct >= USAGE_WARN ? 'text-warn' : 'text-text-hi'}`}>
                         {s.online && s.mem_total > 0 ? `${memPct.toFixed(0)}%` : '—'}
@@ -277,7 +283,7 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
             </div>
             <div className="p-2 max-h-64 overflow-y-auto custom-scrollbar">
               {siteRules.length === 0 ? (
-                <p className="text-xs text-text-mut p-2">Nenhuma regra de alerta cobre esta unidade.</p>
+                regras.error ? <LoadNotice error={regras.error} className="p-2" /> : <p className="text-xs text-text-mut p-2">Nenhuma regra de alerta cobre esta unidade.</p>
               ) : (
                 siteRules.map((r) => (
                   <div key={r.id} className="flex items-center gap-2 px-2 py-1.5 text-xs">

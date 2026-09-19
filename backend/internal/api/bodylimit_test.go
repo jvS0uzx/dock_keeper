@@ -9,8 +9,6 @@ import (
 	"testing"
 )
 
-// decodeHandler imita o que as treze rotas de JSON fazem: decodifica o corpo e
-// responde 400 quando ele não presta.
 func decodeHandler(w http.ResponseWriter, r *http.Request) {
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -43,14 +41,9 @@ func TestLimitBodyRecusaContentLengthAcimaDoTeto(t *testing.T) {
 	}
 }
 
-// Sem Content-Length o tamanho só aparece lendo, e é aí que o handler devolveria
-// 400 "corpo inválido" — resposta que manda procurar erro de sintaxe onde o
-// problema é tamanho.
 func TestLimitBodyRecusaCorpoSemContentLength(t *testing.T) {
 	h := limitBody(1024)(decodeHandler)
 
-	// io.NopCloser esconde o tipo concreto do leitor, então httptest deixa o
-	// ContentLength em -1, como num envio chunked.
 	req := httptest.NewRequest(http.MethodPost, "/api/qualquer",
 		io.NopCloser(strings.NewReader(corpoJSON(4096))))
 	rec := httptest.NewRecorder()
@@ -87,13 +80,9 @@ func TestLimitBodyDeixaPassarCorpoDentroDoTeto(t *testing.T) {
 	}
 }
 
-// O teto precisa valer na malha de rotas, não só quando o middleware é montado
-// à mão: é a montagem que decide se alguma rota ficou de fora.
 func TestRotasDoMuxTemTetoDeCorpo(t *testing.T) {
 	handler := Routes(testConfig())
 
-	// Rota pública e rota autenticada: no segundo caso o teto tem de agir antes
-	// da checagem de credencial, senão o corpo já foi lido para nada.
 	for _, caso := range []struct{ metodo, path string }{
 		{http.MethodPost, "/api/auth/login"},
 		{http.MethodPost, "/api/sites"},
@@ -110,8 +99,6 @@ func TestRotasDoMuxTemTetoDeCorpo(t *testing.T) {
 	}
 }
 
-// A planta baixa é imagem e não cabe no teto de formulário; o inventário de uma
-// unidade inteira também não. Os dois precisam do teto próprio.
 func TestRotasComTetoProprioAceitamCorpoMaiorQueOFormulario(t *testing.T) {
 	handler := Routes(testConfig())
 

@@ -1,3 +1,6 @@
+import { apiErrorMessage } from '../lib/api';
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Map, Upload, Trash2, Save, Pencil, Eye, X, Plus, Building2 } from 'lucide-react';
 import {
@@ -17,8 +20,6 @@ const LIVE_POLL_MS = 20000;
 
 type Mode = 'view' | 'edit';
 
-// As cores dos marcadores são as semânticas do sistema: ok (monitorado),
-// warn (sem agente), info (leva a outra planta) e cinza para o resto.
 const pinColor = (pin: FloorPlanPin) => {
   if (pin.target_plan_id) return 'bg-info border-white/50';
   if (!pin.known) return 'bg-ink-700 border-white/30';
@@ -27,12 +28,10 @@ const pinColor = (pin: FloorPlanPin) => {
   return 'bg-ok border-white/50';
 };
 
-/** Nome curto exibido junto ao ponto: hostname quando existe, senão o IP. */
 const pinLabel = (pin: FloorPlanPin) => {
   if (pin.target_plan_id) return pin.label || 'Abrir planta';
   const name = pin.label || pin.hostname;
   if (!name) return pin.host_ip;
-  // FQDN vira só o rótulo curto: "pc-rh.empresa.local" ocuparia a planta toda.
   return name.split('.')[0];
 };
 
@@ -59,6 +58,13 @@ const FloorPlanView = () => {
   const [draggingHost, setDraggingHost] = useState('');
   const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
+  const hostsCarga = useLoadStatus();
+  const { ok: hostsCargaOk, fail: hostsCargaFail } = hostsCarga;
+  const [imageError, setImageError] = useState<string | null>(null);
+  const marcadores = useLoadStatus();
+  const { ok: marcadoresOk, fail: marcadoresFail } = marcadores;
 
   const imageRef = useRef<HTMLImageElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -66,30 +72,21 @@ const FloorPlanView = () => {
   const loadPlans = useCallback(async () => {
     try {
       const all = await api.floorPlans();
-      // A planta pertence a uma unidade, então a tela só mostra as da unidade
-      // em escopo. Sem unidade escolhida não há mapa a exibir — misturar
-      // andares de filiais diferentes não significaria nada.
       const list = numericSiteId === null ? [] : all.filter(p => p.site_id === numericSiteId);
       setPlans(list);
       setCurrent(prev => (prev && list.some(p => p.id === prev.id) ? prev : list[0] ?? null));
+      cargaOk();
     } catch (err) {
-      console.error(err);
+      cargaFail(err, 'Falha ao listar as plantas.');
     } finally {
       setLoading(false);
     }
-  }, [numericSiteId]);
+  }, [numericSiteId, cargaOk, cargaFail]);
 
   useEffect(() => {
     loadPlans();
   }, [loadPlans]);
 
-  // A paleta de máquinas arrastáveis segue a unidade da planta, e não o parque
-  // inteiro. Desde que o marcador passou a resolver o host pela chave
-  // (unidade, ip), host de outra unidade nunca resolveria: a pessoa arrastava a
-  // máquina que via na lista e a planta escrevia "fora do inventário".
-  //
-  // O recorte vai na consulta, não no filtro do componente: trazer o parque
-  // para descartar no navegador é o mesmo desperdício com uma camada a mais.
   useEffect(() => {
     if (numericSiteId === null) {
       setHosts([]);
@@ -97,18 +94,22 @@ const FloorPlanView = () => {
     }
     const controller = new AbortController();
     api.networkHosts(controller.signal, numericSiteId)
-      .then(inv => setHosts(inv.hosts))
-      .catch(() => {});
+      .then(inv => {
+        setHosts(inv.hosts);
+        hostsCargaOk();
+      })
+      .catch(err => {
+        if (!controller.signal.aborted) hostsCargaFail(err, 'Falha ao ler as máquinas da unidade.');
+      });
     return () => controller.abort();
-  }, [numericSiteId]);
+  }, [numericSiteId, hostsCargaOk, hostsCargaFail]);
 
-  // Imagem da planta: object URL precisa ser revogado ao trocar de planta,
-  // senão o blob fica retido no browser.
   useEffect(() => {
     if (!current) {
       setImageUrl('');
       return;
     }
+    setImageError(null);
     const controller = new AbortController();
     let url = '';
 
@@ -116,9 +117,12 @@ const FloorPlanView = () => {
       .then(objectUrl => {
         url = objectUrl;
         setImageUrl(objectUrl);
+        setImageError(null);
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setImageUrl('');
+      .catch(err => {
+        if (controller.signal.aborted) return;
+        setImageUrl('');
+        setImageError(apiErrorMessage(err, 'Falha ao carregar a imagem da planta.'));
       });
 
     return () => {
@@ -132,13 +136,12 @@ const FloorPlanView = () => {
     try {
       const plan = await api.floorPlan(current.id, signal);
       setPins(plan.pins);
+      marcadoresOk();
     } catch (err) {
-      if (!signal?.aborted) console.error(err);
+      if (!signal?.aborted) marcadoresFail(err, 'Falha ao ler os marcadores da planta.');
     }
-  }, [current]);
+  }, [current, marcadoresOk, marcadoresFail]);
 
-  // Só faz polling em modo visualização: em edição isso sobrescreveria o
-  // posicionamento que o operador ainda não gravou.
   useEffect(() => {
     if (!current) return;
     const controller = new AbortController();
@@ -153,8 +156,6 @@ const FloorPlanView = () => {
     };
   }, [current, mode, refreshPins]);
 
-  // Criar a unidade aqui evita o vaivém: sem unidade cadastrada a tela pedia
-  // para escolher uma na barra lateral, onde não havia nenhuma para escolher.
   const createSiteInline = async () => {
     const name = await dialog.prompt({
       title: 'Nova unidade',
@@ -183,11 +184,7 @@ const FloorPlanView = () => {
   };
 
   const handleUpload = async (file: File) => {
-    // A planta pertence a uma unidade; várias plantas na mesma unidade são os
-    // andares. Sem unidade escolhida não dá para saber onde ela entra.
     if (numericSiteId === null) {
-      // Sem unidade não há onde pendurar a planta. Em vez de só recusar,
-      // oferece o caminho: cadastrar a unidade agora.
       const criar = await dialog.confirm({
         title: 'A planta pertence a uma unidade',
         message:
@@ -243,7 +240,6 @@ const FloorPlanView = () => {
     }
   };
 
-  /** Converte a posição do ponteiro em porcentagem da imagem. */
   const toPercent = (clientX: number, clientY: number) => {
     const rect = imageRef.current!.getBoundingClientRect();
     return {
@@ -252,7 +248,6 @@ const FloorPlanView = () => {
     };
   };
 
-  /** Cria ou mede de novo o marcador do host na coordenada informada. */
   const placeHost = (hostIP: string, clientX: number, clientY: number) => {
     if (!imageRef.current) return;
     const { x, y } = toPercent(clientX, clientY);
@@ -260,7 +255,6 @@ const FloorPlanView = () => {
     setPins(prev => {
       const existing = prev.find(p => p.host_ip === hostIP);
       if (existing) {
-        // Reposicionar preserva o estado já resolvido pelo backend.
         return prev.map(p => (p.host_ip === hostIP ? { ...p, x, y } : p));
       }
       const host = hosts.find(h => h.ip === hostIP);
@@ -285,8 +279,6 @@ const FloorPlanView = () => {
     setDirty(true);
   };
 
-  // Clique na planta continua funcionando: em tela de toque o arrastar nativo
-  // do HTML não dispara, então selecionar e tocar é o caminho que resta.
   const handlePlanClick = (e: React.MouseEvent<HTMLImageElement>) => {
     if (mode !== 'edit' || !pendingHost) return;
     placeHost(pendingHost, e.clientX, e.clientY);
@@ -301,8 +293,6 @@ const FloorPlanView = () => {
     setDraggingHost('');
   };
 
-  // Em edição o clique remove o marcador; em visualização abre a máquina —
-  // é o caminho natural de "achei no mapa, quero ver como está".
   const handlePinClick = (pin: FloorPlanPin) => {
     if (mode === 'edit') {
       removePin(pin.host_ip);
@@ -344,6 +334,8 @@ const FloorPlanView = () => {
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden anim-rise">
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
+      <LoadNotice error={hostsCarga.error} lastOk={hostsCarga.lastOk} className="mb-4" />
       <div className="page-header flex-col md:flex-row md:items-end items-start">
         <div>
           <h1 className="page-title">Planta Baixa</h1>
@@ -450,14 +442,15 @@ const FloorPlanView = () => {
               <span className="text-xs">Envie a imagem de um andar para começar.</span>
             </div>
           ) : !imageUrl ? (
-            <div className="h-full flex items-center justify-center text-sm text-text-faint">Carregando a imagem...</div>
+            <div className="h-full flex items-center justify-center text-sm text-text-faint">
+              {imageError ? <LoadNotice error={imageError} /> : 'Carregando a imagem...'}
+            </div>
           ) : (
             <div
               className={`relative inline-block max-w-full rounded-ctrl transition-shadow ${
                 draggingHost ? 'ring-2 ring-accent/60' : ''
               }`}
               onDragOver={(e) => {
-                // Sem o preventDefault o navegador recusa a área como destino.
                 if (mode === 'edit') e.preventDefault();
               }}
               onDrop={handleDrop}
@@ -486,13 +479,9 @@ const FloorPlanView = () => {
                     mode === 'edit' || pin.server_id ? 'cursor-pointer' : 'cursor-default'
                   }`}
                 >
-                  {/* O destaque de hover é um anel, não zoom: o marcador não pode
-                      mudar de tamanho em cima de um mapa de posições. */}
                   <span
                     className={`w-4 h-4 rounded-full border-2 shadow-lg transition-shadow group-hover:ring-2 group-hover:ring-white/40 ${pinColor(pin)}`}
                   />
-                  {/* O nome ao lado do ponto é o que responde "qual máquina é
-                      essa" sem passar o mouse em cada marcador. */}
                   <span className="px-1.5 py-0.5 rounded bg-ink-950/90 border border-line text-[10px] leading-none text-text-hi whitespace-nowrap shadow-md max-w-[140px] truncate">
                     {pinLabel(pin)}
                   </span>
@@ -567,10 +556,14 @@ const FloorPlanView = () => {
                   {label}
                 </span>
               ))}
-              <p className="mt-2 pt-3 border-t border-line leading-relaxed">
-                {pins.length} marcador(es) nesta planta.
-                {pins.length === 0 && canOperate && ' Entre em Editar para posicionar as máquinas.'}
-              </p>
+              {marcadores.error ? (
+                <LoadNotice error={marcadores.error} lastOk={marcadores.lastOk} className="mt-2 pt-3 border-t border-line" />
+              ) : (
+                <p className="mt-2 pt-3 border-t border-line leading-relaxed">
+                  {pins.length} marcador(es) nesta planta.
+                  {pins.length === 0 && canOperate && ' Entre em Editar para posicionar as máquinas.'}
+                </p>
+              )}
             </div>
           )}
         </div>

@@ -18,8 +18,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// Teto de hosts por envio. Uma /16 inteira não cabe num ciclo de inventário e
-// indica coletor mal configurado.
 const maxInventoryHosts = 5000
 
 type inventoryHost struct {
@@ -35,19 +33,8 @@ type inventoryPayload struct {
 	Hosts            []inventoryHost `json:"hosts"`
 }
 
-// errTooManyHosts separa o estouro do teto dos demais erros de decode: só ele
-// responde 413, e a mensagem precisa continuar a mesma do contrato antigo.
 var errTooManyHosts = errors.New("inventário grande demais")
 
-// decodeInventoryPayload decodifica o corpo conferindo o teto DURANTE a
-// leitura. O teto já existia, mas só era conferido com o slice inteiro em
-// memória — um envio estourado pagava o custo todo de alocação e parse antes de
-// ser recusado (item N3 do checklist). Aqui a recusa acontece no host 5001, e o
-// resto do corpo nem é lido.
-//
-// site_code e collector_version continuam aceitos em qualquer ordem no JSON,
-// antes ou depois de hosts; campo desconhecido é pulado, como o Decode de
-// struct fazia.
 func decodeInventoryPayload(r io.Reader) (inventoryPayload, error) {
 	var p inventoryPayload
 	dec := json.NewDecoder(r)
@@ -57,8 +44,6 @@ func decodeInventoryPayload(r io.Reader) (inventoryPayload, error) {
 		return p, err
 	}
 	if tok == nil {
-		// Corpo "null": o Decode antigo deixava o payload zerado sem erro, e a
-		// validação de site_code fazia a recusa. Mantido.
 		return p, nil
 	}
 	if d, ok := tok.(json.Delim); !ok || d != '{' {
@@ -85,14 +70,13 @@ func decodeInventoryPayload(r io.Reader) (inventoryPayload, error) {
 				return p, err
 			}
 		case "hosts":
-			// Chave repetida: a última vence, como no json.Unmarshal.
 			p.Hosts = nil
 			tok, err := dec.Token()
 			if err != nil {
 				return p, err
 			}
 			if tok == nil {
-				continue // "hosts": null equivale a lista vazia
+				continue
 			}
 			if d, ok := tok.(json.Delim); !ok || d != '[' {
 				return p, errors.New("hosts não é uma lista")
@@ -107,7 +91,7 @@ func decodeInventoryPayload(r io.Reader) (inventoryPayload, error) {
 				}
 				p.Hosts = append(p.Hosts, h)
 			}
-			if _, err := dec.Token(); err != nil { // consome o ']'
+			if _, err := dec.Token(); err != nil {
 				return p, err
 			}
 		default:
@@ -118,18 +102,12 @@ func decodeInventoryPayload(r io.Reader) (inventoryPayload, error) {
 		}
 	}
 
-	if _, err := dec.Token(); err != nil { // consome o '}'
+	if _, err := dec.Token(); err != nil {
 		return p, err
 	}
 	return p, nil
 }
 
-// InventoryIngestHandler recebe o inventário varrido por um coletor remoto.
-//
-// É a contraparte do cmd/collector: o painel só enxerga a rede onde roda, então
-// cada unidade tem um coletor que varre localmente e faz push do resultado.
-// Autentica pelo mesmo X-Agent-Token da ingestão de métricas — é tráfego
-// máquina-a-máquina, sem CORS de browser.
 func InventoryIngestHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -139,7 +117,14 @@ func InventoryIngestHandler(w http.ResponseWriter, r *http.Request) {
 
 	cred, err := authenticateDevice(r)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "credencial de dispositivo inválida")
+		refuseDeviceAuth(w, r, err, "inventory.legacy_token_disabled")
+		return
+	}
+	if !cred.allowsKind(kindCollector) {
+		refuseDeviceKind(w, r, cred, "inventory.kind_mismatch", kindCollector, "inventário")
+		return
+	}
+	if !limitarTaxa(w, chaveDeIngestao(r, cred), tetoDeIngestao()) {
 		return
 	}
 
@@ -153,10 +138,6 @@ func InventoryIngestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sob credencial própria a unidade sai dela, e o site_code do corpo vira
-	// material de conferência. Um coletor comprometido numa filial declarando
-	// outra é o caso que o item S7 existe para fechar: sob o token único ele
-	// reescrevia o inventário inteiro da filial vizinha a cada ciclo.
 	siteID, err := resolveInventorySite(cred, p.SiteCode)
 	if err != nil {
 		if errors.Is(err, errSiteMismatch) {
@@ -180,8 +161,6 @@ func InventoryIngestHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "stored": saved})
 }
 
-// resolveSite exige que a unidade já exista. Criar automaticamente permitiria
-// que um token vazado poluísse o cadastro com unidades inventadas.
 func resolveSite(code string) (*uint, error) {
 	code = strings.ToLower(strings.TrimSpace(code))
 	if code == "" {
@@ -199,8 +178,6 @@ type errInvalidSite string
 
 func (e errInvalidSite) Error() string { return string(e) }
 
-// storeInventory faz o upsert dos hosts recebidos, preservando o cadastro que
-// o operador preencheu no painel.
 func storeInventory(hosts []inventoryHost, siteID *uint) (int, error) {
 	if len(hosts) == 0 {
 		return 0, nil
@@ -210,7 +187,6 @@ func storeInventory(hosts []inventoryHost, siteID *uint) (int, error) {
 	records := make([]database.NetworkHost, 0, len(hosts))
 	for _, h := range hosts {
 		ip := strings.TrimSpace(h.IP)
-		// Endereço malformado viraria linha órfã no inventário.
 		if net.ParseIP(ip) == nil {
 			continue
 		}
@@ -229,8 +205,6 @@ func storeInventory(hosts []inventoryHost, siteID *uint) (int, error) {
 		return 0, nil
 	}
 
-	// Mesma adoção da varredura local: a linha sem unidade tem chave (0, ip) e
-	// não colidiria com a do coletor, duplicando o endereço no inventário.
 	if siteID != nil {
 		ips := make([]string, 0, len(records))
 		for _, r := range records {
@@ -241,20 +215,11 @@ func storeInventory(hosts []inventoryHost, siteID *uint) (int, error) {
 		}
 	}
 
-	// first_seen fica fora do DoUpdates para preservar a primeira aparição;
-	// hostname e mac só sobrescrevem quando vieram preenchidos. Os campos
-	// cadastrais (sala, dono, patrimônio) nunca são tocados por um coletor.
 	err := database.DB.Clauses(clause.OnConflict{
-		// A chave é (unidade, ip): o mesmo 192.168.0.10 em duas filiais são dois
-		// equipamentos, e sob a chave antiga um coletor sobrescrevia o host do
-		// outro a cada ciclo.
 		Columns: database.NetworkHostConflictTarget(),
 		DoUpdates: clause.Assignments(map[string]any{
-			"last_seen":  now,
-			"open_ports": gorm.Expr("EXCLUDED.open_ports"),
-			// Travas do operador vencem o coletor. O COALESCE sozinho não
-			// bastava: o coletor sempre manda a unidade dele, então EXCLUDED
-			// nunca era nulo e revertia todo host movido pelo painel.
+			"last_seen":   now,
+			"open_ports":  gorm.Expr("EXCLUDED.open_ports"),
 			"device_type": gorm.Expr("CASE WHEN network_hosts.device_type_locked THEN network_hosts.device_type ELSE EXCLUDED.device_type END"),
 			"site_id":     gorm.Expr("CASE WHEN network_hosts.site_locked THEN network_hosts.site_id ELSE COALESCE(EXCLUDED.site_id, network_hosts.site_id) END"),
 			"hostname":    gorm.Expr("COALESCE(NULLIF(EXCLUDED.hostname, ''), network_hosts.hostname)"),
@@ -277,16 +242,8 @@ func joinPorts(ports []int) string {
 	return strings.Join(parts, ",")
 }
 
-// errSiteMismatch separa a divergência de unidade dos demais erros de validação:
-// as duas respondem status diferente, e só uma delas é evento de segurança.
 var errSiteMismatch = errors.New("unidade declarada diverge da credencial")
 
-// resolveInventorySite decide de quem é o envio.
-//
-// Com credencial própria a unidade é a dela, sempre. O site_code do corpo, se
-// vier, é conferido — nunca aceito. No modo legado, sem credencial que carregue
-// unidade, o comportamento antigo continua: o corpo decide, porque o token
-// compartilhado não sabe dizer de onde o envio veio.
 func resolveInventorySite(cred deviceAuth, siteCode string) (*uint, error) {
 	if cred.SiteID == nil {
 		return resolveSite(siteCode)
@@ -306,9 +263,6 @@ func resolveInventorySite(cred deviceAuth, siteCode string) (*uint, error) {
 	return &site, nil
 }
 
-// auditInventorySiteMismatch registra a tentativa de um coletor reivindicar
-// unidade alheia. O envio é descartado inteiro: aceitar parte dele é aceitar a
-// parte que o atacante escolheu.
 func auditInventorySiteMismatch(cred deviceAuth, p inventoryPayload) {
 	audit.Record(audit.Entry{
 		Action:     "inventory.site_mismatch",

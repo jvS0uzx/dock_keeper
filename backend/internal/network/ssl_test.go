@@ -28,8 +28,6 @@ type certOpts struct {
 	parentKey  *ecdsa.PrivateKey
 }
 
-// emitirCert gera um certificado em memória. Assinado pelo par quando parent é
-// informado, autoassinado quando não é.
 func emitirCert(t *testing.T, o certOpts) (*x509.Certificate, *ecdsa.PrivateKey) {
 	t.Helper()
 
@@ -68,8 +66,6 @@ func emitirCert(t *testing.T, o certOpts) (*x509.Certificate, *ecdsa.PrivateKey)
 	return cert, key
 }
 
-// servirTLS sobe um servidor TLS local com a cadeia informada e devolve host e
-// porta. A folha vem primeiro, como manda o protocolo.
 func servirTLS(t *testing.T, key *ecdsa.PrivateKey, cadeia ...*x509.Certificate) (string, int) {
 	t.Helper()
 
@@ -141,7 +137,6 @@ func TestCheckSSLAutoassinadoEhInvalido(t *testing.T) {
 	if info.InvalidReason != ReasonAutoassinado {
 		t.Errorf("motivo = %q, esperado %q (msg: %q)", info.InvalidReason, ReasonAutoassinado, info.ErrorMsg)
 	}
-	// O painel precisa exibir o certificado mesmo reprovado: a coleta continua.
 	if info.Issuer != "interno.local" {
 		t.Errorf("emissor não foi coletado: %q", info.Issuer)
 	}
@@ -169,7 +164,6 @@ func TestCheckSSLExpiradoTemPrecedenciaEListaOsDemais(t *testing.T) {
 	if info.DaysLeft >= 0 {
 		t.Errorf("dias restantes = %d, esperado negativo", info.DaysLeft)
 	}
-	// Um certificado com dois defeitos não pode perder o segundo na mensagem.
 	if !strings.Contains(info.ErrorMsg, "autoassinado") {
 		t.Errorf("mensagem perdeu o segundo problema: %q", info.ErrorMsg)
 	}
@@ -229,7 +223,6 @@ func TestCheckSSLFalhaDeConexao(t *testing.T) {
 		t.Errorf("domínio vazio = %+v", info)
 	}
 
-	// Porta fechada: erro de handshake, não classificação de certificado.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("abrir porta: %v", err)
@@ -258,7 +251,6 @@ func TestSSLPortaETimeoutParametrizados(t *testing.T) {
 		t.Errorf("SSL_CHECK_TIMEOUT = %v", got)
 	}
 
-	// Valor sem sentido cai no padrão em vez de derrubar a verificação inteira.
 	t.Setenv("SSL_CHECK_PORT", "99999")
 	t.Setenv("SSL_CHECK_TIMEOUT", "amanhã")
 	if sslPort() != defaultSSLPort || sslTimeout() != defaultSSLTimeout {

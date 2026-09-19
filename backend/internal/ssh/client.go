@@ -20,33 +20,16 @@ import (
 	"github.com/jvS0uzx/dock_keeper/scripts"
 )
 
-// Nomes de container Docker só têm [a-zA-Z0-9_.-] e começam por alfanumérico.
-// Bloqueia injeção de comando via query string no stream de logs (rodaria como
-// root na VPS). O primeiro caractere é parte da defesa: um container chamado
-// "-f" passaria pela regex antiga e o docker o leria como flag, não como alvo.
-// O "--" nos comandos abaixo é a segunda camada, para o dia em que a regex
-// afrouxar de novo.
 var validContainerName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
-// IsValidContainerName expõe a regex acima para o chamador HTTP.
-//
-// Existe porque a linha de auditoria da ação é gravada ANTES de
-// RunContainerAction ter chance de recusar o nome, e o nome vai no detalhe da
-// linha. Sem esta conferência prévia, o corpo da requisição escreveria texto
-// arbitrário na tabela de auditoria. Copiar a regex no pacote HTTP faria as
-// duas divergirem no primeiro ajuste.
 func IsValidContainerName(name string) bool {
 	return validContainerName.MatchString(name)
 }
 
-// Quantas linhas de histórico o `docker logs` entrega ao abrir o stream.
 const dockerLogsTailLines = 100
 
-// Intervalo de gravação dos contadores agregados do access log do Nginx.
 const lbFlushInterval = time.Second
 
-// Só loga a gravação de métricas a cada N ciclos: a coleta roda a cada 1-2s por
-// host e uma linha por ciclo entope o journal.
 const metricsLogEvery = 30
 
 func parseDockerSize(sizeStr string) int64 {
@@ -55,7 +38,6 @@ func parseDockerSize(sizeStr string) int64 {
 		return 0
 	}
 
-	// Separa a parte numérica da unidade de medida.
 	numStr, unitStr := sizeStr, ""
 	for i, r := range sizeStr {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
@@ -106,31 +88,28 @@ type DockerStatsPayload struct {
 
 type SysPayload struct {
 	Uptime   float64              `json:"uptime"`
-	HostCPU  float64              `json:"host_cpu"`
+	HostCPU  *float64             `json:"host_cpu"`
 	MemUsed  int64                `json:"mem_used"`
 	MemTotal int64                `json:"mem_total"`
-	Load1    float64              `json:"load1"`
+	Load1    *float64             `json:"load1"`
 	DiskRoot string               `json:"disk_root"`
 	PS       []DockerPSPayload    `json:"ps"`
 	Stats    []DockerStatsPayload `json:"stats"`
 
-	// Ponteiro porque o script remoto omite o campo em host sem sensor
-	// térmico (VM, container). Zero seria confundido com leitura real.
 	TemperatureC *float64 `json:"temperature_c"`
+
+	NetRxBps *float64 `json:"net_rx_bps"`
+	NetTxBps *float64 `json:"net_tx_bps"`
 }
 
-// runScript sobe o script pelo stdin da sessão remota (`bash -s`).
-func runScript(session sessionWriter, script string) error {
+func runScript(session sessionWriter, t Target, script string) error {
 	stdin, err := session.StdinPipe()
 	if err != nil {
 		return err
 	}
 	go func() {
 		defer stdin.Close()
-		// O prelúdio vai antes do script: são atribuições de variável que o
-		// script lê com fallback embutido, então executá-lo à mão fora do painel
-		// continua funcionando.
-		if _, err := io.WriteString(stdin, scriptPrelude()+script); err != nil {
+		if _, err := io.WriteString(stdin, scriptPrelude(t)+script); err != nil {
 			log.Printf("[SSH] erro ao enviar script: %v", err)
 		}
 	}()
@@ -142,8 +121,6 @@ type sessionWriter interface {
 	Start(cmd string) error
 }
 
-// StartStream abre a sessão de coleta de métricas do host e dos containers.
-// Bloqueia até a sessão cair ou o contexto ser cancelado.
 func StartStream(ctx context.Context, t Target) error {
 	log.Printf("[RealTime] iniciando conexão SSH com %s...", t.addr())
 
@@ -155,25 +132,22 @@ func StartStream(ctx context.Context, t Target) error {
 	defer client.Close()
 	defer session.Close()
 
-	// Isto mede o handshake SSH inteiro (TCP + troca de chaves), uma única vez,
-	// e é o que fica gravado em todas as amostras da sessão — que dura horas.
-	// Está correto para o que a métrica passou a se chamar: é o custo de abrir
-	// a conexão que produziu estas amostras. Não confundir com RTT: o valor
-	// típico aqui é 1000-1400 ms, uma ordem de grandeza acima da latência de
-	// rede. Medir RTT de verdade exigiria um prober separado (ICMP/TCP), fora
-	// do escopo deste stream.
 	handshakeMs := float64(time.Since(startHandshake).Milliseconds())
 	stopOnCancel(ctx, client, session)
+
+	keepaliveCtx, stopKeepalive := context.WithCancel(ctx)
+	defer stopKeepalive()
+	defer forgetRTT(t.ID)
+	go runKeepalive(keepaliveCtx, t, client, rttInterval(), keepaliveTimeout(), keepaliveMaxMisses(), rttProbeEnabled())
 
 	stdout, err := session.StdoutPipe()
 	if err != nil {
 		return err
 	}
-	if err := runScript(session, scripts.StreamMetrics); err != nil {
+	if err := runScript(session, t, scripts.StreamMetrics); err != nil {
 		return err
 	}
 
-	// Cache de containers em memória para evitar um SELECT por ciclo.
 	containerCache := make(map[string]string)
 	cycles := 0
 
@@ -219,6 +193,9 @@ func storeHostMetric(t Target, payload SysPayload, handshakeMs float64) {
 		LoadAvg1:        payload.Load1,
 		SSHHandshakeMs:  &handshakeMs,
 		TemperatureC:    payload.TemperatureC,
+		NetRxBps:        payload.NetRxBps,
+		NetTxBps:        payload.NetTxBps,
+		RTTMs:           latestRTT(t.ID),
 		Timestamp:       time.Now().UTC(),
 	}
 	if err := database.DB.Create(&metric).Error; err != nil {
@@ -284,21 +261,12 @@ func storeContainerMetrics(t Target, payload SysPayload, cache map[string]string
 	}
 }
 
-// lbKey identifica uma combinação upstream/vhost/status dentro da janela.
 type lbKey struct {
 	Upstream   string
 	ServerName string
 	Status     string
 }
 
-// lbCounter acumula requisições do access log e descarrega no banco por
-// intervalo, em vez de um INSERT por linha de log.
-//
-// serverID e siteID são resolvidos uma vez, na abertura do stream, e carregados
-// aqui: a linha do balanceador precisa saber de que host veio para o painel
-// conseguir recortá-la por unidade, e consultar isso no flush — ou pior, por
-// linha de log — pagaria uma ida ao banco por informação que não muda enquanto
-// o stream vive.
 type lbCounter struct {
 	mu     sync.Mutex
 	counts map[lbKey]int
@@ -343,13 +311,6 @@ func (c *lbCounter) flush() {
 	}
 }
 
-// lbOrigin descobre de que host e de que unidade sai este stream.
-//
-// Roda uma vez por abertura de stream, não por flush: t.ID já é o id do
-// database.Server, e a unidade dele não muda enquanto a conexão vive. Falha de
-// consulta devolve nulo em vez de abortar — a métrica do balanceador sem
-// unidade ainda serve a quem tem concessão global, e derrubar a coleta por
-// causa do recorte seria trocar um problema pequeno por um grande.
 func lbOrigin(t Target) (*string, *uint) {
 	if t.ID == "" || database.DB == nil {
 		return nil, nil
@@ -365,8 +326,6 @@ func lbOrigin(t Target) (*string, *uint) {
 	return &id, server.SiteID
 }
 
-// StartNginxStream acompanha o access log do balanceador e agrega as
-// requisições por upstream/status.
 func StartNginxStream(ctx context.Context, t Target) error {
 	log.Printf("[RealTime] iniciando stream do NGINX em %s...", t.addr())
 
@@ -383,13 +342,11 @@ func StartNginxStream(ctx context.Context, t Target) error {
 	if err != nil {
 		return err
 	}
-	if err := runScript(session, scripts.StreamNginx); err != nil {
+	if err := runScript(session, t, scripts.StreamNginx); err != nil {
 		return err
 	}
 
 	counter := newLBCounter(lbOrigin(t))
-	// O flush morre junto com o stream; antes o ticker ficava vivo para sempre
-	// e cada reconexão (a cada 5s em caso de falha) vazava mais uma goroutine.
 	flushCtx, stopFlush := context.WithCancel(ctx)
 	defer stopFlush()
 	go func() {
@@ -406,10 +363,12 @@ func StartNginxStream(ctx context.Context, t Target) error {
 		}
 	}()
 
+	health := newLBHealth(t)
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
-		if key, ok := parseNginxLine(scanner.Text()); ok {
-			counter.add(key)
+		if e, ok := parseNginxEntry(scanner.Text()); ok {
+			counter.add(e.bucket())
+			health.observe(e.Upstream, e.Code, time.Now())
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -419,44 +378,28 @@ func StartNginxStream(ctx context.Context, t Target) error {
 	return session.Wait()
 }
 
-// Status HTTP que o painel destaca. Qualquer outro é tratado como 200.
 var trackedStatuses = []string{"500", "502", "503", "504", "429", "404", "400"}
 
-// parseNginxLine lê "<vhost> - <...> to: <upstream>: <req> <status> ..." e
-// devolve a chave de agregação.
 func parseNginxLine(line string) (lbKey, bool) {
-	idxTo := strings.Index(line, " to: ")
-	if idxTo == -1 {
+	e, ok := parseNginxEntry(line)
+	if !ok {
 		return lbKey{}, false
 	}
+	return e.bucket(), true
+}
 
-	prefixParts := strings.Split(line[:idxTo], " - ")
-	serverName := strings.TrimSpace(prefixParts[len(prefixParts)-1])
-
-	parts := strings.SplitN(line[idxTo+len(" to: "):], ": ", 2)
-	if len(parts) < 2 {
-		return lbKey{}, false
-	}
-
-	upstream := strings.TrimSpace(parts[0])
-	if upstream == "-" {
-		upstream = "Local (Nginx/Cache)"
-	}
-	if upstream == "" {
-		return lbKey{}, false
-	}
-
+func (e nginxEntry) bucket() lbKey {
 	status := "200"
-	for _, code := range trackedStatuses {
-		if strings.Contains(parts[1], " "+code) {
-			status = code
+	code := strconv.Itoa(e.Code)
+	for _, tracked := range trackedStatuses {
+		if code == tracked {
+			status = tracked
 			break
 		}
 	}
-	return lbKey{Upstream: upstream, ServerName: serverName, Status: status}, true
+	return lbKey{Upstream: e.Upstream, ServerName: e.ServerName, Status: status}
 }
 
-// StreamDockerLogs transmite `docker logs -f` de um container por SSE.
 func StreamDockerLogs(ctx context.Context, t Target, containerName string, w http.ResponseWriter, flusher http.Flusher) error {
 	if !validContainerName.MatchString(containerName) {
 		return fmt.Errorf("nome de container inválido: %q", containerName)
@@ -487,8 +430,6 @@ func StreamDockerLogs(ctx context.Context, t Target, containerName string, w htt
 
 	stream := newSSEWriter(w, flusher)
 
-	// docker logs manda a saída da aplicação em stderr também; as duas pontas
-	// escrevem no mesmo SSE, por isso o writer é serializado.
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {

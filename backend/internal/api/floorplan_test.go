@@ -12,8 +12,6 @@ import (
 	"testing"
 )
 
-// pngBytes gera um PNG válido do tamanho pedido, para exercitar a validação
-// sem depender de arquivo de fixture.
 func pngBytes(t *testing.T, w, h int) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -71,8 +69,6 @@ func TestStorePlanImageAceitaPNG(t *testing.T) {
 	}
 }
 
-// O tipo sai do conteúdo, nunca do Content-Type declarado: um HTML servido pelo
-// endpoint da imagem viraria XSS no painel.
 func TestStorePlanImageRecusaConteudoQueNaoEImagem(t *testing.T) {
 	t.Setenv("FLOORPLAN_DIR", t.TempDir())
 
@@ -98,8 +94,6 @@ func TestStorePlanImageRecusaArquivoVazio(t *testing.T) {
 	}
 }
 
-// O nome em disco é aleatório, então dois envios do mesmo arquivo não colidem
-// nem permitem adivinhar o caminho de outra planta.
 func TestStorePlanImageGeraNomeAleatorio(t *testing.T) {
 	t.Setenv("FLOORPLAN_DIR", t.TempDir())
 
@@ -140,7 +134,6 @@ func TestPlanIDFromPath(t *testing.T) {
 	}
 }
 
-// Coordenada fora da imagem viraria marcador invisível.
 func TestClampPercent(t *testing.T) {
 	for input, want := range map[float64]float64{-5: 0, 0: 0, 42.5: 42.5, 100: 100, 180: 100} {
 		if got := clampPercent(input); got != want {

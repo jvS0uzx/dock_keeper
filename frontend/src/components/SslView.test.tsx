@@ -6,9 +6,6 @@ import { SessionContext, type SessionState } from './ui/session-context';
 import { DialogContext, type DialogApi } from './ui/dialog-context';
 import type { Role } from '../lib/session';
 
-// A tela busca domínios e descobertas na montagem. O mock devolve listas vazias:
-// o que se mede aqui é o gate de papel, e uma tabela populada só acrescentaria
-// texto para as buscas tropeçarem.
 vi.mock('../lib/api', () => ({
   api: {
     domains: vi.fn(async () => []),
@@ -40,23 +37,15 @@ const renderComPapel = (role: Role) => {
   );
 };
 
-// "Visualizador não cadastra nada" é regra de produto, e o backend a aplica com
-// requireRoleByMethod(viewer, operator). A tela precisa usar a mesma régua:
-// oferecer um botão que sempre responde 403 gera chamado de suporte, e some com
-// a confiança de quem usa.
 describe('SslView — visualizador é somente-leitura', () => {
   it('não oferece a ação de forçar handshake ao visualizador', async () => {
     renderComPapel('viewer');
 
-    // Espera a carga inicial terminar antes de concluir ausência: procurar cedo
-    // demais acharia o estado de carregamento e o teste passaria sozinho.
     await waitFor(() => expect(screen.getByText(/Domínios/)).toBeTruthy());
 
     expect(screen.queryByRole('button', { name: /forçar handshake/i })).toBeNull();
   });
 
-  // O contraponto: sem ele o teste acima seria satisfeito por uma tela que não
-  // renderiza o botão para ninguém.
   it('oferece a ação ao Suporte TI', async () => {
     renderComPapel('operator');
 

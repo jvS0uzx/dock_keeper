@@ -13,24 +13,17 @@ import (
 	"os"
 	"path/filepath"
 
-	// Registram os decodificadores usados por image.DecodeConfig.
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 )
 
 const (
-	// Teto do upload da planta. Planta baixa de escritório cabe folgado em 8 MB;
-	// o limite existe para uma requisição não conseguir encher o disco.
 	maxPlanBytes = 8 << 20
 
-	// Menor dimensão aceita. Abaixo disso não dá para posicionar marcador.
 	minPlanSide = 100
 )
 
-// Tipos aceitos. Lista fechada: o valor vem do cliente e vira Content-Type na
-// resposta, então um tipo arbitrário permitiria servir HTML pelo endpoint da
-// imagem e transformar o painel em vetor de XSS.
 var planContentTypes = map[string]string{
 	"image/png":  ".png",
 	"image/jpeg": ".jpg",
@@ -39,14 +32,12 @@ var planContentTypes = map[string]string{
 
 var errUnsupportedImage = errors.New("formato não suportado: use PNG, JPEG ou GIF")
 
-// storedPlan é o resultado de gravar uma planta em disco.
 type storedPlan struct {
 	Path          string
 	ContentType   string
 	Width, Height int
 }
 
-// planDir devolve (criando se preciso) o diretório dos uploads.
 func planDir() (string, error) {
 	dir := os.Getenv("FLOORPLAN_DIR")
 	if dir == "" {
@@ -58,11 +49,6 @@ func planDir() (string, error) {
 	return dir, nil
 }
 
-// storePlanImage valida e grava a imagem enviada.
-//
-// O tipo e as dimensões saem do conteúdo do arquivo, nunca do que o cliente
-// declarou: Content-Type e nome de arquivo são texto controlado por quem envia.
-// O nome em disco é aleatório, o que também elimina path traversal.
 func storePlanImage(file multipart.File) (storedPlan, error) {
 	limited := io.LimitReader(file, maxPlanBytes+1)
 	data, err := io.ReadAll(limited)
@@ -111,7 +97,6 @@ func storePlanImage(file multipart.File) (storedPlan, error) {
 	return storedPlan{Path: path, ContentType: contentType, Width: cfg.Width, Height: cfg.Height}, nil
 }
 
-// removePlanImage apaga o arquivo da planta, ignorando ausência.
 func removePlanImage(path string) {
 	if path == "" {
 		return

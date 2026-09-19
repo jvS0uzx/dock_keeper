@@ -15,15 +15,6 @@ const (
 	maxLogLimit     = 1000
 )
 
-// LogSearchHandler busca histórico de logs com filtros opcionais.
-// GET /api/logs/search?server_id=&source=&container=&q=&limit=
-// Ordena por timestamp desc e devolve um array JSON de LogEntry.
-//
-// LogEntry guarda server_id e não site_id, então o recorte por unidade não sai
-// de scope.apply direto: entra como subconsulta sobre os servidores em escopo.
-// Linha órfã — cujo server_id não corresponde a nenhum servidor — fica de fora
-// dessa subconsulta e só aparece para quem tem concessão global, que não a
-// aplica.
 func LogSearchHandler(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
 	scope, status := resolveScope(sess, r)
@@ -42,10 +33,8 @@ func LogSearchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	limit = min(limit, maxLogLimit)
 
-	tx := database.DB.Model(&database.LogEntry{})
+	tx := database.From(r.Context()).Model(&database.LogEntry{})
 	if v := q.Get("server_id"); v != "" {
-		// Servidor fora do alcance responde 404 pelo mesmo motivo do C2: 403
-		// confirmaria a existência do host que o recorte esconde.
 		server, ok := lookupServer(w, sess, v)
 		if !ok {
 			return
@@ -57,7 +46,7 @@ func LogSearchHandler(w http.ResponseWriter, r *http.Request) {
 		tx = tx.Where("server_id = ?", v)
 	} else if scope.filter {
 		tx = tx.Where("server_id IN (?)",
-			scope.apply(database.DB.Model(&database.Server{}).Select("id")))
+			scope.apply(database.From(r.Context()).Model(&database.Server{}).Select("id")))
 	}
 	if v := q.Get("source"); v != "" {
 		tx = tx.Where("source = ?", v)

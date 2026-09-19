@@ -6,22 +6,17 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// Regressão do achado 1 do QA: a varredura reinferia device_type a cada ciclo e
-// desfazia a correção do técnico em no máximo 15 minutos.
 func TestVarreduraNaoDesfazTipoTravado(t *testing.T) {
 	setupDB(t)
 
-	// Primeira varredura: 9100 aberta, o inferidor diz "impressora".
 	persist([]Host{{IP: testIPKnown, OpenPorts: []int{80, 9100}}}, nil)
 	if got := fetch(t, testIPKnown).DeviceType; got != TypePrinter {
 		t.Fatalf("tipo inferido = %q, esperado %q", got, TypePrinter)
 	}
 
-	// O operador corrige a mão para NAS e a trava é ligada.
 	database.DB.Model(&database.NetworkHost{}).Where("ip = ?", testIPKnown).
 		Updates(map[string]any{"device_type": TypeNAS, "device_type_locked": true})
 
-	// Ciclo seguinte com as mesmas portas: sem a trava, voltaria a impressora.
 	persist([]Host{{IP: testIPKnown, OpenPorts: []int{80, 9100}}}, nil)
 
 	host := fetch(t, testIPKnown)
@@ -33,7 +28,6 @@ func TestVarreduraNaoDesfazTipoTravado(t *testing.T) {
 	}
 }
 
-// O contraponto: sem trava, o tipo continua acompanhando as portas.
 func TestVarreduraAtualizaTipoNaoTravado(t *testing.T) {
 	setupDB(t)
 
@@ -42,7 +36,6 @@ func TestVarreduraAtualizaTipoNaoTravado(t *testing.T) {
 		t.Fatalf("tipo inicial = %q, esperado %q", got, TypeLinux)
 	}
 
-	// A máquina passou a expor 3389: agora é estação Windows.
 	persist([]Host{{IP: testIPKnown, OpenPorts: []int{22, 3389}}}, nil)
 
 	if got := fetch(t, testIPKnown).DeviceType; got != TypeWindows {
@@ -50,25 +43,20 @@ func TestVarreduraAtualizaTipoNaoTravado(t *testing.T) {
 	}
 }
 
-// Regressão do achado 2: o coletor sempre manda a unidade dele, então o
-// COALESCE antigo revertia todo host que o operador tivesse movido.
 func TestVarreduraNaoRevertUnidadeTravada(t *testing.T) {
 	setupDB(t)
 
 	matriz := criarUnidade(t, "qa-matriz")
 	filial := criarUnidade(t, "qa-filial")
 
-	// A varredura da matriz descobre o host e o classifica.
 	persist([]Host{{IP: testIPKnown, OpenPorts: []int{22}}}, &matriz)
 	if got := fetch(t, testIPKnown).SiteID; got == nil || *got != matriz {
 		t.Fatalf("unidade inicial = %v, esperada a matriz", got)
 	}
 
-	// O operador move o host para a filial; a trava é ligada.
 	database.DB.Model(&database.NetworkHost{}).Where("ip = ?", testIPKnown).
 		Updates(map[string]any{"site_id": filial, "site_locked": true})
 
-	// A varredura da matriz roda de novo e insiste na unidade dela.
 	persist([]Host{{IP: testIPKnown, OpenPorts: []int{22}}}, &matriz)
 
 	host := fetch(t, testIPKnown)
@@ -77,8 +65,6 @@ func TestVarreduraNaoRevertUnidadeTravada(t *testing.T) {
 	}
 }
 
-// Sem trava, a varredura classifica o host que ainda não tinha unidade — que é
-// justamente o achado 3 (varredura local nunca escrevia site_id).
 func TestVarreduraClassificaHostSemUnidade(t *testing.T) {
 	setupDB(t)
 
@@ -100,7 +86,6 @@ func TestVarreduraClassificaHostSemUnidade(t *testing.T) {
 	}
 }
 
-// criarUnidade cria uma unidade descartável e a remove ao fim do teste.
 func criarUnidade(t *testing.T, code string) uint {
 	t.Helper()
 

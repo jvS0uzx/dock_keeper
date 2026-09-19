@@ -1,7 +1,9 @@
-import { useState, useEffect, type FormEvent } from 'react';
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
+import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { ShieldOff } from 'lucide-react';
 import { api, type ServerLiveStat, type ServerRecord as Server } from '../lib/api';
-import { formatGB } from '../lib/format';
+import { formatGB, formatLatency, formatLoad, formatPercent } from '../lib/format';
 import { useDialog } from './ui/dialog-context';
 import { useRole } from './ui/session-context';
 
@@ -13,26 +15,32 @@ const ServersView = () => {
   const [servers, setServers] = useState<Server[]>([]);
   const [liveStats, setLiveStats] = useState<Record<string, ServerLiveStat>>({});
   const [loading, setLoading] = useState(true);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
+  const status = useLoadStatus();
+  const { ok: statusOk, fail: statusFail } = status;
   const [form, setForm] = useState({ ...emptyForm });
 
-  const fetchServers = async () => {
+  const fetchServers = useCallback(async () => {
     try {
       setServers(await api.servers());
+      cargaOk();
     } catch (err) {
-      console.error(err);
+      cargaFail(err, 'Falha ao listar os servidores.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [cargaOk, cargaFail]);
 
-  const fetchLiveStatus = async (signal?: AbortSignal) => {
+  const fetchLiveStatus = useCallback(async (signal?: AbortSignal) => {
     try {
       const data = await api.liveMetrics(signal);
       setLiveStats(Object.fromEntries(data.servers.map(s => [s.id, s])));
-    } catch {
-      // Falha de polling não interrompe a tela: a próxima rodada tenta de novo.
+      statusOk();
+    } catch (err) {
+      if (!signal?.aborted) statusFail(err, 'Falha ao ler o estado das conexões.');
     }
-  };
+  }, [statusOk, statusFail]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -43,7 +51,7 @@ const ServersView = () => {
       clearInterval(interval);
       controller.abort();
     };
-  }, []);
+  }, [fetchServers, fetchLiveStatus]);
 
   const handleAdd = async (e: FormEvent) => {
     e.preventDefault();
@@ -77,8 +85,6 @@ const ServersView = () => {
     }
   };
 
-  // Servidor cadastrado entrega SSH root: tela restrita a administrador. A aba
-  // já some para os demais; isto cobre acesso por estado antigo.
   if (!canAdmin) {
     return (
       <div className="p-8 h-full flex flex-col items-center justify-center text-text-mut gap-3">
@@ -90,6 +96,8 @@ const ServersView = () => {
 
   return (
     <div className="p-4 md:p-8 anim-rise">
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
+      <LoadNotice error={status.error} lastOk={status.lastOk} className="mb-4" />
       <div className="page-header">
         <div>
           <h1 className="page-title">Servidores</h1>
@@ -149,7 +157,7 @@ const ServersView = () => {
           {loading ? (
             <p className="text-sm text-text-mut">Carregando...</p>
           ) : servers.length === 0 ? (
-            <p className="text-sm text-text-mut">Nenhum servidor cadastrado.</p>
+            carga.error && !carga.lastOk ? null : <p className="text-sm text-text-mut">Nenhum servidor cadastrado.</p>
           ) : (
             <div className="overflow-x-auto custom-scrollbar">
               <table className="table-base whitespace-nowrap">
@@ -161,6 +169,7 @@ const ServersView = () => {
                     <th className="text-right">CPU</th>
                     <th className="text-right">RAM</th>
                     <th className="text-right">Load</th>
+                    <th className="text-right">Latência</th>
                     <th className="text-right">Ação</th>
                   </tr>
                 </thead>
@@ -178,16 +187,28 @@ const ServersView = () => {
                       </td>
                       <td className="font-medium text-text-hi">{s.name}</td>
                       <td className="mono-data text-text-mut">{s.host_ip}</td>
-                      <td className="text-right mono-data text-text-hi">
-                        {isOnline ? `${live.cpu.toFixed(0)}%` : <span className="text-text-faint">-</span>}
+                      <td
+                        data-testid="cpu"
+                        className={`text-right mono-data ${isOnline && live.cpu !== null ? 'text-text-hi' : 'text-text-faint'}`}
+                      >
+                        {isOnline ? formatPercent(live.cpu) : '—'}
                       </td>
                       <td className="text-right mono-data text-text-hi">
                         {isOnline && live.mem_total > 0
                           ? <span>{formatGB(live.mem_used)}<span className="text-text-faint text-xs">/{formatGB(live.mem_total)}GB</span></span>
                           : <span className="text-text-faint">-</span>}
                       </td>
-                      <td className="text-right mono-data text-text-hi">
-                        {isOnline ? live.load1.toFixed(2) : <span className="text-text-faint">-</span>}
+                      <td
+                        data-testid="load"
+                        className={`text-right mono-data ${isOnline && live.load1 !== null ? 'text-text-hi' : 'text-text-faint'}`}
+                      >
+                        {isOnline ? formatLoad(live.load1) : '—'}
+                      </td>
+                      <td
+                        data-testid="latencia"
+                        className={`text-right mono-data ${live?.rtt_ms != null ? 'text-text-hi' : 'text-text-faint'}`}
+                      >
+                        {formatLatency(live?.rtt_ms ?? null)}
                       </td>
                       <td className="text-right">
                         <button onClick={() => handleDelete(s)} className="btn btn-danger btn-sm">

@@ -1,0 +1,130 @@
+---
+- name: Instalar o agente de estacao do DockKeeper
+  hosts: estacoes
+  become: true
+
+  vars_files:
+    - secrets.yml
+
+  vars:
+    agente_nome: dockkeeper-agent
+    agente_antigo: vd-agent
+    agente_binario_por_arquitetura:
+      x86_64: agent-linux-amd64
+      aarch64: agent-linux-arm64
+    agente_server_url: "{{ dockkeeper_agent_server_url | default(vd_agent_server_url) | default('https://painel.exemplo.com') }}"
+    agente_interval: "{{ dockkeeper_agent_interval | default(vd_agent_interval) | default('5') }}"
+    agente_site: "{{ dockkeeper_agent_site | default(vd_agent_site) | default('') }}"
+    agente_enroll_token: "{{ dockkeeper_agent_enroll_token | default(vd_agent_enroll_token) | default('') }}"
+    agente_token: "{{ dockkeeper_agent_token | default(vd_agent_token) | default('') }}"
+
+  tasks:
+    - name: Parar e desabilitar o servico antigo
+      ansible.builtin.systemd:
+        name: "{{ agente_antigo }}"
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Criar o diretorio de estado novo
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop:
+        - /var/lib/private
+        - "/var/lib/private/{{ agente_nome }}"
+
+    - name: Levar a credencial e o machine-id do diretorio de estado antigo
+      ansible.builtin.command:
+        cmd: "mv {{ item.0 }}/{{ item.1 }} /var/lib/private/{{ agente_nome }}/{{ item.1 }}"
+        removes: "{{ item.0 }}/{{ item.1 }}"
+        creates: "/var/lib/private/{{ agente_nome }}/{{ item.1 }}"
+      loop: "{{ ['/var/lib/private/' ~ agente_antigo, '/var/lib/' ~ agente_antigo] | product(['credential.json', 'machine-id']) | list }}"
+      notify: reiniciar agente
+
+    - name: Guardar como .anterior o que sobrou do estado antigo
+      ansible.builtin.command:
+        cmd: "mv {{ item.0 }}/{{ item.1 }} /var/lib/private/{{ agente_nome }}/{{ item.1 }}.anterior"
+        removes: "{{ item.0 }}/{{ item.1 }}"
+      loop: "{{ ['/var/lib/private/' ~ agente_antigo, '/var/lib/' ~ agente_antigo] | product(['credential.json', 'machine-id']) | list }}"
+
+    - name: Remover unit, binario e config do nome antigo
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/etc/systemd/system/{{ agente_antigo }}.service"
+        - "/usr/local/bin/{{ agente_antigo }}"
+        - "/etc/{{ agente_antigo }}.env"
+
+    - name: Inspecionar o caminho de estado antigo fora do diretorio privado
+      ansible.builtin.stat:
+        path: "/var/lib/{{ agente_antigo }}"
+        follow: false
+      register: estado_antigo
+
+    - name: Remover o link de estado antigo
+      ansible.builtin.file:
+        path: "/var/lib/{{ agente_antigo }}"
+        state: absent
+      when: estado_antigo.stat.islnk | default(false)
+
+    - name: Remover os diretorios de estado antigos se vazios
+      ansible.builtin.command:
+        cmd: "rmdir {{ item }}"
+        removes: "{{ item }}"
+      loop:
+        - "/var/lib/private/{{ agente_antigo }}"
+        - "/var/lib/{{ agente_antigo }}"
+      register: rmdir_antigo
+      changed_when: false
+      failed_when: false
+
+    - name: Copiar o binario da arquitetura do host
+      ansible.builtin.copy:
+        src: "../../../dist/{{ agente_binario_por_arquitetura[ansible_architecture] }}"
+        dest: "/usr/local/bin/{{ agente_nome }}"
+        owner: root
+        group: root
+        mode: "0755"
+      notify: reiniciar agente
+
+    - name: Gravar a configuracao com o token
+      ansible.builtin.copy:
+        dest: "/etc/{{ agente_nome }}.env"
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          AGENT_SERVER_URL="{{ agente_server_url }}"
+          AGENT_ENROLL_TOKEN="{{ agente_enroll_token }}"
+          AGENT_TOKEN="{{ agente_token }}"
+          AGENT_SITE="{{ agente_site }}"
+          AGENT_INTERVAL="{{ agente_interval }}"
+      notify: reiniciar agente
+
+    - name: Instalar a unit systemd
+      ansible.builtin.copy:
+        src: "../{{ agente_nome }}.service"
+        dest: "/etc/systemd/system/{{ agente_nome }}.service"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: reiniciar agente
+
+    - name: Habilitar e iniciar o servico
+      ansible.builtin.systemd:
+        name: "{{ agente_nome }}"
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: reiniciar agente
+      ansible.builtin.systemd:
+        name: "{{ agente_nome }}"
+        state: restarted
+        daemon_reload: true

@@ -10,17 +10,6 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// A ação de container é auditada pelo próprio handler, com o verbo, o servidor
-// alvo, a unidade e o nome do container, gravando antes de o comando sair. O
-// middleware genérico só enxerga método, rota e status.
-//
-// Por isso /api/containers/action sai do wrapper que aplica o middleware: com
-// os dois na cadeia, cada ação gerava duas linhas dizendo a mesma coisa, e a
-// menos informativa das duas aparecia junto na consulta do administrador.
-//
-// O teste roda pelo mux montado, não chamando o handler direto, porque o que se
-// mede aqui é a fiação — chamar o handler nunca passaria pelo middleware e
-// daria verde mesmo com a duplicação de pé.
 func TestAcaoDeContainerGeraUmaLinhaSo(t *testing.T) {
 	setupAuditAPI(t)
 
@@ -34,8 +23,6 @@ func TestAcaoDeContainerGeraUmaLinhaSo(t *testing.T) {
 	rec := httptest.NewRecorder()
 	Routes(testConfig()).ServeHTTP(rec, req)
 
-	// O servidor não existe, então a recusa por alcance é o desfecho — e é
-	// justamente um dos casos em que as duas linhas apareciam.
 	var linhas []database.AuditLog
 	if err := database.DB.Where("action LIKE ?", "container.%").
 		Or("action = ?", "desconhecido.create").

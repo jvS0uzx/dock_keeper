@@ -36,7 +36,6 @@ func TestValidRole(t *testing.T) {
 	}
 }
 
-// Senha curta é o vetor mais comum de conta comprometida num painel interno.
 func TestHashPasswordExigeTamanho(t *testing.T) {
 	if _, err := HashPassword("curta"); err != ErrWeakPassword {
 		t.Errorf("senha curta: erro = %v", err)
@@ -63,9 +62,6 @@ func TestSessaoInvalidaNaoResolve(t *testing.T) {
 	}
 }
 
-// Os dois testes abaixo passaram a exigir banco: a sessão deixou de viver num
-// mapa em memória, e a autorização é relida a cada Lookup — sessão de usuário
-// que não existe na tabela não resolve mais, por desenho.
 func TestLogoutInvalidaSessao(t *testing.T) {
 	user := setupSessaoDB(t)
 
@@ -83,7 +79,6 @@ func TestLogoutInvalidaSessao(t *testing.T) {
 	}
 }
 
-// Trocar papel ou desativar alguém precisa valer na hora, não no fim da sessão.
 func TestRevokeUserDerrubaTodasAsSessoes(t *testing.T) {
 	user := setupSessaoDB(t)
 	acc := []Access{{SiteID: nil, Role: RoleOperator}}
@@ -109,7 +104,6 @@ func TestRevokeUserDerrubaTodasAsSessoes(t *testing.T) {
 
 func site(id uint) *uint { return &id }
 
-// O modelo copia o desenho do Zabbix: papel diz o que pode, concessão diz onde.
 func TestRoleForSiteEEscopo(t *testing.T) {
 	restrito := []Access{{SiteID: site(3), Role: RoleOperator}}
 	global := []Access{{SiteID: nil, Role: RoleViewer}, {SiteID: site(3), Role: RoleOperator}}
@@ -121,7 +115,6 @@ func TestRoleForSiteEEscopo(t *testing.T) {
 		t.Error("concessão global não foi reconhecida")
 	}
 
-	// Restrito: opera na unidade 3, não enxerga a 9 nem o escopo sem unidade.
 	if got := RoleForSite(restrito, site(3)); got != RoleOperator {
 		t.Errorf("papel na própria unidade = %q", got)
 	}
@@ -132,7 +125,6 @@ func TestRoleForSiteEEscopo(t *testing.T) {
 		t.Error("escopo sem unidade (VPS/Dev) ficou visível para restrito")
 	}
 
-	// Global viewer + operator na 3: vence o maior papel por alvo.
 	if got := RoleForSite(global, site(3)); got != RoleOperator {
 		t.Errorf("papel combinado na unidade 3 = %q", got)
 	}

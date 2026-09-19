@@ -5,21 +5,15 @@ on:
     branches: [main]
   pull_request:
 
-# O deploy nas VPS é disparado por merge em main, por outro workflow. Este aqui
-# só verifica; nada nele toca servidor.
 permissions:
   contents: read
 
 jobs:
-  # A varredura de segredo foi uma auditoria manual pontual. Como passo de CI
-  # ela vira garantia contínua: cobre a árvore e o histórico completo, então um
-  # segredo commitado e removido no commit seguinte continua sendo pego.
   segredos:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          # A varredura de histórico precisa dos commits; o padrão é rasa.
           fetch-depth: 0
 
       - name: gitleaks
@@ -28,10 +22,6 @@ jobs:
         run: |
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSAO}/gitleaks_${VERSAO}_linux_x64.tar.gz" \
             | tar -xz gitleaks
-          # --redact para o achado não reimprimir o segredo no log público do
-          # Actions, que é justamente onde ele não deve estar.
-          # --log-opts=--all: sem isso a varredura cobre só a branch atual, e um
-          # segredo que ficou numa branch antiga passaria.
           ./gitleaks detect --redact --no-banner --config .gitleaks.toml --log-opts=--all
           ./gitleaks detect --redact --no-banner --config .gitleaks.toml --no-git
 
@@ -41,15 +31,12 @@ jobs:
       run:
         working-directory: backend
 
-    # Os testes de integração pulam sozinhos sem DATABASE_URL, mas pular é o que
-    # deixa uma regressão de recorte por unidade passar despercebida — metade da
-    # suíte de segurança depende de banco. O serviço garante que ela roda.
     services:
       postgres:
         image: postgres:15-alpine
         env:
           POSTGRES_PASSWORD: ci
-          POSTGRES_DB: vdstats_test
+          POSTGRES_DB: dockkeeper_test
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
@@ -59,7 +46,7 @@ jobs:
           - 5432:5432
 
     env:
-      DATABASE_URL: "postgres://postgres:ci@127.0.0.1:5432/vdstats_test?sslmode=disable"
+      DATABASE_URL: "postgres://postgres:ci@127.0.0.1:5432/dockkeeper_test?sslmode=disable"
 
     steps:
       - uses: actions/checkout@v4
@@ -70,8 +57,6 @@ jobs:
           cache-dependency-path: backend/go.sum
 
       - name: gofmt
-        # gofmt -l não tem código de saída próprio: lista os arquivos e sai
-        # zero. Sem esta conferência o passo passaria sempre.
         run: |
           arquivos=$(gofmt -l .)
           if [ -n "$arquivos" ]; then
@@ -104,10 +89,6 @@ jobs:
 
       - run: npm ci
 
-      # tsc -b, nao --noEmit: o tsconfig.json da raiz tem "files": [] e so
-      # referencias de projeto, entao --noEmit checa ZERO arquivo e passa
-      # sempre. Um passo de CI que nunca falha e pior que passo nenhum, porque
-      # da a impressao de cobertura.
       - name: typecheck
         run: npm run typecheck
 
@@ -120,11 +101,6 @@ jobs:
       - name: build
         run: npm run build
 
-      # Regressão do C1: o token de administrador global chegou a ser embutido
-      # no bundle de produção e viajou para todo navegador que abriu o painel.
-      # A correção fez VITE_API_TOKEN ser lido apenas sob import.meta.env.DEV.
-      # Este passo prova que continua assim: injeta um valor reconhecível e
-      # falha se ele aparecer em qualquer arquivo do build.
       - name: token nao vaza para o bundle
         env:
           VITE_API_TOKEN: canario-do-ci-nao-pode-aparecer-no-bundle

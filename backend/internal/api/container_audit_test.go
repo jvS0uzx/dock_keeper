@@ -13,17 +13,11 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// Item S8: o painel executa docker start/stop/restart como root na VPS e não
-// registrava quem mandou. Estes testes cobrem os três desfechos da rota —
-// executada, recusada por alcance e recusada por argumento.
-
 const (
 	srvAuditA = "00000000-0000-0000-0000-00000000e001"
 	srvAuditB = "00000000-0000-0000-0000-00000000e002"
 )
 
-// setupAuditRouteDB planta duas filiais com um servidor cada. Sem DATABASE_URL o
-// teste é pulado, no mesmo modelo de scope_read_test.go.
 func setupAuditRouteDB(t *testing.T) (filialA, filialB uint) {
 	t.Helper()
 
@@ -60,8 +54,6 @@ func setupAuditRouteDB(t *testing.T) (filialA, filialB uint) {
 	return sedeA.ID, sedeB.ID
 }
 
-// Unscoped no servidor porque Server tem exclusão lógica: sem ele a linha
-// sobrevive com o mesmo id e a execução seguinte esbarra na chave primária.
 func limpaAuditRoute(t *testing.T) {
 	t.Helper()
 
@@ -70,7 +62,6 @@ func limpaAuditRoute(t *testing.T) {
 	database.DB.Where("code IN ?", []string{"audit-a", "audit-b"}).Delete(&database.Site{})
 }
 
-// sessaoDaFilial monta a sessão de um operador que só alcança uma unidade.
 func sessaoDaFilial(id uint) auth.Session {
 	return auth.Session{
 		UserID:   77,
@@ -80,8 +71,6 @@ func sessaoDaFilial(id uint) auth.Session {
 	}
 }
 
-// acaoDeContainer dispara a rota com a sessão já no contexto, como o middleware
-// a entrega.
 func acaoDeContainer(sess auth.Session, corpo string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/containers/action", strings.NewReader(corpo))
@@ -89,7 +78,6 @@ func acaoDeContainer(sess auth.Session, corpo string) *httptest.ResponseRecorder
 	return rec
 }
 
-// ultimaLinhaDeAuditoria devolve o registro mais recente de ação de container.
 func ultimaLinhaDeAuditoria(t *testing.T) database.AuditLog {
 	t.Helper()
 
@@ -111,13 +99,6 @@ func detalheDe(t *testing.T, row database.AuditLog) map[string]any {
 	return m
 }
 
-// A execução falha porque não há chave SSH no ambiente de teste, e é exatamente
-// o desfecho que interessa: a linha precisa existir mesmo assim. Se o registro
-// fosse feito só depois de um comando bem-sucedido, este caso não deixaria
-// rastro nenhum — e comando que falhou é o que mais se quer auditar.
-//
-// A presença simultânea do detalhe gravado ANTES (container, host) e do gravado
-// DEPOIS (erro) é a prova de que as duas fases correram.
 func TestAcaoDeContainerFalhaMasDeixaRastro(t *testing.T) {
 	filialA, _ := setupAuditRouteDB(t)
 
@@ -156,9 +137,6 @@ func TestAcaoDeContainerFalhaMasDeixaRastro(t *testing.T) {
 	}
 }
 
-// Tentar operar servidor de outra unidade é o sinal que mais justifica a
-// auditoria existir. lookupServer responde 404 sem confirmar a existência, o
-// que deixaria o episódio inteiramente invisível sem esta linha.
 func TestAcaoEmUnidadeAlheiaRegistraRecusa(t *testing.T) {
 	filialA, _ := setupAuditRouteDB(t)
 
@@ -183,8 +161,6 @@ func TestAcaoEmUnidadeAlheiaRegistraRecusa(t *testing.T) {
 	}
 }
 
-// A coluna de ação não pode receber texto escolhido pelo cliente: seria mais uma
-// superfície, e uma tabela de auditoria poluída deixa de ser consultável.
 func TestAcaoInvalidaNaoInterpolaOCorpoNaColuna(t *testing.T) {
 	filialA, _ := setupAuditRouteDB(t)
 
@@ -203,8 +179,6 @@ func TestAcaoInvalidaNaoInterpolaOCorpoNaColuna(t *testing.T) {
 	}
 }
 
-// O nome do container entra no detalhe da linha, gravado antes de o pacote ssh
-// ter chance de recusá-lo — por isso a conferência precisa acontecer no handler.
 func TestNomeDeContainerInvalidoRecusadoAntesDoRegistro(t *testing.T) {
 	filialA, _ := setupAuditRouteDB(t)
 

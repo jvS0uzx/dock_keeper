@@ -1,3 +1,5 @@
+import LoadNotice from './ui/LoadNotice';
+import { useLoadStatus } from './ui/load-status';
 import { useState, useEffect, useCallback, useMemo, type FormEvent } from 'react';
 import {
   RefreshCw, Search, ShieldQuestion, Router, Printer, Monitor,
@@ -12,11 +14,8 @@ import Select from './ui/Select';
 
 const POLL_MS = 20000;
 
-// Tempo que a varredura costuma levar antes do inventário refletir o disparo.
 const SCAN_SETTLE_MS = 8000;
 
-// Portas que identificam o tipo de equipamento. A primeira que casar vence,
-// então a ordem importa: 9100 (fila de impressão) antes de 80.
 const FINGERPRINTS: { port: string; label: string; Icon: typeof Monitor }[] = [
   { port: '9100', label: 'Impressora', Icon: Printer },
   { port: '3389', label: 'Estação Windows', Icon: Monitor },
@@ -26,7 +25,6 @@ const FINGERPRINTS: { port: string; label: string; Icon: typeof Monitor }[] = [
   { port: '22', label: 'Linux / SSH', Icon: Router },
 ];
 
-// Tipos que o backend infere pelas portas; o operador pode corrigir à mão.
 const DEVICE_TYPES: { value: string; label: string }[] = [
   { value: 'printer', label: 'Impressora' },
   { value: 'windows', label: 'Estação Windows' },
@@ -36,8 +34,6 @@ const DEVICE_TYPES: { value: string; label: string }[] = [
   { value: 'unknown', label: 'Desconhecido' },
 ];
 
-// Valor vazio significa "não fixado": o backend recalcula pelo que a varredura
-// detectar. Fica no topo porque é o estado natural de um host recém-descoberto.
 const AUTO_TYPE_OPTION = { value: '', label: 'Automático (detectado pelas portas)' };
 const AUTO_SITE_OPTION = { value: '', label: 'Automático (definido pelo coletor)' };
 
@@ -49,13 +45,6 @@ const identify = (host: NetworkHostView) => {
   return match ?? { label: 'Desconhecido', Icon: ShieldQuestion };
 };
 
-/**
- * Tipo que a varredura enxerga agora, para o operador saber o que está aceitando
- * ao deixar o campo em automático.
- *
- * Sem lock, o valor gravado é o próprio detectado. Com lock, o backend só devolve
- * o valor fixado, então a inferência local pelas portas é a melhor aproximação.
- */
 const detectedTypeLabel = (host: NetworkHostView) =>
   host.device_type_locked ? identify(host).label : typeLabel(host.device_type);
 
@@ -75,16 +64,8 @@ interface HostEditModalProps {
   onSaved: (updated: NetworkHostView) => void;
 }
 
-/** Campos de texto livre do cadastro, os únicos comparáveis um a um. */
 const TEXT_FIELDS = ['floor', 'sector', 'room', 'rack', 'asset_tag', 'owner', 'notes'] as const;
 
-/**
- * Estado inicial do formulário.
- *
- * Campo sem lock começa em "automático" mesmo tendo valor gravado: o valor veio
- * da varredura, não de uma escolha de alguém, e mostrá-lo como se fosse escolha
- * do operador faria qualquer gravação fixar o campo sem querer.
- */
 const buildForm = (host: NetworkHostView) => ({
   site_id: host.site_locked ? host.site_id : null,
   device_type: host.device_type_locked ? host.device_type : '',
@@ -97,7 +78,6 @@ const buildForm = (host: NetworkHostView) => ({
   notes: host.notes,
 });
 
-/** Cadastro físico do equipamento: onde ele está e de quem é. */
 const HostEditModal = ({ host, sites, onClose, onSaved }: HostEditModalProps) => {
   const dialog = useDialog();
   const [saving, setSaving] = useState(false);
@@ -110,9 +90,6 @@ const HostEditModal = ({ host, sites, onClose, onSaved }: HostEditModalProps) =>
     e.preventDefault();
     if (saving) return;
 
-    // Só o que o operador mexeu entra no patch: mandar o formulário inteiro
-    // ligaria os locks de tipo e unidade em toda gravação, mesmo que ele tenha
-    // vindo aqui apenas para preencher a sala.
     const patch: HostInventoryPatch = {};
     for (const field of TEXT_FIELDS) {
       if (form[field] !== initial[field]) patch[field] = form[field];
@@ -238,13 +215,15 @@ const HostEditModal = ({ host, sites, onClose, onSaved }: HostEditModalProps) =>
 const NetworkView = () => {
   const dialog = useDialog();
   const { canOperate } = useRole();
-  // Unidade escolhida na barra lateral: o inventário segue o mesmo escopo das
-  // demais telas do painel de campo.
   const { numericSiteId } = useSiteScope();
   const [inventory, setInventory] = useState<NetworkInventory | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [editing, setEditing] = useState<NetworkHostView | null>(null);
   const [loading, setLoading] = useState(true);
+  const carga = useLoadStatus();
+  const { ok: cargaOk, fail: cargaFail } = carga;
+  const unidades = useLoadStatus();
+  const { ok: unidadesOk, fail: unidadesFail } = unidades;
   const [scanning, setScanning] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -252,23 +231,31 @@ const NetworkView = () => {
   const fetchInventory = useCallback(async (signal?: AbortSignal) => {
     try {
       setInventory(await api.networkHosts(signal));
+      cargaOk();
     } catch (err) {
-      if (!signal?.aborted) console.error(err);
+      if (!signal?.aborted) cargaFail(err, 'Falha ao ler o inventário de rede.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cargaOk, cargaFail]);
 
   useEffect(() => {
     const controller = new AbortController();
     fetchInventory(controller.signal);
-    api.sites().then(setSites).catch(() => {});
+    api.sites()
+      .then((list) => {
+        setSites(list);
+        unidadesOk();
+      })
+      .catch((err) => {
+        if (!controller.signal.aborted) unidadesFail(err, 'Falha ao listar as unidades.');
+      });
     const interval = setInterval(() => fetchInventory(controller.signal), POLL_MS);
     return () => {
       clearInterval(interval);
       controller.abort();
     };
-  }, [fetchInventory]);
+  }, [fetchInventory, unidadesOk, unidadesFail]);
 
   const runScan = async () => {
     setScanning(true);
@@ -285,7 +272,6 @@ const NetworkView = () => {
     }
   };
 
-  // Reflete a edição na tabela sem esperar o próximo polling.
   const handleSaved = (updated: NetworkHostView) => {
     setInventory((prev) =>
       prev
@@ -295,8 +281,6 @@ const NetworkView = () => {
     setEditing(null);
   };
 
-  // Recorte da unidade antes de qualquer outro filtro: os cartões de resumo
-  // contam sobre ele, não sobre o parque inteiro.
   const scoped = useMemo(
     () => (inventory?.hosts ?? []).filter(h => numericSiteId === null || h.site_id === numericSiteId),
     [inventory, numericSiteId],
@@ -320,6 +304,8 @@ const NetworkView = () => {
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden anim-rise">
+      <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
+      <LoadNotice error={unidades.error} lastOk={unidades.lastOk} className="mb-4" />
       <div className="page-header flex-col md:flex-row md:items-end items-start">
         <div>
           <h1 className="page-title">Inventário de Rede</h1>
@@ -486,8 +472,6 @@ const NetworkView = () => {
       </div>
 
       {editing && (
-        // A chave por IP garante que o formulário remonte ao trocar de host, em
-        // vez de reaproveitar o estado do anterior.
         <HostEditModal
           key={editing.ip}
           host={editing}

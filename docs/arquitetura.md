@@ -70,7 +70,7 @@ a transição, com aviso no log. Ver [`agente.md`](agente.md).
 
 ## 3. Coletor remoto de inventário
 
-**O que é.** O repositório `vd_collector`, instalado numa máquina dentro da rede
+**O que é.** O repositório `dockkeeper_collector`, instalado numa máquina dentro da rede
 da filial. Varre a faixa local e faz `POST /api/ingest/inventory`.
 
 **Por que existe.** O painel só enxerga a rede onde ele mesmo roda. Uma empresa

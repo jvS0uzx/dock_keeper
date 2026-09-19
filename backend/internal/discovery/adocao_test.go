@@ -6,9 +6,6 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
-// contarHosts conta as linhas do inventário para um endereço. É o observável que
-// separa "adotou a linha existente" de "criou uma segunda linha": o teste de
-// classificação sozinho não distinguia os dois, porque lia só a primeira.
 func contarHosts(t *testing.T, ip string) int64 {
 	t.Helper()
 
@@ -20,11 +17,6 @@ func contarHosts(t *testing.T, ip string) int64 {
 	return n
 }
 
-// Regressão da chave composta do inventário: com o índice único em
-// (COALESCE(site_id,0), ip), a linha que a varredura deixou sem unidade tem
-// chave (0, ip) e não colide com a da varredura que já conhece a unidade. Sem a
-// adoção prévia o mesmo endereço vira duas linhas — uma órfã, que continua
-// aparecendo na tela, e uma classificada.
 func TestVarreduraNaoDuplicaHostAoClassificar(t *testing.T) {
 	setupDB(t)
 
@@ -45,8 +37,6 @@ func TestVarreduraNaoDuplicaHostAoClassificar(t *testing.T) {
 	}
 }
 
-// O contraponto que impede a adoção de virar sequestro: unidade nula escolhida a
-// mão pelo operador continua nula depois da varredura.
 func TestAdocaoRespeitaATravaDoOperador(t *testing.T) {
 	setupDB(t)
 

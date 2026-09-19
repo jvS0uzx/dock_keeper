@@ -38,10 +38,6 @@ func TestParseOptionalUint(t *testing.T) {
 	}
 }
 
-// Regressão: com *uint — ou *json.RawMessage — o encoding/json anula o próprio
-// ponteiro ao encontrar null, e "campo ausente" vira indistinguível de "campo
-// enviado como null". No PATCH do host os dois são opostos: ausente preserva a
-// unidade, null devolve o host ao controle automático do coletor.
 func TestSiteIDDistingueAusenteDeNull(t *testing.T) {
 	type corpo struct {
 		SiteID json.RawMessage `json:"site_id"`

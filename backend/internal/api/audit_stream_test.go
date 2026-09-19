@@ -12,9 +12,6 @@ import (
 
 const srvStream = "00000000-0000-0000-0000-0000000000e1"
 
-// Ler /var/log/auth.log de um host de produção é leitura, mas é leitura de dado
-// sensível, como root, iniciada por uma pessoa. "Quem leu o log de autenticação
-// do servidor X" é a pergunta que a auditoria existe para responder.
 func TestAberturaDoStreamDeAuthLogEAuditada(t *testing.T) {
 	sede := setupStreamDB(t)
 
@@ -46,9 +43,6 @@ func TestAberturaDoStreamDeAuthLogEAuditada(t *testing.T) {
 	}
 }
 
-// Recusa por alcance é o sinal mais direto de alguém tentando ler host de
-// unidade alheia. lookupServer responde 404 e não 403 para não confirmar
-// existência, então sem esta linha a tentativa não deixaria rastro nenhum.
 func TestStreamRecusadoPorAlcanceDeixaRastro(t *testing.T) {
 	setupStreamDB(t)
 
