@@ -1,14 +1,16 @@
 import { useState, type FormEvent } from 'react';
-import { Activity, Loader2, LogIn } from 'lucide-react';
+import { Loader2, LogIn } from 'lucide-react';
 import { api } from '../lib/api';
 import { saveSession, type SessionInfo } from '../lib/session';
+import logo from '../assets/dockkeeper.png';
 
 interface LoginViewProps {
   onLogin: (session: SessionInfo) => void;
   notice?: string;
+  onTokenLogin?: () => void;
 }
 
-const LoginView = ({ onLogin, notice }: LoginViewProps) => {
+const LoginView = ({ onLogin, notice, onTokenLogin }: LoginViewProps) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -44,9 +46,13 @@ const LoginView = ({ onLogin, notice }: LoginViewProps) => {
     <div className="flex h-screen w-screen items-center justify-center bg-ink-950 p-4 text-text">
       <div className="anim-rise w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center">
-          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-card border border-line bg-ink-800 shadow-panel">
-            <Activity size={22} strokeWidth={1.75} className="text-accent" />
-          </div>
+          <img
+            src={logo}
+            alt="DockKeeper"
+            width={72}
+            height={72}
+            className="mb-4 object-contain"
+          />
           <h1 className="text-xl font-bold tracking-tight text-text-hi">
             Dock<span className="text-accent">Keeper</span>
           </h1>
@@ -62,7 +68,7 @@ const LoginView = ({ onLogin, notice }: LoginViewProps) => {
 
           <div>
             <label htmlFor="login-username" className="eyebrow mb-1.5 block">
-              Usuário
+              Usuário ou e-mail
             </label>
             <input
               id="login-username"
@@ -117,6 +123,17 @@ const LoginView = ({ onLogin, notice }: LoginViewProps) => {
         <p className="mt-6 text-center text-xs text-text-faint">
           Acesso restrito. Fale com o administrador para obter uma conta.
         </p>
+
+        {onTokenLogin && import.meta.env.DEV && (
+          <div className="mt-4 text-center">
+            <button type="button" onClick={onTokenLogin} className="btn btn-ghost btn-sm">
+              Entrar como token (dev)
+            </button>
+            <p className="mt-1.5 text-[11px] text-text-faint">
+              Sessão de máquina, só para desenvolvimento: painéis e anotações continuam recusando.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -22,6 +22,8 @@ import (
 var arquivosDeMigracao embed.FS
 
 const (
+	versaoDoBaseline = 1
+
 	travaDeMigracao  = 8274523
 	tempoDeMigracao  = 5 * time.Minute
 	pastaDeMigracoes = "migracoes"
@@ -116,19 +118,20 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 
-	if len(lista) > 0 && lista[0].versao == 1 {
-		adotado, err := adotarEsquemaExistente(ctx, conn, lista[0], jaAplicadas)
-		if err != nil {
-			return err
-		}
-		if adotado {
-			jaAplicadas[lista[0].versao] = aplicada{nome: lista[0].nome, hash: lista[0].hash}
-		}
-	}
-
 	aplicadasAgora := 0
 	for _, m := range lista {
 		anterior, existe := jaAplicadas[m.versao]
+
+		if m.versao == versaoDoBaseline {
+			if err := convergirBaseline(ctx, conn, m, anterior, existe); err != nil {
+				return err
+			}
+			if !existe {
+				aplicadasAgora++
+			}
+			continue
+		}
+
 		if existe {
 			if anterior.hash != m.hash {
 				return fmt.Errorf(
@@ -156,28 +159,35 @@ func Migrate(db *gorm.DB) error {
 	return nil
 }
 
-func adotarEsquemaExistente(ctx context.Context, conn *sql.Conn, baseline migracao, jaAplicadas map[int]aplicada) (bool, error) {
-	if _, existe := jaAplicadas[baseline.versao]; existe {
-		return false, nil
+func convergirBaseline(ctx context.Context, conn *sql.Conn, m migracao, anterior aplicada, existe bool) error {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("abrir transação do baseline: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, m.sql); err != nil {
+		return fmt.Errorf("migração %03d_%s falhou: %w", m.versao, m.nome, err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO schema_migrations (versao, nome, hash, aplicada_em)
+		VALUES ($1, $2, $3, now())
+		ON CONFLICT (versao) DO UPDATE SET nome = EXCLUDED.nome, hash = EXCLUDED.hash`,
+		m.versao, m.nome, m.hash); err != nil {
+		return fmt.Errorf("registrar o baseline: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("confirmar o baseline: %w", err)
 	}
 
-	var tabela *string
-	if err := conn.QueryRowContext(ctx, "SELECT to_regclass('public.servers')::text").Scan(&tabela); err != nil {
-		return false, fmt.Errorf("procurar esquema existente: %w", err)
+	switch {
+	case !existe:
+		log.Printf("[Migração] %03d_%s aplicada", m.versao, m.nome)
+	case anterior.hash != m.hash:
+		log.Printf("[Migração] %03d_%s convergida: o baseline mudou desde a última subida e o hash foi atualizado",
+			m.versao, m.nome)
 	}
-	if tabela == nil {
-		return false, nil
-	}
-
-	if _, err := conn.ExecContext(ctx,
-		"INSERT INTO schema_migrations (versao, nome, hash) VALUES ($1, $2, $3)",
-		baseline.versao, baseline.nome, baseline.hash); err != nil {
-		return false, fmt.Errorf("adotar o esquema existente como baseline: %w", err)
-	}
-
-	log.Printf("[Migração] banco já tinha as tabelas: %03d_%s adotada como baseline, sem recriar nada",
-		baseline.versao, baseline.nome)
-	return true, nil
+	return nil
 }
 
 func criarControleDeMigracao(ctx context.Context, conn *sql.Conn) error {

@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+
+	"github.com/jvS0uzx/dockkeeper_collector/scan"
 )
 
 func contarHosts(t *testing.T, ip string) int64 {
@@ -22,12 +24,12 @@ func TestVarreduraNaoDuplicaHostAoClassificar(t *testing.T) {
 
 	unidade := criarUnidade(t, "qa-adocao")
 
-	persist([]Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, nil)
+	persist([]scan.Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, nil)
 	if n := contarHosts(t, testIPUnnamed); n != 1 {
 		t.Fatalf("linhas após a primeira varredura = %d, esperada 1", n)
 	}
 
-	persist([]Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, &unidade)
+	persist([]scan.Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, &unidade)
 
 	if n := contarHosts(t, testIPUnnamed); n != 1 {
 		t.Errorf("linhas após a classificação = %d, esperada 1: o host foi duplicado", n)
@@ -42,11 +44,11 @@ func TestAdocaoRespeitaATravaDoOperador(t *testing.T) {
 
 	unidade := criarUnidade(t, "qa-adocao-travada")
 
-	persist([]Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, nil)
+	persist([]scan.Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, nil)
 	database.DB.Model(&database.NetworkHost{}).Where("ip = ?", testIPUnnamed).
 		Update("site_locked", true)
 
-	persist([]Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, &unidade)
+	persist([]scan.Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, &unidade)
 
 	if got := fetch(t, testIPUnnamed).SiteID; got != nil {
 		t.Errorf("unidade = %v, esperada nenhuma: a adoção passou por cima da trava", got)

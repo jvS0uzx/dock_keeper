@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BellRing, CheckCircle2, Clock, Send, XCircle } from 'lucide-react';
+import { BellOff, BellRing, CheckCircle2, CircleDashed, Clock, Send, XCircle } from 'lucide-react';
 
 import { api, type AlertDelivery, type AlertItem, type AlertStatus } from '../lib/api';
 import { formatDateTime, relativeTime } from '../lib/format';
@@ -43,11 +43,21 @@ const ESTADO_ROTULO: Record<AlertStatus, string> = {
   resolved: 'Resolvido',
 };
 
-const ENTREGA: Record<AlertDelivery, { rotulo: string; classe: string; Icon: typeof Send }> = {
+interface Entrega {
+  rotulo: string;
+  classe: string;
+  Icon: typeof Send;
+}
+
+const ENTREGA: Record<AlertDelivery, Entrega> = {
   enviado: { rotulo: 'Enviado', classe: 'text-ok', Icon: CheckCircle2 },
   pendente: { rotulo: 'Pendente', classe: 'text-warn', Icon: Clock },
   falhou: { rotulo: 'Falhou', classe: 'text-crit', Icon: XCircle },
+  sem_canal: { rotulo: 'Sem canal', classe: 'text-info', Icon: BellOff },
 };
+
+const entregaDe = (valor: string): Entrega =>
+  ENTREGA[valor as AlertDelivery] ?? { rotulo: valor, classe: 'text-text-faint', Icon: CircleDashed };
 
 const AlertsView = () => {
   const dialog = useDialog();
@@ -114,7 +124,7 @@ const AlertsView = () => {
 
   const origem = (alerta: AlertItem) => {
     const partes = [alerta.server_id, alerta.site_id === null ? null : siteName(alerta.site_id)].filter(Boolean);
-    return partes.length === 0 ? '—' : partes.join(' · ');
+    return partes.join(' · ');
   };
 
   return (
@@ -123,7 +133,7 @@ const AlertsView = () => {
         <div>
           <h1 className="page-title">Alertas</h1>
           <p className="page-desc">
-            Cada disparo vira um alerta com ciclo próprio. A coluna de entrega mostra se o aviso
+            Cada disparo vira um alerta com ciclo próprio. O estado de entrega mostra se o aviso
             chegou ao Telegram: pendente ou falhou significa que ninguém foi avisado ainda.
           </p>
         </div>
@@ -153,69 +163,99 @@ const AlertsView = () => {
       <LoadNotice error={error} lastOk={lastOk} className="mb-4" />
 
       <div className="panel flex-1 min-h-0 overflow-auto custom-scrollbar">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Severidade</th>
-              <th>Alerta</th>
-              <th>Origem</th>
-              <th>Abriu</th>
-              <th>Estado</th>
-              <th>Entrega</th>
-              <th className="text-right">Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visiveis.map((alerta) => {
-              const entrega = ENTREGA[alerta.delivery];
-              const EntregaIcon = entrega.Icon;
-              return (
-                <tr key={alerta.id}>
-                  <td>
-                    <span className={SEVERIDADE_CLASSE[alerta.severity] ?? 'badge'}>
-                      {SEVERIDADE_ROTULO[alerta.severity] ?? alerta.severity}
-                    </span>
-                  </td>
-                  <td className="text-text-hi">{alerta.text}</td>
-                  <td className="mono-data text-text-mut">{origem(alerta)}</td>
-                  <td className="text-text-mut" title={formatDateTime(alerta.created_at)}>
+        <ul className="flex flex-col">
+          {visiveis.map((alerta) => {
+            const entrega = entregaDe(alerta.delivery);
+            const EntregaIcon = entrega.Icon;
+            const partesOrigem = origem(alerta);
+            return (
+              <li
+                key={alerta.id}
+                className="flex flex-col gap-4 border-b border-line px-5 py-4 last:border-b-0 lg:flex-row lg:items-start lg:gap-6"
+              >
+                <div className="flex shrink-0 items-center gap-3 lg:w-36 lg:flex-col lg:items-start lg:gap-1.5">
+                  <span className={SEVERIDADE_CLASSE[alerta.severity] ?? 'badge'}>
+                    {SEVERIDADE_ROTULO[alerta.severity] ?? alerta.severity}
+                  </span>
+                  <span className="text-xs text-text-faint" title={formatDateTime(alerta.created_at)}>
                     {relativeTime(alerta.created_at)}
-                  </td>
-                  <td>
-                    <span className="text-text-mut">{ESTADO_ROTULO[alerta.status]}</span>
-                    {alerta.acked_by && (
-                      <span className="block text-xs text-text-faint">por {alerta.acked_by}</span>
+                  </span>
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <p className="max-w-prose text-sm leading-relaxed text-text-hi">{alerta.text}</p>
+
+                  <p className="mt-1.5 text-xs text-text-mut">
+                    <span className="text-text-faint">{ESTADO_ROTULO[alerta.status]}</span>
+                    {alerta.acked_by && <span className="text-text-faint"> por {alerta.acked_by}</span>}
+                    {partesOrigem !== '' && (
+                      <>
+                        <span className="text-text-faint"> · </span>
+                        <span className="mono-data">{partesOrigem}</span>
+                      </>
                     )}
-                  </td>
-                  <td>
-                    <span className={`flex items-center gap-1.5 ${entrega.classe}`}>
+                  </p>
+
+                  <div className="mt-2.5">
+                    <span className={`inline-flex items-center gap-1.5 text-xs ${entrega.classe}`}>
                       <EntregaIcon size={14} strokeWidth={1.75} />
                       {entrega.rotulo}
                     </span>
+
                     {alerta.delivery !== 'enviado' && (
-                      <span className="block text-xs text-text-faint">
-                        {alerta.attempts} {alerta.attempts === 1 ? 'tentativa' : 'tentativas'}
-                        {alerta.last_error ? `: ${alerta.last_error}` : ''}
-                      </span>
+                      <details className="mt-1.5">
+                        <summary className="w-fit cursor-pointer text-xs text-text-mut transition-colors hover:text-text">
+                          Detalhe da entrega
+                        </summary>
+                        <div className="mt-2 flex flex-col gap-1 rounded-ctrl border border-line bg-ink-850 p-3 text-xs text-text-mut">
+                          {alerta.delivery === 'sem_canal' && (
+                            <span className="max-w-prose">
+                              Não há canal de Telegram configurado. Ao configurar, todo alerta aberto com menos de 24 h
+                              volta sozinho para a fila de entrega.
+                            </span>
+                          )}
+                          {alerta.attempts > 0 && (
+                            <span>
+                              {alerta.attempts} {alerta.attempts === 1 ? 'tentativa' : 'tentativas'}
+                            </span>
+                          )}
+                          {alerta.last_error && (
+                            <span className="max-w-prose break-words text-text-faint">
+                              Motivo: {alerta.last_error}
+                            </span>
+                          )}
+                          {alerta.last_attempt_at && (
+                            <span className="text-text-faint">
+                              Última tentativa: {formatDateTime(alerta.last_attempt_at)}
+                            </span>
+                          )}
+                          {alerta.next_attempt_at && alerta.delivery === 'pendente' && (
+                            <span className="text-text-faint">
+                              Próxima tentativa: {formatDateTime(alerta.next_attempt_at)}
+                            </span>
+                          )}
+                        </div>
+                      </details>
                     )}
-                  </td>
-                  <td className="text-right whitespace-nowrap">
-                    {alerta.status === 'open' && (
-                      <button className="btn btn-ghost btn-sm" onClick={() => agir(alerta, 'ack')}>
-                        Reconhecer
-                      </button>
-                    )}
-                    {alerta.status !== 'resolved' && (
-                      <button className="btn btn-ghost btn-sm" onClick={() => agir(alerta, 'resolve')}>
-                        Resolver
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </div>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-3 lg:pt-0.5">
+                  {alerta.status === 'open' && (
+                    <button className="btn btn-ghost btn-sm" onClick={() => agir(alerta, 'ack')}>
+                      Reconhecer
+                    </button>
+                  )}
+                  {alerta.status !== 'resolved' && (
+                    <button className="btn btn-primary btn-sm" onClick={() => agir(alerta, 'resolve')}>
+                      Resolver
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
 
         {visiveis.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 py-16 text-text-faint">

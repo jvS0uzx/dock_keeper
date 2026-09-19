@@ -11,6 +11,7 @@ import (
 
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"github.com/jvS0uzx/dock_keeper/internal/safego"
+	"github.com/jvS0uzx/dockkeeper_collector/scan"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -20,7 +21,7 @@ const (
 )
 
 type Sweeper struct {
-	cfg      Config
+	cfg      scan.Config
 	interval time.Duration
 
 	siteCode    string
@@ -50,7 +51,7 @@ func Configure() {
 		}
 	}
 
-	cfg := Config{CIDRs: cidrs}
+	cfg := scan.Config{CIDRs: cidrs}
 	if ports := splitList(os.Getenv("DISCOVERY_PORTS")); len(ports) > 0 {
 		for _, p := range ports {
 			if n, err := strconv.Atoi(p); err == nil && n > 0 && n < 65536 {
@@ -59,7 +60,7 @@ func Configure() {
 		}
 	}
 
-	Default.cfg = cfg.withDefaults()
+	Default.cfg = cfg.WithDefaults()
 	Default.interval = interval
 	Default.siteCode = strings.ToLower(strings.TrimSpace(os.Getenv("DISCOVERY_SITE")))
 
@@ -104,7 +105,7 @@ func (s *Sweeper) Run(ctx context.Context) int {
 	defer s.release()
 
 	started := time.Now()
-	hosts, errs := Scan(ctx, s.cfg)
+	hosts, errs := scan.Run(ctx, s.cfg)
 	for _, err := range errs {
 		log.Printf("[Discovery] %v", err)
 	}
@@ -172,7 +173,7 @@ func (s *Sweeper) LastRun() time.Time {
 	return s.lastRun
 }
 
-func persist(hosts []Host, siteID *uint) {
+func persist(hosts []scan.Host, siteID *uint) {
 	if len(hosts) == 0 {
 		return
 	}

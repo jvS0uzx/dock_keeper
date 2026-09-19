@@ -81,7 +81,7 @@ func Connect() error {
 
 	err = DB.AutoMigrate(&Server{}, &Container{}, &MetricServer{}, &MetricContainer{}, &MetricLoadBalancer{}, &Domain{}, &AlertRule{}, &LogEntry{}, &Site{}, &NetworkHost{}, &FloorPlan{}, &FloorPlanPin{}, &MetricServerTrend{}, &User{}, &UserSiteAccess{}, &AuditLog{},
 		&EnrollmentToken{}, &DeviceCredential{}, &UserSession{}, &AlertState{}, &Alert{},
-		&Dashboard{}, &DashboardPanel{}, &Annotation{})
+		&Dashboard{}, &DashboardPanel{}, &Annotation{}, &ServerAddress{})
 	if err != nil {
 		return fmt.Errorf("erro ao migrar as tabelas: %w", err)
 	}

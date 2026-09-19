@@ -1,12 +1,46 @@
 import LoadNotice from './ui/LoadNotice';
 import { useLoadStatus } from './ui/load-status';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Clock, Filter, Globe, Server, Database, Activity, ArrowRight, HardDrive } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { api, type ContainerLiveStat, type HistoryRange, type LbStat, type ServerLiveStat } from '../lib/api';
-import { formatBytes, formatGB } from '../lib/format';
+import {
+  api,
+  apiErrorMessage,
+  type ContainerLiveStat,
+  type HistoryRange,
+  type LbStat,
+  type ServerLiveStat,
+  type ServerRecord,
+} from '../lib/api';
+import {
+  ALTURA_MAXIMA_MALHA,
+  LARGURA_PADRAO_MALHA,
+  PASSO_BALANCEADOR,
+  PASSO_CARTAO,
+  alturaDoConteudo,
+  alturaVisivel,
+  centroDaLinha,
+} from '../lib/malhaLayout';
+import { hasGlobalAdmin } from '../lib/panels';
+import { useDialog } from './ui/dialog-context';
+import { useSession } from './ui/session-context';
+import { formatBytes, formatGB, formatPercent } from '../lib/format';
 import { mediaDefinida } from '../lib/agregado';
-import { deriveUpstreams, splitUpstreams, totalRequests, type UpstreamNode } from '../lib/upstream';
+import {
+  carregarFiltroDaMalha,
+  classificarMalha,
+  deriveUpstreams,
+  ehBalanceador,
+  indiceDeEnderecos,
+  nosDaMalha,
+  rotuloDoUpstream,
+  salvarFiltroDaMalha,
+  splitUpstreams,
+  totalRequests,
+  type FiltroDaMalha,
+  type NoDaMalha,
+  type UpstreamNode,
+} from '../lib/upstream';
 import Select, { type SelectOption } from './ui/Select';
 
 const LIVE_POLL_MS = 2000;
@@ -14,11 +48,6 @@ const HISTORY_POLL_MS = 30000;
 
 const ERROR_STATUSES = ['500', '502', '503', '504', '400', '404'];
 
-
-const TARGET_IPS: string[] = (import.meta.env.VITE_TARGET_VPS_IPS || '')
-  .split(',')
-  .map((ip: string) => ip.trim())
-  .filter(Boolean);
 
 const LB_IP: string = import.meta.env.VITE_LB_IP || '';
 
@@ -70,18 +99,96 @@ const Gauge = ({ value, title, detalhe }: { value: number | null; title: string;
 };
 
 const TRACO_ATIVO = 'color-mix(in srgb, var(--color-accent) 45%, var(--color-ink-900))';
+const TRACO_OCIOSO = 'var(--color-text-faint)';
+const TRACEJADO_OCIOSO = '4 4';
 
-const nomeDoUpstream = (host: string, servers: ServerLiveStat[]): string | null => {
-  const exato = servers.find((s) => s.host_ip === host);
-  if (exato) return exato.name;
-  const octeto = host.split('.').pop();
-  const candidatos = servers.filter((s) => s.host_ip.split('.').pop() === octeto);
-  return candidatos.length === 1 ? candidatos[0].name : null;
-};
+const FILTROS_DA_MALHA: { value: FiltroDaMalha; label: string }[] = [
+  { value: 'tudo', label: 'Tudo' },
+  { value: 'atras', label: 'Só atrás do balanceador' },
+  { value: 'fora', label: 'Só fora do balanceador' },
+];
 
-const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: ServerLiveStat[] }) => {
-  const nodes = useMemo(() => deriveUpstreams(stats, TARGET_IPS), [stats]);
+const LoadBalancerFlow = ({
+  stats,
+  servers,
+  onAssociado,
+}: {
+  stats: LbStat[];
+  servers: ServerLiveStat[];
+  onAssociado: () => void;
+}) => {
+  const session = useSession();
+  const dialog = useDialog();
+  const podeAssociar = hasGlobalAdmin(session.accesses);
+  const [filtro, setFiltro] = useState<FiltroDaMalha>(carregarFiltroDaMalha);
+  const [cadastro, setCadastro] = useState<ServerRecord[]>([]);
+  const cadastroRef = useRef<ServerRecord[]>([]);
+  const [abertoEm, setAbertoEm] = useState('');
+  const [escolha, setEscolha] = useState('');
+  const escolhaRef = useRef('');
+  const [salvando, setSalvando] = useState(false);
+
+  const upstreams = useMemo(() => deriveUpstreams(stats), [stats]);
+  const grupos = useMemo(() => classificarMalha(servers, upstreams), [servers, upstreams]);
+  const todosOsNodes = useMemo(() => nosDaMalha(servers, upstreams), [servers, upstreams]);
+  const nodes = filtro === 'fora' ? [] : todosOsNodes;
   const total = totalRequests(stats);
+
+  const trocarFiltro = (valor: FiltroDaMalha) => {
+    setFiltro(valor);
+    salvarFiltroDaMalha(valor);
+  };
+
+  const carregarCadastro = useCallback(() => {
+    if (!podeAssociar) return;
+    api
+      .servers()
+      .then((lista) => {
+        cadastroRef.current = lista;
+        setCadastro(lista);
+      })
+      .catch(() => {
+        cadastroRef.current = [];
+        setCadastro([]);
+      });
+  }, [podeAssociar]);
+
+  useEffect(() => {
+    carregarCadastro();
+  }, [carregarCadastro]);
+
+  const escolher = (valor: string) => {
+    escolhaRef.current = valor;
+    setEscolha(valor);
+  };
+
+  const abrirAssociacao = (addr: string) => {
+    escolher('');
+    setAbertoEm((atual) => (atual === addr ? '' : addr));
+  };
+
+  const associar = async (node: NoDaMalha) => {
+    const servidor = cadastroRef.current.find((s) => s.id === escolhaRef.current);
+    if (!servidor) {
+      dialog.notify('Escolha o servidor que responde por esse endereço.', 'error');
+      return;
+    }
+    setSalvando(true);
+    try {
+      await api.updateServerAliases(servidor.id, [...new Set([...(servidor.aliases ?? []), node.host])]);
+      dialog.notify(`${node.host} passou a pertencer a ${servidor.name}.`, 'success');
+      setAbertoEm('');
+      escolher('');
+      carregarCadastro();
+      onAssociado();
+    } catch (err) {
+      dialog.notify(apiErrorMessage(err, 'Falha ao associar o endereço.'), 'error');
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  const opcoesDeServidor: SelectOption[] = cadastro.map((s) => ({ value: s.id, label: s.name }));
 
   const lbs = useMemo(() => {
     const byId = new Map<string, { id: string; reqs: number; ups: Map<string, number> }>();
@@ -103,63 +210,115 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
   }, [stats, servers]);
 
   const areaRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 0, h: 0 });
+  const [largura, setLargura] = useState(0);
   useEffect(() => {
     const el = areaRef.current;
     if (!el) return;
-    const observer = new ResizeObserver(() =>
-      setSize({ w: el.clientWidth, h: el.clientHeight }),
-    );
+    const observer = new ResizeObserver(() => setLargura(el.clientWidth));
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
-  const rowY = (i: number, n: number) => ((i + 1) / (n + 1)) * 100;
-  const upIndex = new Map(nodes.map((n, i) => [n.addr, i]));
-  const height = Math.max(208, Math.max(lbs.length, nodes.length, 1) * 76);
+  const enderecoParaNo = indiceDeEnderecos(nodes);
+  const posicaoDoNo = new Map(nodes.map((n, i) => [n.id, i]));
+  const arestas = lbs.map((lb) => {
+    const porNo = new Map<string, number>();
+    for (const [addr, reqs] of lb.ups.entries()) {
+      const id = enderecoParaNo.get(addr);
+      if (id === undefined) continue;
+      porNo.set(id, (porNo.get(id) ?? 0) + reqs);
+    }
+    return porNo;
+  });
+  const alturaConteudo = alturaDoConteudo(nodes.length, lbs.length);
+  const alturaCaixa = alturaVisivel(alturaConteudo);
+  const rolaDentro = alturaConteudo > ALTURA_MAXIMA_MALHA;
 
-  const { w, h } = size;
+  const w = largura > 0 ? largura : LARGURA_PADRAO_MALHA;
+  const yNo = (i: number) => centroDaLinha(i, nodes.length, alturaConteudo, PASSO_CARTAO);
+  const yLb = (i: number) => centroDaLinha(i, lbs.length, alturaConteudo, PASSO_BALANCEADOR);
+  const yMeio = alturaConteudo / 2;
   const xIn = 55;
   const xLbIn = w / 2 - 27;
   const xLbOut = w / 2 + 27;
   const xUp = w - 199;
-  const py = (pct: number) => (pct / 100) * h;
   const curva = (x0: number, y0: number, x1: number, y1: number) => {
     const cx = (x1 - x0) * 0.45;
     return `M ${x0},${y0} C ${x0 + cx},${y0} ${x1 - cx},${y1} ${x1},${y1}`;
   };
 
   return (
-    <div className="panel p-6 mb-6 overflow-hidden relative">
-      <div className="flex items-center justify-between mb-8 pb-3 border-b border-line">
-        <span className="eyebrow flex items-center gap-2">
-          <Activity size={16} strokeWidth={1.75} className="text-accent" />
-          Malha de roteamento (cluster NGINX)
-        </span>
-        <span className={`badge ${total > 0 ? 'badge-ok' : 'badge-muted'}`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${total > 0 ? 'bg-ok animate-pulse' : 'bg-text-faint'}`} />
-          {total} req / 5s
-        </span>
+    <div className="panel p-6 mb-6 relative">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-8 pb-3 border-b border-line">
+        <div className="flex flex-wrap items-center gap-4">
+          <span className="eyebrow flex items-center gap-2">
+            <Activity size={16} strokeWidth={1.75} className="text-accent" />
+            Malha de roteamento (cluster NGINX)
+          </span>
+          <Select
+            ariaLabel="Filtrar a malha"
+            className="w-56"
+            value={filtro}
+            onChange={(v) => trocarFiltro(v as FiltroDaMalha)}
+            options={FILTROS_DA_MALHA}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-3 md:ml-auto">
+          {lbs.length > 1 && (
+            <span className="text-[11px] text-text-faint" title="Máquinas que reportam tráfego como balanceador">
+              {`${lbs.length} balanceadores`}
+            </span>
+          )}
+          <span className="text-[11px] text-text-faint" title="Máquinas cadastradas que o Nginx usa como upstream">
+            {`${grupos.atras.length} atrás do balanceador`}
+          </span>
+          {grupos.fora.length > 0 && (
+            <span
+              className="text-[11px] text-text-faint"
+              title="Máquinas cadastradas que não recebem tráfego do balanceador"
+            >
+              {`${grupos.fora.length} fora do balanceador`}
+            </span>
+          )}
+          {grupos.soltos.length > 0 && (
+            <span
+              className="text-[11px] text-warn"
+              title="Endereços que aparecem no Nginx e não batem com servidor cadastrado"
+            >
+              {`${grupos.soltos.length} ${grupos.soltos.length === 1 ? 'endereço sem cadastro' : 'endereços sem cadastro'}`}
+            </span>
+          )}
+          <span data-testid="malha-trafego" className={`badge ${total > 0 ? 'badge-ok' : 'badge-muted'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${total > 0 ? 'bg-ok animate-pulse' : 'bg-text-faint'}`} />
+            {`${total} req / 5s`}
+          </span>
+        </div>
       </div>
 
-      <div ref={areaRef} className="relative w-full max-w-4xl mx-auto" style={{ height }}>
-        {w > 0 && (
-          <svg
-            className="absolute inset-0 z-0 overflow-visible"
-            width={w}
-            height={h}
-            viewBox={`0 0 ${w} ${h}`}
-            aria-hidden="true"
-          >
-            {lbs.map((lb, li) => {
-              const yLb = py(rowY(li, lbs.length));
-              return (
+      {filtro !== 'fora' && (
+        <div
+          ref={areaRef}
+          data-testid="malha-area"
+          className={`relative w-full max-w-4xl mx-auto ${rolaDentro ? 'overflow-y-auto custom-scrollbar pr-1' : ''}`}
+          style={{ height: alturaCaixa }}
+        >
+          <div data-testid="malha-conteudo" className="relative w-full" style={{ height: alturaConteudo }}>
+            <svg
+              className="absolute inset-0 z-0 overflow-visible"
+              width={w}
+              height={alturaConteudo}
+              viewBox={`0 0 ${w} ${alturaConteudo}`}
+              aria-hidden="true"
+            >
+              {lbs.map((lb, li) => (
                 <g key={`lb-${lb.id}`}>
                   <path
                     id={`path-in-${li}`}
-                    d={curva(xIn, py(50), xLbIn, yLb)}
+                    data-testid="malha-aresta"
+                    d={curva(xIn, yMeio, xLbIn, yLb(li))}
                     fill="none"
-                    stroke={lb.reqs > 0 ? TRACO_ATIVO : 'var(--color-line)'}
+                    stroke={lb.reqs > 0 ? TRACO_ATIVO : TRACO_OCIOSO}
+                    strokeDasharray={lb.reqs > 0 ? undefined : TRACEJADO_OCIOSO}
                     strokeWidth="1.25"
                   />
                   {lb.reqs > 0 && (
@@ -169,17 +328,20 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
                       </animateMotion>
                     </circle>
                   )}
-                  {[...lb.ups.entries()].map(([addr, reqs]) => {
-                    const ui = upIndex.get(addr);
+                  {[...arestas[li].entries()].map(([idDoNo, reqs]) => {
+                    const ui = posicaoDoNo.get(idDoNo);
                     if (ui === undefined) return null;
-                    const yUp = py(rowY(ui, nodes.length));
                     return (
-                      <g key={`edge-${lb.id}-${addr}`}>
+                      <g key={`edge-${lb.id}-${idDoNo}`}>
                         <path
                           id={`edge-${li}-${ui}`}
-                          d={curva(xLbOut, yLb, xUp, yUp)}
+                          data-testid="malha-aresta"
+                          data-de={lb.id}
+                          data-para={idDoNo}
+                          d={curva(xLbOut, yLb(li), xUp, yNo(ui))}
                           fill="none"
-                          stroke={reqs > 0 ? TRACO_ATIVO : 'var(--color-line)'}
+                          stroke={reqs > 0 ? TRACO_ATIVO : TRACO_OCIOSO}
+                          strokeDasharray={reqs > 0 ? undefined : TRACEJADO_OCIOSO}
                           strokeWidth="1.25"
                         />
                         {reqs > 0 &&
@@ -194,86 +356,171 @@ const LoadBalancerFlow = ({ stats, servers }: { stats: LbStat[]; servers: Server
                     );
                   })}
                 </g>
-              );
-            })}
-            {nodes.map((node, ui) => {
-              if (lbs.some((lb) => lb.ups.has(node.addr))) return null;
-              const yUp = py(rowY(ui, nodes.length));
-              const yLb = py(rowY(0, lbs.length));
-              return (
-                <path
-                  key={`idle-${node.addr}`}
-                  d={curva(xLbOut, yLb, xUp, yUp)}
-                  fill="none"
-                  stroke="var(--color-line)"
-                  strokeWidth="1.25"
-                />
-              );
-            })}
-          </svg>
-        )}
+              ))}
+              {nodes.map((node, ui) => {
+                if (arestas.some((porNo) => porNo.has(node.id))) return null;
+                return (
+                  <path
+                    key={`idle-${node.id}`}
+                    data-testid="malha-aresta"
+                    d={curva(xLbOut, yLb(0), xUp, yNo(ui))}
+                    fill="none"
+                    stroke={TRACO_OCIOSO}
+                    strokeDasharray={TRACEJADO_OCIOSO}
+                    strokeWidth="1.25"
+                  />
+                );
+              })}
+            </svg>
 
-        <div className="absolute left-1/4 -translate-x-1/2 top-0 z-10 bg-ink-950 px-2 py-0.5 rounded-full border border-line text-[10px] text-text-mut mono-data flex items-center gap-1">
-          {total} <ArrowRight size={12} strokeWidth={1.75} className="text-accent" />
-        </div>
+            <div className="absolute left-1/4 -translate-x-1/2 top-0 z-10 bg-ink-950 px-2 py-0.5 rounded-full border border-line text-[10px] text-text-mut mono-data flex items-center gap-1">
+              {total} <ArrowRight size={12} strokeWidth={1.75} className="text-accent" />
+            </div>
 
-        <div
-          className="absolute z-10 flex flex-col items-center left-0"
-          style={{ top: '50%', transform: 'translateY(-50%)' }}
-        >
-          <div className="w-14 h-14 rounded-full bg-ink-800 border border-line flex items-center justify-center">
-            <Globe size={22} strokeWidth={1.75} className="text-text-mut" />
-          </div>
-          <span className="eyebrow mt-2">Internet</span>
-        </div>
-
-        {lbs.map((lb, li) => (
-          <div
-            key={`lb-box-${lb.id}`}
-            className="absolute z-10 left-1/2 flex flex-col items-center"
-            style={{ top: `${rowY(li, lbs.length)}%`, transform: 'translate(-50%, -50%)' }}
-          >
             <div
-              className={`w-14 h-14 rounded-card bg-ink-800 border flex items-center justify-center transition-colors ${
-                lb.reqs > 0 ? 'border-accent/40' : 'border-line'
-              }`}
+              className="absolute z-10 flex flex-col items-center left-0"
+              style={{ top: yMeio, transform: 'translateY(-50%)' }}
             >
-              <Server size={24} strokeWidth={1.75} className={lb.reqs > 0 ? 'text-accent' : 'text-text-mut'} />
+              <div className="w-14 h-14 rounded-full bg-ink-800 border border-line flex items-center justify-center">
+                <Globe size={22} strokeWidth={1.75} className="text-text-mut" />
+              </div>
+              <span className="eyebrow mt-2">Internet</span>
             </div>
-            <span className="eyebrow mt-2 max-w-[150px] truncate" title={lb.label}>
-              {lb.label}
-            </span>
-          </div>
-        ))}
 
-        {nodes.map((node, ui) => (
-          <div
-            key={node.addr}
-            className={`absolute z-10 right-0 w-[200px] panel panel-hover p-3 flex items-center gap-3 h-[60px] ${
-              node.reqs > 0 ? 'border-accent/30' : ''
-            }`}
-            style={{ top: `${rowY(ui, nodes.length)}%`, transform: 'translateY(-50%)' }}
-            title={node.reqs > 0 ? `${node.reqs} req / 5s` : 'Sem tráfego na janela'}
-          >
-            <div className="w-9 h-9 rounded-ctrl bg-ink-800 flex items-center justify-center flex-shrink-0">
-              <Database
-                size={16}
-                strokeWidth={1.75}
-                className={node.reqs > 0 ? 'text-accent' : 'text-text-faint'}
-              />
-            </div>
-            <div className="flex flex-col min-w-0 flex-1">
-              <span className="text-xs text-text-hi font-medium truncate">
-                {nomeDoUpstream(node.host, servers) ?? `Node ${ui + 1}`}
-              </span>
-              <span className="text-[10px] text-text-faint mono-data selectable truncate">{node.addr}</span>
-            </div>
-            <span className={`text-[10px] mono-data shrink-0 ${node.reqs > 0 ? 'text-accent' : 'text-text-faint'}`}>
-              {node.reqs} req
+            {lbs.map((lb, li) => (
+              <div
+                key={`lb-box-${lb.id}`}
+                data-testid="malha-lb"
+                className="absolute z-10 left-1/2 flex flex-col items-center"
+                style={{ top: yLb(li), transform: 'translate(-50%, -50%)' }}
+              >
+                <div
+                  className={`w-14 h-14 rounded-card bg-ink-800 border flex items-center justify-center transition-colors ${
+                    lb.reqs > 0 ? 'border-accent/40' : 'border-line'
+                  }`}
+                >
+                  <Server size={24} strokeWidth={1.75} className={lb.reqs > 0 ? 'text-accent' : 'text-text-mut'} />
+                </div>
+                <span className="eyebrow mt-2 max-w-[150px] truncate" title={lb.label}>
+                  {lb.label}
+                </span>
+              </div>
+            ))}
+
+            {nodes.map((node, ui) => (
+              <div
+                key={node.id}
+                data-testid="malha-no"
+                className={`absolute right-0 w-[200px] panel panel-hover p-3 flex items-center gap-3 h-[72px] ${
+                  abertoEm === node.id ? 'z-30' : 'z-10'
+                } ${node.reqs > 0 ? 'border-accent/30' : ''}`}
+                style={{ top: yNo(ui), transform: 'translateY(-50%)' }}
+                title={node.enderecos.join(' · ')}
+              >
+                <div className="w-9 h-9 rounded-ctrl bg-ink-800 flex items-center justify-center flex-shrink-0">
+                  <Database
+                    size={16}
+                    strokeWidth={1.75}
+                    className={node.reqs > 0 ? 'text-accent' : 'text-text-faint'}
+                  />
+                </div>
+                <div className="flex flex-col min-w-0 flex-1 gap-0.5">
+                  <span className="text-xs text-text-hi font-medium truncate" title={node.rotulo}>
+                    {node.rotulo}
+                  </span>
+                  {node.cadastrado ? (
+                    <span
+                      className="text-[10px] text-text-faint mono-data selectable truncate"
+                      title={node.enderecos.join(' · ')}
+                    >
+                      {node.enderecos.join(' · ')}
+                    </span>
+                  ) : podeAssociar ? (
+                    <button
+                      type="button"
+                      onClick={() => abrirAssociacao(node.id)}
+                      className="w-fit text-[10px] text-warn transition-colors hover:text-accent-hi"
+                      title="Endereço que não bate com nenhum servidor cadastrado"
+                    >
+                      não cadastrado · associar
+                    </button>
+                  ) : (
+                    <span
+                      className="text-[10px] text-text-faint truncate"
+                      title="Endereço que não bate com nenhum servidor cadastrado"
+                    >
+                      não cadastrado · peça a um administrador
+                    </span>
+                  )}
+                  {node.reqs > 0 ? (
+                    <span className="text-[10px] mono-data text-accent">{`${node.reqs} req / 5s`}</span>
+                  ) : (
+                    <span className="text-[10px] text-text-faint truncate">sem tráfego na janela</span>
+                  )}
+                </div>
+
+                {abertoEm === node.id && (
+                  <div className="absolute right-0 top-full z-30 mt-1 flex w-[224px] flex-col gap-2 rounded-card border border-line bg-ink-900 p-2 shadow-lg">
+                    <span className="text-[10px] text-text-faint">Quem responde por {node.host}?</span>
+                    <Select
+                      ariaLabel={`Associar ${node.rotulo} a um servidor`}
+                      value={escolha}
+                      onChange={escolher}
+                      options={opcoesDeServidor}
+                      placeholder="Escolha o servidor"
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={salvando}
+                        onClick={() => associar(node)}
+                      >
+                        Salvar
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAbertoEm('')}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {filtro !== 'atras' && grupos.fora.length > 0 && (
+        <section className="mt-6 border-t border-line pt-4">
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <span className="eyebrow">Fora do balanceador</span>
+            <span className="text-[11px] text-text-faint">
+              cadastradas e coletadas pelo painel, sem receber tráfego do Nginx
             </span>
           </div>
-        ))}
-      </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {grupos.fora.map((maquina) => (
+              <div key={maquina.id} className="panel p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-text-hi">{maquina.name}</span>
+                  <span className={`badge ${maquina.online ? 'badge-ok' : 'badge-crit'}`}>
+                    {maquina.online ? 'Online' : 'Offline'}
+                  </span>
+                </div>
+                <span className="mono-data mt-1 block text-[10px] text-text-faint">{maquina.host_ip}</span>
+                <div className="mt-2 flex items-center gap-4 text-[11px] text-text-mut">
+                  <span>{`CPU ${formatPercent(maquina.cpu)}`}</span>
+                  <span>
+                    {maquina.mem_total > 0
+                      ? `RAM ${formatGB(maquina.mem_used)}/${formatGB(maquina.mem_total)} GB`
+                      : 'RAM —'}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 };
@@ -321,8 +568,8 @@ const groupTrafficByProject = (stats: LbStat[], nodes: UpstreamNode[]): ProjectT
   return Array.from(projects.values()).sort((a, b) => b.total - a.total);
 };
 
-const LoadBalancerDashboard = ({ stats }: { stats: LbStat[] }) => {
-  const nodes = useMemo(() => deriveUpstreams(stats, TARGET_IPS), [stats]);
+const LoadBalancerDashboard = ({ stats, servers }: { stats: LbStat[]; servers: ServerLiveStat[] }) => {
+  const nodes = useMemo(() => deriveUpstreams(stats), [stats]);
   const projects = useMemo(() => groupTrafficByProject(stats, nodes), [stats, nodes]);
   const totalErrors = projects.reduce((acc, p) => acc + p.errors, 0);
 
@@ -369,8 +616,10 @@ const LoadBalancerDashboard = ({ stats }: { stats: LbStat[] }) => {
               <tr>
                 <th>Domínio / Sistema</th>
                 <th>Algoritmo</th>
-                {nodes.map((node, idx) => (
-                  <th key={node.addr} className="text-right" title={node.addr}>Node {idx + 1}</th>
+                {nodes.map((node) => (
+                  <th key={node.addr} className="text-right" title={node.addr}>
+                    {rotuloDoUpstream(node, servers)}
+                  </th>
                 ))}
                 <th className="text-right">Local/Cache</th>
                 <th className="text-right">Total req/5s</th>
@@ -439,6 +688,18 @@ export default function Dashboard() {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const recarregarVivo = useCallback(() => {
+    api
+      .liveMetrics()
+      .then((data) => {
+        setServers(data.servers);
+        setContainers(data.containers);
+        setLoadBalancing(data.load_balancing);
+        cargaOk();
+      })
+      .catch((err) => cargaFail(err, 'Falha ao ler as métricas ao vivo.'));
+  }, [cargaOk, cargaFail]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -521,10 +782,13 @@ export default function Dashboard() {
 
   const vpsOptions: SelectOption[] = [
     { value: 'all', label: 'Global (Cluster)' },
-    ...uniqueServers.map((s) => ({ value: s.id, label: s.host_ip === LB_IP ? `${s.host_ip} (LB)` : s.host_ip })),
+    ...uniqueServers.map((s) => ({
+      value: s.id,
+      label: ehBalanceador(s, LB_IP) ? `${s.name} — ${s.host_ip} (LB)` : `${s.name} — ${s.host_ip}`,
+    })),
   ];
 
-  const isLoadBalancerSelected = activeServer?.host_ip === LB_IP;
+  const isLoadBalancerSelected = activeServer ? ehBalanceador(activeServer, LB_IP) : false;
 
   return (
     <div className="min-h-full px-4 pb-4 pt-2 md:px-6 md:pb-6 md:pt-3 lg:px-8 lg:pb-8 lg:pt-4 anim-rise">
@@ -552,7 +816,7 @@ export default function Dashboard() {
       </div>
 
       {isLoadBalancerSelected ? (
-        <LoadBalancerDashboard stats={loadBalancing} />
+        <LoadBalancerDashboard stats={loadBalancing} servers={servers} />
       ) : (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 mb-6 stagger">
@@ -590,7 +854,9 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {selectedServerId === 'all' && <LoadBalancerFlow stats={loadBalancing} servers={servers} />}
+          {selectedServerId === 'all' && (
+            <LoadBalancerFlow stats={loadBalancing} servers={servers} onAssociado={recarregarVivo} />
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-6 h-56 stagger">
             <Gauge value={cpuMedia.media} title="CPU do host" detalhe={cpuDetalhe} />

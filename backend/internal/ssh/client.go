@@ -100,6 +100,8 @@ type SysPayload struct {
 
 	NetRxBps *float64 `json:"net_rx_bps"`
 	NetTxBps *float64 `json:"net_tx_bps"`
+
+	Addresses []string `json:"addresses"`
 }
 
 func runScript(session sessionWriter, t Target, script string) error {
@@ -201,6 +203,7 @@ func storeHostMetric(t Target, payload SysPayload, handshakeMs float64) {
 	if err := database.DB.Create(&metric).Error; err != nil {
 		log.Printf("[RealTime] erro ao gravar métrica de %s: %v", t.Host, err)
 	}
+	database.RegistrarEnderecos(t.ID, append(payload.Addresses, t.Host))
 }
 
 func notifyStoppedContainers(t Target, ps []DockerPSPayload) {

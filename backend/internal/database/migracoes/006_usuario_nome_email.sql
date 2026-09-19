@@ -1,0 +1,4 @@
+ALTER TABLE users ADD COLUMN IF NOT EXISTS nome varchar(120) NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email varchar(160) NOT NULL DEFAULT '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (email) WHERE email <> '';

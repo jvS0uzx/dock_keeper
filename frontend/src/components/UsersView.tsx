@@ -13,7 +13,7 @@ const ROLE_OPTIONS: Role[] = ['viewer', 'operator', 'admin'];
 
 const ROLE_SELECT_OPTIONS = ROLE_OPTIONS.map((r) => ({ value: r, label: ROLE_LABELS[r] }));
 
-const emptyForm = { username: '', password: '', role: 'viewer' as Role };
+const emptyForm = { username: '', nome: '', email: '', password: '', role: 'viewer' as Role };
 
 const UsersView = () => {
   const session = useSession();
@@ -59,10 +59,14 @@ const UsersView = () => {
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     try {
+      const nome = form.nome.trim();
+      const email = form.email.trim();
       await api.createUser({
         username: form.username.trim(),
         password: form.password,
         role: form.role,
+        ...(nome !== '' ? { nome } : {}),
+        ...(email !== '' ? { email } : {}),
         ...(accesses.length > 0 ? { accesses } : {}),
       });
       setForm({ ...emptyForm });
@@ -183,6 +187,30 @@ const UsersView = () => {
               />
             </div>
             <div>
+              <label htmlFor="user-nome" className="eyebrow block mb-1.5">Nome</label>
+              <input
+                id="user-nome"
+                type="text"
+                value={form.nome}
+                onChange={(e) => setForm({ ...form, nome: e.target.value })}
+                className="input-base w-full"
+                placeholder="Ex: João Vitor Souza"
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label htmlFor="user-email" className="eyebrow block mb-1.5">E-mail</label>
+              <input
+                id="user-email"
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className="input-base w-full"
+                placeholder="Ex: joao@empresa.com.br"
+                autoComplete="off"
+              />
+            </div>
+            <div>
               <label htmlFor="user-password" className="eyebrow block mb-1.5">Senha</label>
               <input
                 id="user-password"
@@ -281,6 +309,7 @@ const UsersView = () => {
                 <thead>
                   <tr>
                     <th>Status</th>
+                    <th>Pessoa</th>
                     <th>Usuário</th>
                     <th>Papel</th>
                     <th>Acessos</th>
@@ -303,9 +332,15 @@ const UsersView = () => {
                         </button>
                       </td>
                       <td className="font-medium text-text-hi">
-                        {user.username}
+                        {user.nome ?? <span className="text-text-faint">—</span>}
                         {user.username === session.username && (
                           <span className="ml-2 text-[11px] text-text-faint">(você)</span>
+                        )}
+                      </td>
+                      <td className="text-text-mut">
+                        <span className="mono-data">{user.username}</span>
+                        {user.email && (
+                          <span className="block text-[11px] text-text-faint">{user.email}</span>
                         )}
                       </td>
                       <td>

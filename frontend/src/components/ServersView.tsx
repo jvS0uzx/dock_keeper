@@ -2,16 +2,19 @@ import LoadNotice from './ui/LoadNotice';
 import { useLoadStatus } from './ui/load-status';
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { ShieldOff } from 'lucide-react';
-import { api, type ServerLiveStat, type ServerRecord as Server } from '../lib/api';
+import { api, apiErrorMessage, type ServerLiveStat, type ServerRecord as Server } from '../lib/api';
 import { formatGB, formatLatency, formatLoad, formatPercent } from '../lib/format';
 import { useDialog } from './ui/dialog-context';
-import { useRole } from './ui/session-context';
+import { useRole, useSession } from './ui/session-context';
+import { hasGlobalAdmin } from '../lib/panels';
 
 const emptyForm = { name: '', host_ip: '', user: 'root' };
 
 const ServersView = () => {
   const dialog = useDialog();
   const { canAdmin } = useRole();
+  const session = useSession();
+  const podeRenomear = hasGlobalAdmin(session.accesses);
   const [servers, setServers] = useState<Server[]>([]);
   const [liveStats, setLiveStats] = useState<Record<string, ServerLiveStat>>({});
   const [loading, setLoading] = useState(true);
@@ -63,8 +66,45 @@ const ServersView = () => {
       fetchServers();
       dialog.notify(`${form.name} entrou no monitoramento.`, 'success');
     } catch (err) {
-      console.error(err);
-      dialog.notify('Erro ao cadastrar o servidor.', 'error');
+      dialog.notify(apiErrorMessage(err, 'Erro ao cadastrar o servidor.'), 'error');
+    }
+  };
+
+  const marcarBalanceador = async (server: Server, valor: boolean | null) => {
+    try {
+      await api.setServerBehindLb(server.id, valor);
+      await fetchServers();
+      await fetchLiveStatus();
+      dialog.notify(
+        valor === null
+          ? `${server.name} voltou à classificação automática.`
+          : `${server.name} marcado como ${valor ? 'atrás do' : 'fora do'} balanceador.`,
+        'success',
+      );
+    } catch (err) {
+      dialog.notify(apiErrorMessage(err, 'Falha ao mudar a classificação.'), 'error');
+    }
+  };
+
+  const handleRename = async (server: Server) => {
+    const novo = await dialog.prompt({
+      title: `Renomear ${server.name}`,
+      message: 'O nome aparece na malha de roteamento, nos gráficos e nos alertas.',
+      initialValue: server.name,
+      confirmLabel: 'Renomear',
+      placeholder: 'Ex: VPS Produção',
+    });
+    if (novo === null) return;
+
+    const nome = novo.trim();
+    if (nome === '' || nome === server.name) return;
+
+    try {
+      await api.renameServer(server.id, nome);
+      await fetchServers();
+      dialog.notify(`${server.name} agora se chama ${nome}.`, 'success');
+    } catch (err) {
+      dialog.notify(apiErrorMessage(err, 'Falha ao renomear o servidor.'), 'error');
     }
   };
 
@@ -80,8 +120,7 @@ const ServersView = () => {
       await api.deleteServer(server.id);
       fetchServers();
     } catch (err) {
-      console.error(err);
-      dialog.notify('Erro ao remover o servidor.', 'error');
+      dialog.notify(apiErrorMessage(err, 'Erro ao remover o servidor.'), 'error');
     }
   };
 
@@ -170,6 +209,7 @@ const ServersView = () => {
                     <th className="text-right">RAM</th>
                     <th className="text-right">Load</th>
                     <th className="text-right">Latência</th>
+                    <th>Balanceador</th>
                     <th className="text-right">Ação</th>
                   </tr>
                 </thead>
@@ -210,7 +250,50 @@ const ServersView = () => {
                       >
                         {formatLatency(live?.rtt_ms ?? null)}
                       </td>
-                      <td className="text-right">
+                      <td className="whitespace-nowrap">
+                        {(() => {
+                          const atras = live?.behind_lb === true;
+                          const origem = live?.behind_lb_origem;
+                          const titulo =
+                            origem === 'manual'
+                              ? 'Classificação manual'
+                              : origem === 'trafego'
+                                ? 'Automático: apareceu como upstream do Nginx'
+                                : 'Automático: nunca apareceu como upstream';
+                          return (
+                            <div className="flex items-center gap-2">
+                              <span className={`badge ${atras ? 'badge-ok' : 'badge-muted'}`} title={titulo}>
+                                {atras ? 'Atrás do LB' : 'Fora do LB'}
+                              </span>
+                              {podeRenomear && (
+                                <>
+                                  <button
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => marcarBalanceador(s, !atras)}
+                                  >
+                                    {atras ? 'Marcar como fora do balanceador' : 'Marcar como atrás do balanceador'}
+                                  </button>
+                                  {origem === 'manual' && (
+                                    <button
+                                      className="btn btn-ghost btn-sm"
+                                      onClick={() => marcarBalanceador(s, null)}
+                                      title="Voltar à classificação automática"
+                                    >
+                                      automático
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td className="text-right whitespace-nowrap">
+                        {podeRenomear && (
+                          <button onClick={() => handleRename(s)} className="btn btn-ghost btn-sm mr-1.5">
+                            Renomear
+                          </button>
+                        )}
                         <button onClick={() => handleDelete(s)} className="btn btn-danger btn-sm">
                           Remover
                         </button>

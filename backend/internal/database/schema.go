@@ -29,6 +29,8 @@ type Server struct {
 
 	MachineID string `gorm:"size:128;index" json:"machine_id"`
 
+	BehindLB *bool `json:"behind_lb"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
@@ -67,6 +69,8 @@ type LogEntry struct {
 type User struct {
 	ID           uint       `gorm:"primaryKey" json:"id"`
 	Username     string     `gorm:"size:64;uniqueIndex;not null" json:"username"`
+	Nome         string     `gorm:"size:120;not null;default:''" json:"nome"`
+	Email        string     `gorm:"size:160;not null;default:''" json:"email"`
 	PasswordHash string     `gorm:"size:255;not null" json:"-"`
 	Role         string     `gorm:"size:16;not null;default:'viewer'" json:"role"`
 	Active       bool       `json:"active"`
@@ -231,6 +235,7 @@ const (
 	AlertDeliveryPendente = "pendente"
 	AlertDeliveryEnviado  = "enviado"
 	AlertDeliveryFalhou   = "falhou"
+	AlertDeliverySemCanal = "sem_canal"
 )
 
 type Alert struct {

@@ -18,6 +18,7 @@ var (
 	AlertasEntregues    = expvar.NewInt("dockkeeper_alertas_entregues")
 	AlertasFalhos       = expvar.NewInt("dockkeeper_alertas_falhos")
 	AlertasDescartados  = expvar.NewInt("dockkeeper_alertas_descartados")
+	AlertasSemCanal     = expvar.NewInt("dockkeeper_alertas_sem_canal")
 	LogsDescartados     = expvar.NewInt("dockkeeper_logs_descartados")
 	SessoesSSH          = expvar.NewInt("dockkeeper_sessoes_ssh_abertas")
 	ReconexoesSSH       = expvar.NewInt("dockkeeper_reconexoes_ssh")

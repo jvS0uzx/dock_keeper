@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jvS0uzx/dock_keeper/internal/config"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 )
 
@@ -34,18 +35,21 @@ type ServerLiveStat struct {
 	Online         bool     `json:"online"`
 	SSHHandshakeMs *float64 `json:"ssh_handshake_ms"`
 
-	Kind         string   `json:"kind"`
-	SiteID       *uint    `json:"site_id"`
-	OS           string   `json:"os"`
-	Platform     string   `json:"platform"`
-	Arch         string   `json:"arch"`
-	LastUser     string   `json:"last_user"`
-	AgentVersion string   `json:"agent_version"`
-	TemperatureC *float64 `json:"temperature_c"`
-	NetRxBps     *float64 `json:"net_rx_bps"`
-	NetTxBps     *float64 `json:"net_tx_bps"`
-	RTTMs        *float64 `json:"rtt_ms"`
-	CollectNginx bool     `json:"collect_nginx"`
+	Kind           string   `json:"kind"`
+	SiteID         *uint    `json:"site_id"`
+	OS             string   `json:"os"`
+	Platform       string   `json:"platform"`
+	Arch           string   `json:"arch"`
+	LastUser       string   `json:"last_user"`
+	AgentVersion   string   `json:"agent_version"`
+	TemperatureC   *float64 `json:"temperature_c"`
+	NetRxBps       *float64 `json:"net_rx_bps"`
+	NetTxBps       *float64 `json:"net_tx_bps"`
+	RTTMs          *float64 `json:"rtt_ms"`
+	Addresses      []string `json:"addresses"`
+	BehindLB       bool     `json:"behind_lb"`
+	BehindLBOrigem string   `json:"behind_lb_origem"`
+	CollectNginx   bool     `json:"collect_nginx"`
 
 	LiveWindowSec int `json:"live_window_sec"`
 }
@@ -69,6 +73,37 @@ const metricLookback = "10 minutes"
 const containerLiveWindow = "30 seconds"
 
 const lbWindow = "5 seconds"
+
+const membroPadraoDias = 7
+
+func membroDaMalha(s database.Server, enderecos []string, upstreams map[string]bool) (bool, string) {
+	if s.BehindLB != nil {
+		return *s.BehindLB, "manual"
+	}
+	for _, endereco := range enderecos {
+		if upstreams[endereco] {
+			return true, "trafego"
+		}
+	}
+	return false, "nenhum"
+}
+
+func unirEnderecos(hostIP string, conhecidos []string) []string {
+	fora := make([]string, 0, len(conhecidos)+1)
+	vistos := map[string]bool{}
+	if hostIP != "" {
+		fora = append(fora, hostIP)
+		vistos[hostIP] = true
+	}
+	for _, endereco := range conhecidos {
+		if vistos[endereco] {
+			continue
+		}
+		vistos[endereco] = true
+		fora = append(fora, endereco)
+	}
+	return fora
+}
 
 func liveMetricsHandler(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
@@ -98,6 +133,22 @@ func liveMetricsHandler(w http.ResponseWriter, r *http.Request) {
 		LoadBalancing: []LbStat{},
 	}
 
+	ids := make([]string, 0, len(servers))
+	for _, s := range servers {
+		ids = append(ids, s.ID)
+	}
+	enderecos, err := database.EnderecosPorServidor(ids)
+	if err != nil {
+		log.Printf("[API] erro ao ler endereços dos servidores: %v", err)
+		enderecos = map[string][]string{}
+	}
+
+	upstreams, err := database.UpstreamsRecentes(config.Dias("LB_MEMBERSHIP_DAYS", membroPadraoDias))
+	if err != nil {
+		log.Printf("[API] erro ao ler upstreams recentes: %v", err)
+		upstreams = map[string]bool{}
+	}
+
 	for _, s := range servers {
 		stat := ServerLiveStat{
 			ID: s.ID, HostIP: s.HostIP, Name: s.Name,
@@ -105,6 +156,8 @@ func liveMetricsHandler(w http.ResponseWriter, r *http.Request) {
 			Arch: s.Arch, LastUser: s.LastUser, AgentVersion: s.AgentVersion,
 			CollectNginx: s.CollectNginx,
 		}
+		stat.Addresses = unirEnderecos(s.HostIP, enderecos[s.ID])
+		stat.BehindLB, stat.BehindLBOrigem = membroDaMalha(s, stat.Addresses, upstreams)
 		window := database.LiveWindowFor(s.ReportIntervalSec)
 		stat.LiveWindowSec = int(window / time.Second)
 

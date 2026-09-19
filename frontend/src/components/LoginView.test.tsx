@@ -23,7 +23,7 @@ const sessaoValida: SessionInfo = {
 
 const preencherEEnviar = async (usuario: string, senha: string) => {
   const user = userEvent.setup();
-  await user.type(screen.getByLabelText('Usuário'), usuario);
+  await user.type(screen.getByLabelText('Usuário ou e-mail'), usuario);
   await user.type(screen.getByLabelText('Senha'), senha);
   await user.click(screen.getByRole('button', { name: /entrar/i }));
   return user;
@@ -72,7 +72,7 @@ describe('LoginView', () => {
     const botao = screen.getByRole('button', { name: /entrar/i }) as HTMLButtonElement;
     expect(botao.disabled).toBe(true);
 
-    await user.type(screen.getByLabelText('Usuário'), 'admin');
+    await user.type(screen.getByLabelText('Usuário ou e-mail'), 'admin');
     expect(botao.disabled).toBe(true);
 
     await user.type(screen.getByLabelText('Senha'), 'senha');

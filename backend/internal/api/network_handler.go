@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"log"
-	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"github.com/jvS0uzx/dock_keeper/internal/discovery"
+	"github.com/jvS0uzx/dockkeeper_collector/scan"
 )
 
 const defaultHostOfflineAfter = 30 * time.Minute
@@ -113,7 +113,7 @@ func networkHostsHandler(w http.ResponseWriter, r *http.Request) {
 		inventory.Hosts = append(inventory.Hosts, view)
 	}
 	sort.Slice(inventory.Hosts, func(i, j int) bool {
-		return lessIP(inventory.Hosts[i].IP, inventory.Hosts[j].IP)
+		return scan.LessIP(inventory.Hosts[i].IP, inventory.Hosts[j].IP)
 	})
 	inventory.Total = len(inventory.Hosts)
 
@@ -187,19 +187,6 @@ func indexServers(servers []database.Server) serverIndex {
 		idx.idByName[strings.ToLower(s.Name)] = s.ID
 	}
 	return idx
-}
-
-func lessIP(a, b string) bool {
-	ipA, ipB := net.ParseIP(a).To4(), net.ParseIP(b).To4()
-	if ipA == nil || ipB == nil {
-		return a < b
-	}
-	for i := range ipA {
-		if ipA[i] != ipB[i] {
-			return ipA[i] < ipB[i]
-		}
-	}
-	return false
 }
 
 func splitPorts(raw string) []string {

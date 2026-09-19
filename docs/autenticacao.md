@@ -161,6 +161,12 @@ HTTP, então a ordem não muda nada para o cliente legítimo.
 O limite de tentativa responde `429` **antes** de conferir a senha, o que também
 tira o custo de CPU do atacante. Ver [`configuracao.md`](configuracao.md).
 
+**Identificador.** O campo `username` do login aceita o nome de usuário ou o
+e-mail cadastrado, comparados em minúsculas. A busca é uma consulta só
+(`username = ? OR (email <> '' AND email = ?)`), então continua havendo um único
+caminho de "não encontrado", com o hash de descarte. Conta sem e-mail nunca casa
+com identificador vazio, porque a condição exige `email <> ''`.
+
 ## Primeiro usuário
 
 Só um admin cria outro, então instalação nova precisa de um ponto de partida.

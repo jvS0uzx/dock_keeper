@@ -11,6 +11,7 @@ import { ROLE_LABELS } from '../lib/session';
 import { useSession } from './ui/session-context';
 import { ALL_SITES, useSiteScope } from './ui/site-scope-context';
 import Select from './ui/Select';
+import logo from '../assets/dockkeeper.png';
 
 interface SidebarProps {
   activeTab: string;
@@ -72,9 +73,12 @@ const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => 
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r border-line bg-ink-900">
       <div className="border-b border-line p-5">
-        <h1 className="text-lg font-bold tracking-tight text-text-hi">
-          Dock<span className="text-accent">Keeper</span>
-        </h1>
+        <div className="flex items-center gap-2.5">
+          <img src={logo} alt="DockKeeper" width={32} height={32} className="h-8 w-8 object-contain" />
+          <h1 className="text-lg font-bold tracking-tight text-text-hi">
+            Dock<span className="text-accent">Keeper</span>
+          </h1>
+        </div>
         <p className="mt-1 text-xs text-text-mut">{PANELS[panel].description}</p>
       </div>
 
@@ -167,7 +171,9 @@ const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => 
             <KeyRound size={14} strokeWidth={1.75} className="text-text-mut" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium text-text-hi">{session.username}</p>
+            <p className="truncate text-xs font-medium text-text-hi" title={session.username}>
+              {session.nome || session.username}
+            </p>
             <p className="eyebrow mt-0.5">
               {session.isToken ? 'Token de API' : ROLE_LABELS[session.role]}
             </p>

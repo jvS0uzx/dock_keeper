@@ -30,6 +30,9 @@ export interface ServerLiveStat {
   agent_version: string;
   temperature_c: number | null;
   collect_nginx: boolean;
+  addresses: string[];
+  behind_lb?: boolean;
+  behind_lb_origem?: 'manual' | 'trafego' | 'nenhum';
   net_rx_bps: number | null;
   net_tx_bps: number | null;
   rtt_ms: number | null;
@@ -73,6 +76,7 @@ export interface ServerRecord {
   user: string;
   port: number;
   created_at: string;
+  aliases?: string[] | null;
 }
 
 export interface DomainRecord {
@@ -271,6 +275,8 @@ export type ContainerAction = 'start' | 'stop' | 'restart';
 export interface UserRecord {
   id: number;
   username: string;
+  nome: string | null;
+  email: string | null;
   role: Role;
   active: boolean;
   last_login: string | null;
@@ -300,6 +306,8 @@ export interface EnrollToken {
 
 export interface MeInfo {
   username: string;
+  nome?: string | null;
+  email?: string | null;
   role: Role;
   kind: 'user' | 'token';
   accesses: SiteAccess[];
@@ -361,7 +369,7 @@ export const apiErrorMessage = (err: unknown, fallback: string): string => {
 };
 
 export type AlertStatus = 'open' | 'acked' | 'resolved';
-export type AlertDelivery = 'pendente' | 'enviado' | 'falhou';
+export type AlertDelivery = 'pendente' | 'enviado' | 'falhou' | 'sem_canal';
 
 export interface AlertItem {
   id: number;
@@ -390,6 +398,7 @@ export interface Readiness {
   alertas?: string;
   alertas_detalhe?: string;
   alertas_falhos?: number;
+  alertas_sem_canal?: number;
   logs_descartados?: number;
 }
 
@@ -458,7 +467,7 @@ export const api = {
   },
 
   readiness(signal?: AbortSignal) {
-    return request<Readiness>('/readyz', { signal });
+    return request<Readiness>('/api/readyz', { signal });
   },
 
   async alerts(query: AlertQuery = {}, signal?: AbortSignal): Promise<AlertItem[]> {
@@ -490,6 +499,7 @@ export const api = {
         ...s,
         cpu: s.cpu ?? null,
         load1: s.load1 ?? null,
+        addresses: s.addresses ?? [],
         net_rx_bps: s.net_rx_bps ?? null,
         net_tx_bps: s.net_tx_bps ?? null,
         rtt_ms: s.rtt_ms ?? null,
@@ -562,6 +572,18 @@ export const api = {
 
   createServer(body: { name: string; host_ip: string; user: string }) {
     return request<ServerRecord>('/api/servers', send('POST', body));
+  },
+
+  updateServerAliases(id: string, aliases: string[]) {
+    return request<ServerRecord>(`/api/servers?id=${encodeURIComponent(id)}`, send('PATCH', { aliases }));
+  },
+
+  setServerBehindLb(id: string, behind_lb: boolean | null) {
+    return request<ServerRecord>(`/api/servers?id=${encodeURIComponent(id)}`, send('PATCH', { behind_lb }));
+  },
+
+  renameServer(id: string, name: string) {
+    return request<ServerRecord>(`/api/servers?id=${encodeURIComponent(id)}`, send('PATCH', { name }));
   },
 
   deleteServer(id: string) {
@@ -726,16 +748,35 @@ export const api = {
 
   async users(): Promise<UserRecord[]> {
     const list = asArray<UserRecord>(await request('/api/users'));
-    return list.map((u) => ({ ...u, accesses: u.accesses ?? [] }));
+    return list.map((u) => ({
+      ...u,
+      nome: u.nome ?? null,
+      email: u.email ?? null,
+      accesses: u.accesses ?? [],
+    }));
   },
 
-  createUser(body: { username: string; password: string; role: Role; accesses?: SiteAccess[] }) {
+  createUser(body: {
+    username: string;
+    password: string;
+    role: Role;
+    nome?: string;
+    email?: string;
+    accesses?: SiteAccess[];
+  }) {
     return request<UserRecord>('/api/users', send('POST', body));
   },
 
   updateUser(
     id: number,
-    patch: { password?: string; role?: Role; active?: boolean; accesses?: SiteAccess[] },
+    patch: {
+      password?: string;
+      role?: Role;
+      active?: boolean;
+      nome?: string;
+      email?: string;
+      accesses?: SiteAccess[];
+    },
   ) {
     return request<unknown>(`/api/users?id=${id}`, send('PATCH', patch));
   },

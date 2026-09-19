@@ -45,12 +45,18 @@ func corpoReadyz(r *http.Request, status, db string) map[string]any {
 	falhos := alertasFalhos(r)
 	corpo["alertas_falhos"] = falhos
 
+	presos := alertasSemCanal(r)
+	corpo["alertas_sem_canal"] = presos
+
 	motivos := []string{}
 	if saude.Estado == alert.EstadoDegradado {
 		motivos = append(motivos, "canal de alerta degradado")
 	}
 	if falhos > 0 {
 		motivos = append(motivos, "alerta com entrega falhou")
+	}
+	if presos > 0 {
+		motivos = append(motivos, "alerta preso sem canal de entrega configurado")
 	}
 	if descartados > 0 {
 		motivos = append(motivos, "linha de log descartada pela fila")
@@ -59,6 +65,22 @@ func corpoReadyz(r *http.Request, status, db string) map[string]any {
 		corpo["degradado"] = motivos
 	}
 	return corpo
+}
+
+func alertasSemCanal(r *http.Request) int64 {
+	db := database.From(r.Context())
+	if db == nil {
+		return 0
+	}
+
+	var n int64
+	err := db.Model(&database.Alert{}).
+		Where("delivery = ? AND status <> ?", database.AlertDeliverySemCanal, database.AlertStatusResolved).
+		Count(&n).Error
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func alertasFalhos(r *http.Request) int64 {

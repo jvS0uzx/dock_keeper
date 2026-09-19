@@ -134,13 +134,33 @@ func TestMigrarDeNovoNaoFazNada(t *testing.T) {
 	}
 }
 
+func TestBaselineComHashAntigoConvergeEmVezDeRecusar(t *testing.T) {
+	db := bancoVazio(t)
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrar: %v", err)
+	}
+	if err := db.Exec("UPDATE schema_migrations SET hash = 'hash-do-snapshot-antigo' WHERE versao = 1").Error; err != nil {
+		t.Fatalf("alterar o hash do baseline: %v", err)
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("o baseline com hash antigo derrubou a subida: %v", err)
+	}
+	var hash string
+	db.Raw("SELECT hash FROM schema_migrations WHERE versao = 1").Scan(&hash)
+	if hash == "hash-do-snapshot-antigo" {
+		t.Error("o hash do baseline não foi atualizado")
+	}
+}
+
 func TestMigracaoEditadaDepoisDeAplicadaFalha(t *testing.T) {
 	db := bancoVazio(t)
 
 	if err := Migrate(db); err != nil {
 		t.Fatalf("migrar: %v", err)
 	}
-	if err := db.Exec("UPDATE schema_migrations SET hash = 'hash-de-outro-arquivo' WHERE versao = 1").Error; err != nil {
+	if err := db.Exec("UPDATE schema_migrations SET hash = 'hash-de-outro-arquivo' WHERE versao = 2").Error; err != nil {
 		t.Fatalf("alterar o hash: %v", err)
 	}
 
@@ -148,7 +168,7 @@ func TestMigracaoEditadaDepoisDeAplicadaFalha(t *testing.T) {
 	if err == nil {
 		t.Fatal("migração editada depois de aplicada passou sem erro")
 	}
-	for _, trecho := range []string{"001_baseline", "mudou depois de aplicada", "crie uma migração nova"} {
+	for _, trecho := range []string{"002_integridade_referencial", "mudou depois de aplicada", "crie uma migração nova"} {
 		if !strings.Contains(err.Error(), trecho) {
 			t.Errorf("mensagem de erro não explica o problema (%q não contém %q)", err.Error(), trecho)
 		}

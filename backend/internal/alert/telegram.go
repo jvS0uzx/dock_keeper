@@ -154,10 +154,12 @@ func claimSlot(key string) bool {
 	return true
 }
 
+var ErrSemCanal = errors.New("canal de alerta não configurado")
+
 func Deliver(msg string) error {
 	if !enabled {
 		log.Printf("[Alert] (Telegram desligado) %s", msg)
-		return nil
+		return ErrSemCanal
 	}
 
 	err := call("sendMessage", url.Values{

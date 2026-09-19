@@ -10,6 +10,7 @@ require (
 
 require (
 	github.com/joho/godotenv v1.5.1
+	github.com/jvS0uzx/dockkeeper_collector v0.0.0-20260919131718-a9ef4d8b7109
 	github.com/shirou/gopsutil/v3 v3.24.5
 	golang.org/x/sys v0.47.0
 )

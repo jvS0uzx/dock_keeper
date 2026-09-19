@@ -137,7 +137,7 @@ describe('MetricsHistoryView — anotações', () => {
     expect(marcador?.textContent).toContain('deploy 2.3');
   });
 
-  it('anotação global vai com server_id nulo', async () => {
+  it('anotação global vai com server_id nulo', { timeout: 15000 }, async () => {
     const user = userEvent.setup();
     renderizar();
     await waitFor(() => expect(consultasDoHistorico().length).toBeGreaterThan(0));

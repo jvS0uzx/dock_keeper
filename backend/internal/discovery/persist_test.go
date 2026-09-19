@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+
+	"github.com/jvS0uzx/dockkeeper_collector/scan"
 )
 
 const (
@@ -45,12 +47,12 @@ func fetch(t *testing.T, ip string) database.NetworkHost {
 func TestPersistUpsertNaoDuplica(t *testing.T) {
 	setupDB(t)
 
-	persist([]Host{{IP: testIPKnown, Hostname: "PC-RH", MAC: "aa:bb:cc:dd:ee:ff", OpenPorts: []int{445, 3389}}}, nil)
+	persist([]scan.Host{{IP: testIPKnown, Hostname: "PC-RH", MAC: "aa:bb:cc:dd:ee:ff", OpenPorts: []int{445, 3389}}}, nil)
 	primeira := fetch(t, testIPKnown)
 
 	time.Sleep(10 * time.Millisecond)
 
-	persist([]Host{{IP: testIPKnown, Hostname: "PC-RH", MAC: "aa:bb:cc:dd:ee:ff", OpenPorts: []int{445, 3389, 22}}}, nil)
+	persist([]scan.Host{{IP: testIPKnown, Hostname: "PC-RH", MAC: "aa:bb:cc:dd:ee:ff", OpenPorts: []int{445, 3389, 22}}}, nil)
 
 	var count int64
 	database.DB.Model(&database.NetworkHost{}).Where("ip = ?", testIPKnown).Count(&count)
@@ -73,8 +75,8 @@ func TestPersistUpsertNaoDuplica(t *testing.T) {
 func TestPersistNaoApagaNomeNemMACConhecidos(t *testing.T) {
 	setupDB(t)
 
-	persist([]Host{{IP: testIPKnown, Hostname: "PC-FINANCEIRO", MAC: "11:22:33:44:55:66", OpenPorts: []int{445}}}, nil)
-	persist([]Host{{IP: testIPKnown, Hostname: "", MAC: "", OpenPorts: []int{445}}}, nil)
+	persist([]scan.Host{{IP: testIPKnown, Hostname: "PC-FINANCEIRO", MAC: "11:22:33:44:55:66", OpenPorts: []int{445}}}, nil)
+	persist([]scan.Host{{IP: testIPKnown, Hostname: "", MAC: "", OpenPorts: []int{445}}}, nil)
 
 	host := fetch(t, testIPKnown)
 	if host.Hostname != "PC-FINANCEIRO" {
@@ -88,12 +90,12 @@ func TestPersistNaoApagaNomeNemMACConhecidos(t *testing.T) {
 func TestPersistPreencheNomeDescobertoDepois(t *testing.T) {
 	setupDB(t)
 
-	persist([]Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, nil)
+	persist([]scan.Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, nil)
 	if got := fetch(t, testIPUnnamed).Hostname; got != "" {
 		t.Fatalf("hostname inicial = %q, esperado vazio", got)
 	}
 
-	persist([]Host{{IP: testIPUnnamed, Hostname: "nas-secao", MAC: "aa:aa:aa:bb:bb:bb", OpenPorts: []int{22}}}, nil)
+	persist([]scan.Host{{IP: testIPUnnamed, Hostname: "nas-secao", MAC: "aa:aa:aa:bb:bb:bb", OpenPorts: []int{22}}}, nil)
 
 	host := fetch(t, testIPUnnamed)
 	if host.Hostname != "nas-secao" {

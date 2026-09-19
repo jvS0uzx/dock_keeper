@@ -118,5 +118,4 @@ Copie de `.env.example`. Todas são de desenvolvimento — ver
 |---|---|
 | `VITE_API_URL` | Base da API em desenvolvimento. Em produção, use `config.json` |
 | `VITE_API_TOKEN` | Token de máquina, **ignorado no build de produção** |
-| `VITE_TARGET_VPS_IPS` | Endereços dos backends como o Nginx os reporta em `upstream_addr`, só para ordenar o diagrama |
 | `VITE_LB_IP` | IP do host que roda o Nginx balanceador, comparado com `servers.host_ip` |

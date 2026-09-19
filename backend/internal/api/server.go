@@ -61,7 +61,8 @@ func Routes(cfg Config) http.Handler {
 		return chain(semPrazoDeEscrita(h), cfg.withCORS, cfg.requireTicket, allowMethods(http.MethodGet))
 	}
 
-	mux.HandleFunc("/api/servers", admin(cfg.serversHandler, http.MethodGet, http.MethodPost, http.MethodDelete))
+	mux.HandleFunc("/api/servers", admin(cfg.serversHandler,
+		http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete))
 	mux.HandleFunc("/api/metrics/live", api(liveMetricsHandler, http.MethodGet))
 	mux.HandleFunc("/api/metrics/history", api(HistoryHandler, http.MethodGet))
 	mux.HandleFunc("/api/dashboards", api(dashboardsHandler,
@@ -121,6 +122,7 @@ func Routes(cfg Config) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("/readyz", readyHandler)
+	mux.HandleFunc("/api/readyz", public(readyHandler, http.MethodGet, http.MethodHead))
 	mux.HandleFunc("/metrics", api(metricsHandler, http.MethodGet))
 
 	return mux

@@ -4,12 +4,14 @@ import (
 	"testing"
 
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+
+	"github.com/jvS0uzx/dockkeeper_collector/scan"
 )
 
 func TestVarreduraNaoDesfazTipoTravado(t *testing.T) {
 	setupDB(t)
 
-	persist([]Host{{IP: testIPKnown, OpenPorts: []int{80, 9100}}}, nil)
+	persist([]scan.Host{{IP: testIPKnown, OpenPorts: []int{80, 9100}}}, nil)
 	if got := fetch(t, testIPKnown).DeviceType; got != TypePrinter {
 		t.Fatalf("tipo inferido = %q, esperado %q", got, TypePrinter)
 	}
@@ -17,7 +19,7 @@ func TestVarreduraNaoDesfazTipoTravado(t *testing.T) {
 	database.DB.Model(&database.NetworkHost{}).Where("ip = ?", testIPKnown).
 		Updates(map[string]any{"device_type": TypeNAS, "device_type_locked": true})
 
-	persist([]Host{{IP: testIPKnown, OpenPorts: []int{80, 9100}}}, nil)
+	persist([]scan.Host{{IP: testIPKnown, OpenPorts: []int{80, 9100}}}, nil)
 
 	host := fetch(t, testIPKnown)
 	if host.DeviceType != TypeNAS {
@@ -31,12 +33,12 @@ func TestVarreduraNaoDesfazTipoTravado(t *testing.T) {
 func TestVarreduraAtualizaTipoNaoTravado(t *testing.T) {
 	setupDB(t)
 
-	persist([]Host{{IP: testIPKnown, OpenPorts: []int{22}}}, nil)
+	persist([]scan.Host{{IP: testIPKnown, OpenPorts: []int{22}}}, nil)
 	if got := fetch(t, testIPKnown).DeviceType; got != TypeLinux {
 		t.Fatalf("tipo inicial = %q, esperado %q", got, TypeLinux)
 	}
 
-	persist([]Host{{IP: testIPKnown, OpenPorts: []int{22, 3389}}}, nil)
+	persist([]scan.Host{{IP: testIPKnown, OpenPorts: []int{22, 3389}}}, nil)
 
 	if got := fetch(t, testIPKnown).DeviceType; got != TypeWindows {
 		t.Errorf("tipo = %q, esperado %q — sem trava o valor deve seguir as portas", got, TypeWindows)
@@ -49,7 +51,7 @@ func TestVarreduraNaoRevertUnidadeTravada(t *testing.T) {
 	matriz := criarUnidade(t, "qa-matriz")
 	filial := criarUnidade(t, "qa-filial")
 
-	persist([]Host{{IP: testIPKnown, OpenPorts: []int{22}}}, &matriz)
+	persist([]scan.Host{{IP: testIPKnown, OpenPorts: []int{22}}}, &matriz)
 	if got := fetch(t, testIPKnown).SiteID; got == nil || *got != matriz {
 		t.Fatalf("unidade inicial = %v, esperada a matriz", got)
 	}
@@ -57,7 +59,7 @@ func TestVarreduraNaoRevertUnidadeTravada(t *testing.T) {
 	database.DB.Model(&database.NetworkHost{}).Where("ip = ?", testIPKnown).
 		Updates(map[string]any{"site_id": filial, "site_locked": true})
 
-	persist([]Host{{IP: testIPKnown, OpenPorts: []int{22}}}, &matriz)
+	persist([]scan.Host{{IP: testIPKnown, OpenPorts: []int{22}}}, &matriz)
 
 	host := fetch(t, testIPKnown)
 	if host.SiteID == nil || *host.SiteID != filial {
@@ -70,12 +72,12 @@ func TestVarreduraClassificaHostSemUnidade(t *testing.T) {
 
 	unidade := criarUnidade(t, "qa-classifica")
 
-	persist([]Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, nil)
+	persist([]scan.Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, nil)
 	if got := fetch(t, testIPUnnamed).SiteID; got != nil {
 		t.Fatalf("unidade inicial = %v, esperada nenhuma", got)
 	}
 
-	persist([]Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, &unidade)
+	persist([]scan.Host{{IP: testIPUnnamed, OpenPorts: []int{22}}}, &unidade)
 
 	host := fetch(t, testIPUnnamed)
 	if host.SiteID == nil || *host.SiteID != unidade {

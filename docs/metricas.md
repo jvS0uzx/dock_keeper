@@ -247,3 +247,24 @@ usuário inexistente nas duas formas, e ela já entrou pela linha `Invalid user`
 Motor de regras: além de `cpu`, `mem`, `disk` e `load`, aceita `temperature`,
 `net_rx`, `net_tx` e `rtt`. Amostra sem a medição (`NULL`) é ignorada: não dispara nem
 conta como zero, e também não encerra um alerta aberto.
+
+## Endereços declarados
+
+O script de coleta emite `addresses` com os IPv4 de todas as interfaces do host, menos
+loopback e as virtuais do Docker (`veth`, `docker`, `br-`, `virbr`). Sem o comando `ip` no
+host, o campo sai vazio e nada quebra. O agente de estação faz o mesmo pela gopsutil.
+
+O painel guarda cada endereço em `server_addresses` com `primeiro_visto` e `ultimo_visto`, o
+que permite duas coisas: rotular um upstream do nginx pelo servidor dono do endereço, sem
+adivinhar pelo último octeto, e recusar o cadastro de um servidor com endereço que já é de
+outro. Endereço coletado que passa `ADDRESS_RETENTION_DAYS` (padrão 30) sem aparecer é podado
+junto com as outras retenções; alias manual fica.
+
+## Membro do balanceador
+
+A malha do painel desenhava só quem tinha upstream na janela do minuto, então a VPS sumia do
+desenho quando o tráfego zerava. Agora a participação vem de uma janela de
+`LB_MEMBERSHIP_DAYS` (padrão 7) sobre `metric_load_balancers`, cruzada com os endereços
+conhecidos do servidor, e pode ser fixada à mão em `servers.behind_lb`. O `GET
+/api/metrics/live` entrega o resultado já resolvido em `behind_lb`, com a procedência em
+`behind_lb_origem`.

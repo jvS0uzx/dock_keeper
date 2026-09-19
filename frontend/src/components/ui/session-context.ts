@@ -3,6 +3,7 @@ import { canAdmin, canOperate, type Role, type SiteAccess } from '../../lib/sess
 
 export interface SessionState {
   username: string;
+  nome?: string | null;
   role: Role;
   accesses: SiteAccess[];
   isToken: boolean;

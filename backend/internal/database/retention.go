@@ -30,6 +30,8 @@ const defaultAuditRetentionDays = 365
 
 const defaultAlertRetentionDays = 90
 
+const defaultAddressRetentionDays = 30
+
 func PruneAlertsParaTeste(maxAge time.Duration) {
 	pruneAlerts(maxAge)
 }
@@ -89,6 +91,7 @@ func prune(maxAge, auditMaxAge time.Duration) {
 	pruneContainers(cutoff)
 	pruneAuditLog(auditMaxAge)
 	pruneAlerts(config.Dias("ALERT_RETENTION_DAYS", defaultAlertRetentionDays))
+	PodarEnderecos(config.Dias("ADDRESS_RETENTION_DAYS", defaultAddressRetentionDays))
 }
 
 func pruneAuditLog(maxAge time.Duration) {

@@ -52,6 +52,14 @@ func (m *ServerManager) Start(t Target) {
 	}
 }
 
+func (m *ServerManager) Rodando(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, ok := m.cancelFuncs[id]
+	return ok
+}
+
 func (m *ServerManager) Stop(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -94,11 +94,58 @@ describe('faixa de degradação', () => {
     expect(screen.queryByRole('button', { name: /ver alertas/i })).toBeNull();
   });
 
-  it('não quebra a tela quando a prontidão falha', async () => {
-    api.readiness.mockRejectedValue(new Error('rede fora'));
+  it('avisa sobre alerta preso sem canal e leva para os alertas', async () => {
+    const irParaAlertas = vi.fn();
+    api.readiness.mockResolvedValue({
+      status: 'degradado',
+      db: 'ok',
+      alertas: 'ok',
+      alertas_falhos: 0,
+      alertas_sem_canal: 2,
+      logs_descartados: 0,
+      degradado: ['alerta preso sem canal de entrega configurado'],
+    });
+    render(<DegradacaoAviso irParaAlertas={irParaAlertas} />);
+
+    const faixa = await screen.findByRole('status');
+    expect(faixa.textContent).toMatch(/alerta preso sem canal de entrega configurado/);
+    expect(faixa.textContent).toMatch(/2 alerta\(s\) sem canal de entrega/);
+
+    const usuario = userEvent.setup();
+    await usuario.click(screen.getByRole('button', { name: /ver alertas/i }));
+    expect(irParaAlertas).toHaveBeenCalled();
+  });
+
+  it('avisa que não consegue ler a prontidão em vez de sumir', async () => {
+    api.readiness.mockRejectedValue(new Error(JSON.stringify({ error: 'painel fora do ar' })));
+    render(<DegradacaoAviso irParaAlertas={vi.fn()} />);
+
+    const faixa = await screen.findByRole('status');
+    expect(faixa.textContent).toMatch(/prontidão/i);
+    expect(faixa.textContent).toMatch(/painel fora do ar/);
+    expect(faixa.textContent).not.toMatch(/Painel degradado/);
+  });
+
+  it('não confunde falha de leitura com painel saudável', async () => {
+    api.readiness.mockResolvedValue({ status: 'ok', db: 'ok', alertas: 'ok', degradado: [] });
     render(<DegradacaoAviso irParaAlertas={vi.fn()} />);
 
     await vi.waitFor(() => expect(api.readiness).toHaveBeenCalled());
     expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('volta ao estado normal quando a leitura seguinte dá certo', async () => {
+    api.readiness
+      .mockRejectedValueOnce(new Error('rede fora'))
+      .mockResolvedValue({ status: 'ok', db: 'ok', alertas: 'ok', degradado: [] });
+    vi.useFakeTimers();
+    try {
+      render(<DegradacaoAviso irParaAlertas={vi.fn()} />);
+      await vi.waitFor(() => expect(screen.queryByRole('status')).not.toBeNull());
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -233,3 +233,58 @@ func TestStreamMetricsSemNetDevNaoEmiteRede(t *testing.T) {
 		}
 	}
 }
+
+func enderecosDaLinha(t *testing.T, linha string) []string {
+	t.Helper()
+
+	var payload struct {
+		Addresses []string `json:"addresses"`
+	}
+	if err := json.Unmarshal([]byte(linha), &payload); err != nil {
+		t.Fatalf("linha do script não é JSON válido: %v (%s)", err, linha)
+	}
+	return payload.Addresses
+}
+
+func TestStreamMetricsDeclaraEnderecosSemVirtuaisNemLoopback(t *testing.T) {
+	dir := t.TempDir()
+	falso := "#!/bin/sh\ncat <<'SAIDA'\n" +
+		"1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever preferred_lft forever\n" +
+		"2: eth0    inet 198.51.100.25/24 brd 198.51.100.255 scope global eth0\\       valid_lft forever\n" +
+		"3: tailscale0    inet 100.100.0.2/32 scope global tailscale0\\       valid_lft forever\n" +
+		"4: docker0    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0\\       valid_lft forever\n" +
+		"5: br-1a2b    inet 172.18.0.1/16 scope global br-1a2b\\       valid_lft forever\n" +
+		"6: veth9f2    inet 169.254.1.1/32 scope global veth9f2\\       valid_lft forever\n" +
+		"SAIDA\n"
+	if err := os.WriteFile(filepath.Join(dir, "ip"), []byte(falso), 0o755); err != nil {
+		t.Fatalf("criar ip falso: %v", err)
+	}
+
+	linha := iniciarScript(t, "DOCKKEEPER_INTERVAL=60\nPATH="+dir+":$PATH\n").proxima()
+	enderecos := enderecosDaLinha(t, linha)
+
+	tem := map[string]bool{}
+	for _, a := range enderecos {
+		tem[a] = true
+	}
+	if !tem["198.51.100.25"] || !tem["100.100.0.2"] {
+		t.Errorf("addresses=%v, esperado o endereço público e o da overlay", enderecos)
+	}
+	for _, indesejado := range []string{"127.0.0.1", "172.17.0.1", "172.18.0.1", "169.254.1.1"} {
+		if tem[indesejado] {
+			t.Errorf("addresses trouxe %q, que é loopback ou interface virtual: %v", indesejado, enderecos)
+		}
+	}
+}
+
+func TestStreamMetricsSemIpNaoQuebraNemEmiteEnderecos(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ip"), []byte("#!/bin/sh\nexit 127\n"), 0o755); err != nil {
+		t.Fatalf("criar ip quebrado: %v", err)
+	}
+
+	linha := iniciarScript(t, "DOCKKEEPER_INTERVAL=60\nPATH="+dir+":$PATH\n").proxima()
+	if enderecos := enderecosDaLinha(t, linha); len(enderecos) != 0 {
+		t.Errorf("sem o comando ip a lista deveria sair vazia, veio %v", enderecos)
+	}
+}

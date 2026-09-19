@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -46,6 +47,8 @@ type metricsPayload struct {
 
 	NetRxBps *float64 `json:"net_rx_bps,omitempty"`
 	NetTxBps *float64 `json:"net_tx_bps,omitempty"`
+
+	Addresses []string `json:"addresses,omitempty"`
 
 	OS           string `json:"os"`
 	Platform     string `json:"platform"`
@@ -160,6 +163,7 @@ func iniciar(ctx context.Context) {
 			p := collect(cfg.hostname, cfg.siteCode, intervalSec)
 			p.MachineID = maquina
 			p.NetRxBps, p.NetTxBps = rede.taxas()
+			p.Addresses = enderecosDoHost(net.Interfaces)
 			return p
 		},
 	}

@@ -144,9 +144,11 @@ func HashPassword(plain string) (string, error) {
 }
 
 func Login(username, password string) (Session, error) {
+	identificador := strings.ToLower(strings.TrimSpace(username))
+
 	var user database.User
 	err := database.DB.
-		Where("username = ?", strings.ToLower(strings.TrimSpace(username))).
+		Where("username = ? OR (email <> '' AND email = ?)", identificador, identificador).
 		First(&user).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {

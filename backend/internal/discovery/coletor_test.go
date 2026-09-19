@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+
+	"github.com/jvS0uzx/dockkeeper_collector/scan"
 )
 
 const codigoUnidadeColetor = "qa-coletor"
@@ -28,7 +30,7 @@ func TestVarreduraLocalDesligaQuandoHaColetorNaUnidade(t *testing.T) {
 	})
 
 	s := &Sweeper{
-		cfg:      Config{CIDRs: []string{"192.168.250.0/24"}}.withDefaults(),
+		cfg:      scan.Config{CIDRs: []string{"192.168.250.0/24"}}.WithDefaults(),
 		interval: time.Minute,
 		siteCode: codigoUnidadeColetor,
 	}
@@ -63,7 +65,7 @@ func TestColetorRevogadoNaoDesligaAVarredura(t *testing.T) {
 	})
 
 	s := &Sweeper{
-		cfg:      Config{CIDRs: []string{"192.168.250.0/24"}}.withDefaults(),
+		cfg:      scan.Config{CIDRs: []string{"192.168.250.0/24"}}.WithDefaults(),
 		interval: time.Minute,
 		siteCode: codigoUnidadeColetor,
 	}
@@ -75,14 +77,14 @@ func TestColetorRevogadoNaoDesligaAVarredura(t *testing.T) {
 }
 
 func TestPortasSondadasCobremATabelaDeClassificacao(t *testing.T) {
-	sondadas := make(map[int]bool, len(DefaultPorts))
-	for _, p := range DefaultPorts {
+	sondadas := make(map[int]bool, len(scan.DefaultPorts))
+	for _, p := range scan.DefaultPorts {
 		sondadas[p] = true
 	}
 
 	for _, regra := range fingerprints {
 		if !sondadas[regra.Port] {
-			t.Errorf("a porta %d classifica como %q mas não é sondada por DefaultPorts",
+			t.Errorf("a porta %d classifica como %q mas não é sondada por scan.DefaultPorts",
 				regra.Port, regra.Type)
 		}
 	}

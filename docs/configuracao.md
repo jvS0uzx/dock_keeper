@@ -23,6 +23,9 @@ Estas três derrubam ou incapacitam o processo:
 |---|---|---|
 | `DATABASE_URL` | — | DSN do Postgres, formato `key=value` do GORM |
 | `ALERT_RETENTION_DAYS` | `90` | Idade máxima de alerta resolvido ou já entregue; alerta `open` nunca é podado por idade |
+| `ADDRESS_RETENTION_DAYS` | `30` | Dias sem ver um endereço coletado antes de tirá-lo do servidor; alias manual nunca é podado |
+| `LB_MEMBERSHIP_DAYS` | `7` | Janela de memória para considerar um servidor atrás do balanceador; sobrevive a fim de semana sem tráfego |
+| `ALERT_RESUME_HOURS` | `24` | Idade máxima do alerta preso em `sem_canal` que volta para a fila quando o canal é configurado |
 | `DB_STATEMENT_TIMEOUT` | `15s` | Limite por consulta, aplicado no DSN. Consulta travada morre sozinha em vez de segurar conexão do pool |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` ou `error`. O log sai em JSON (`log/slog`) |
 | `API_TOKEN_ALLOW_WRITE` | `false` | `true` deixa o `API_TOKEN` de máquina escrever. Por padrão ele é somente leitura, e cada escrita liberada fica na auditoria |
@@ -240,7 +243,6 @@ Todas de desenvolvimento. Ver [`../frontend/README.md`](../frontend/README.md).
 |---|---|
 | `VITE_API_URL` | Base da API em desenvolvimento. Em produção, `public/config.json` |
 | `VITE_API_TOKEN` | Token de máquina, **ignorado no build de produção** |
-| `VITE_TARGET_VPS_IPS` | Endereços como o Nginx os reporta em `upstream_addr` |
 | `VITE_LB_IP` | IP do host do balanceador, comparado com `servers.host_ip` |
 
 ---

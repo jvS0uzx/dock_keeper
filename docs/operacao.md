@@ -477,3 +477,27 @@ O escritor do logstore grava em lote. Quando o lote falha, ele separa dois casos
 A fila tem 10 mil linhas. Cheia, a linha nova é descartada em vez de travar o stream SSE que a
 produziu. O total descartado sai em `logstore.Descartadas()`, exposto no corpo do `/readyz` como
 `logs_descartados`, e o log de aviso sai no máximo uma vez por minuto.
+
+## Painel sem canal de alerta
+
+Sem `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`, o painel continua detectando incidente e
+gravando o alerta, mas **não existe para onde entregar**. O estado de entrega desses alertas é
+`sem_canal`, nunca `enviado`: dizer "enviado" sem canal era mentira, e foi por isso que a fila
+persistida existe.
+
+O que o operador vê:
+
+| Onde | O que aparece |
+|---|---|
+| Tela de Alertas | O alerta fica aberto, com entrega `sem_canal` |
+| `/readyz` | `alertas: desligado`, `alertas_sem_canal: N` e o motivo em `degradado` |
+| `/metrics` | `dockkeeper_alertas_sem_canal` |
+
+O que fazer: configurar `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`. Assim que o canal responde
+— no boot ou quando a revalidação em segundo plano o encontra de volta — o despachante
+**retoma** sozinho os alertas presos que ainda estão abertos e foram criados nas últimas
+`ALERT_RESUME_HOURS` (padrão 24). Incidente de ontem ainda vale a pena avisar; de semana
+passada é ruído, e o alerta continua visível na tela de qualquer jeito.
+
+Enquanto não há canal, a supressão por chave enxerga o alerta preso, então o mesmo incidente
+não vira uma linha nova a cada ciclo do motor de regras.

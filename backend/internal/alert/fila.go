@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -24,9 +25,11 @@ const (
 
 var (
 	despachoIntervalo = 5 * time.Second
-	despachoLease     = time.Minute
-	backoffBase       = defaultBackoffBase
-	backoffMax        = defaultBackoffMax
+
+	retomadaPadraoHoras = 24
+	despachoLease       = time.Minute
+	backoffBase         = defaultBackoffBase
+	backoffMax          = defaultBackoffMax
 )
 
 type Entrada struct {
@@ -104,7 +107,8 @@ func Enqueue(e Entrada) bool {
 func suppressed(key string, now time.Time) bool {
 	var pendentes int64
 	if err := database.DB.Model(&database.Alert{}).
-		Where("key = ? AND delivery = ?", key, database.AlertDeliveryPendente).
+		Where("key = ? AND delivery IN ?", key,
+			[]string{database.AlertDeliveryPendente, database.AlertDeliverySemCanal}).
 		Count(&pendentes).Error; err == nil && pendentes > 0 {
 		return true
 	}
@@ -159,15 +163,64 @@ func dispatchPending(now time.Time) int {
 		return 0
 	}
 
+	retomarSemCanal(now)
+
 	claimed := claimBatch(now)
 	for _, alerta := range claimed {
-		if err := Deliver(alerta.Text); err != nil {
+		err := Deliver(alerta.Text)
+		switch {
+		case errors.Is(err, ErrSemCanal):
+			registerSemCanal(alerta, agora().UTC())
+		case err != nil:
 			registerFailure(alerta, err, agora().UTC())
-			continue
+		default:
+			registerSuccess(alerta, agora().UTC())
 		}
-		registerSuccess(alerta, agora().UTC())
 	}
 	return len(claimed)
+}
+
+func janelaDeRetomada() time.Duration {
+	return time.Duration(config.Inteiro("ALERT_RESUME_HOURS", retomadaPadraoHoras)) * time.Hour
+}
+
+func retomarSemCanal(now time.Time) {
+	if Status().Estado == EstadoDesligado {
+		return
+	}
+
+	corte := now.Add(-janelaDeRetomada())
+	res := database.DB.Model(&database.Alert{}).
+		Where("delivery = ? AND status = ? AND created_at >= ?",
+			database.AlertDeliverySemCanal, database.AlertStatusOpen, corte).
+		Updates(map[string]any{
+			"delivery":        database.AlertDeliveryPendente,
+			"next_attempt_at": nil,
+			"last_error":      "",
+		})
+	if res.Error != nil {
+		log.Printf("[Alert] erro ao retomar alertas sem canal: %v", res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		observabilidade.AlertasSemCanal.Add(-res.RowsAffected)
+		log.Printf("[Alert] canal de volta: %d alerta(s) preso(s) voltaram para a fila", res.RowsAffected)
+	}
+}
+
+func registerSemCanal(alerta database.Alert, now time.Time) {
+	err := database.DB.Model(&database.Alert{}).Where("id = ?", alerta.ID).
+		Updates(map[string]any{
+			"delivery":        database.AlertDeliverySemCanal,
+			"last_attempt_at": now,
+			"next_attempt_at": nil,
+			"last_error":      ErrSemCanal.Error(),
+		}).Error
+	if err != nil {
+		log.Printf("[Alert] erro ao marcar alerta %d como sem canal: %v", alerta.ID, err)
+		return
+	}
+	observabilidade.AlertasSemCanal.Add(1)
 }
 
 func claimBatch(now time.Time) []database.Alert {

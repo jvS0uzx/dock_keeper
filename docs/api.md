@@ -101,7 +101,7 @@ As escritas das duas rotas são auditadas pelo middleware: `dashboards.create`,
 
 | Rota | Métodos | Exige | O que faz |
 |---|---|---|---|
-| `/api/servers` | GET, POST, DELETE | **admin global** | Cadastro dos hosts monitorados. Cadastrar entrega acesso SSH root, por isso é admin |
+| `/api/servers` | GET, POST, PATCH, DELETE | **admin global** | Cadastro dos hosts monitorados. Cadastrar entrega acesso SSH root, por isso é admin. O `PATCH` renomeia e ajusta `user` e `port`; `host_ip` não muda, porque é a identidade da coleta |
 | `/api/containers/action` | POST | **operador global** | `start`, `stop` ou `restart` de container no host remoto |
 | `/api/containers/logs/stream` | GET | ticket | `docker logs -f` por SSE |
 
@@ -232,10 +232,10 @@ continuar apontando para um dispositivo que existiu.
 
 | Rota | Métodos | Exige | O que faz |
 |---|---|---|---|
-| `/api/auth/login` | POST | público | Usuário e senha, devolve token de sessão |
+| `/api/auth/login` | POST | público | Identificador e senha, devolve token de sessão. O campo `username` aceita o nome de usuário **ou** o e-mail cadastrado |
 | `/api/auth/logout` | POST | `viewer` | Invalida a sessão atual |
 | `/api/auth/me` | GET | `viewer` | Quem está autenticado, com papel e concessões |
-| `/api/users` | GET, POST, PATCH, DELETE | **admin global** | Gestão de usuários e concessões. O `POST` aceita `"active"`; omitido vale `true` |
+| `/api/users` | GET, POST, PATCH, DELETE | **admin global** | Gestão de usuários e concessões. O `POST` aceita `"active"`; omitido vale `true`. `POST` e `PATCH` aceitam `"nome"` e `"email"`, devolvidos no `GET` e no `/api/auth/me` |
 | `/api/stream-ticket` | POST | `viewer` | Ticket de uso único para as rotas de SSE |
 
 ## Auditoria e saúde
@@ -263,3 +263,113 @@ a quem não pode vê-lo já é vazamento.
 **Timeouts.** `ReadHeaderTimeout` de 10 s fecha Slowloris. `WriteTimeout` fica
 zerado de propósito: as rotas de SSE mantêm a resposta aberta indefinidamente e
 seriam cortadas no meio.
+
+## Renomear servidor
+
+`PATCH /api/servers?id=<uuid>` aceita `name`, `user` e `port`, todos opcionais, e devolve o
+servidor atualizado.
+
+| Situação | Resposta |
+|---|---|
+| Nome válido | 200 com o servidor |
+| Corpo inválido, nome vazio, acima de 64 caracteres ou porta fora de 1-65535 | 400 |
+| Nome repetido em outro servidor da mesma unidade | 409 |
+| Id inexistente | 404 |
+
+O `host_ip` não muda: ele é a identidade da coleta e a chave do cadastro. Para trocar o
+endereço, remova e cadastre de novo.
+
+Renomear **não derruba a coleta**: o `ServerManager` acompanha a sessão SSH pelo id do
+servidor, que não muda. A consequência é que as mensagens de alerta disparadas por aquele
+stream seguem citando o nome antigo até a próxima reconexão, quando o alvo é remontado a
+partir do banco.
+
+## Nome e e-mail de usuário
+
+`nome` (até 120 caracteres) e `email` (até 160, guardado em minúsculas) são opcionais. O
+e-mail é único entre as contas que o preenchem; contas sem e-mail continuam convivendo, o que
+o índice parcial `idx_users_email` garante. O login aceita o nome de usuário ou o e-mail, e o
+caminho de "não encontrado" continua comparando contra o hash falso, para não vazar por tempo
+de resposta quais identificadores existem.
+
+## Endereços do servidor
+
+Cada servidor declara os próprios endereços, para que o painel pare de adivinhar de quem é um
+upstream do nginx. O `GET /api/metrics/live` devolve, por servidor, `addresses: []` com o
+`host_ip` e todos os endereços conhecidos, sem repetir.
+
+De onde vêm:
+
+| Origem | Como chega | Poda |
+|---|---|---|
+| `coletado` | `stream_metrics.sh` lê `ip -o -4 addr` e o agente de estação lê as interfaces pela gopsutil; ambos mandam `addresses` no payload | Sai depois de `ADDRESS_RETENTION_DAYS` (padrão 30) sem ser visto |
+| `manual` | `PATCH /api/servers?id=` com `{"aliases":["100.100.0.2"]}` | Nunca é podado |
+
+Loopback, link-local e IPv6 são descartados nas duas pontas. Interface virtual do Docker
+(`veth`, `docker`, `br-`, `virbr`) fica de fora, pela mesma razão do RX/TX: não é endereço por
+onde a máquina se apresenta na rede.
+
+### Um endereço pertence a um servidor só
+
+`POST /api/servers` responde **409** quando o `host_ip` já pertence a outro servidor, seja como
+`host_ip` dele, seja como endereço coletado ou alias. A mensagem diz qual servidor e qual
+unidade. Antes desta trava, cadastrar o mesmo IP com outro nome **renomeava** o servidor
+existente em silêncio, que foi como o banco acabou com duas VPS-2. O `PATCH` aplica a mesma
+regra aos `aliases`.
+
+O alcance do conflito depende da faixa:
+
+| Faixa | Conflito |
+|---|---|
+| Privada (RFC 1918) | Por unidade. Duas filiais podem ter `192.168.0.10` legitimamente |
+| Pública | Global |
+| `100.64/10` (CGNAT, usada por overlay como o Tailscale) | Global, porque é única na frota |
+
+A recusa entra na auditoria como `server.create` com resultado `error`, que é como o painel já
+classifica todo 409.
+
+## Quem está atrás do balanceador
+
+Topologia é estrutura, não fluxo: uma VPS continua atrás do balanceador num domingo sem
+requisição nenhuma. Por isso o `GET /api/metrics/live` devolve, por servidor:
+
+| Campo | O que é |
+|---|---|
+| `behind_lb` | booleano já resolvido, pronto para desenhar a malha |
+| `behind_lb_origem` | `manual`, `trafego` ou `nenhum`, para a tela explicar de onde veio a classificação |
+
+A resolução tem duas fontes, nesta ordem:
+
+1. **Manual**, quando `servers.behind_lb` não é nulo. `PATCH /api/servers?id=` aceita
+   `{"behind_lb": true}`, `false` ou `null`. O `null` devolve o servidor ao automático. É a
+   saída para a VPS que entrou no balanceador hoje e ainda não recebeu request, e para tirar
+   da malha quem saiu.
+2. **Memória de tráfego**, quando o manual é nulo: algum endereço do servidor (`host_ip`,
+   coletado ou alias) apareceu como upstream em `metric_load_balancers` nos últimos
+   `LB_MEMBERSHIP_DAYS` (padrão 7).
+
+A consulta compara o endereço sem a porta (`split_part(upstream_addr, ':', 1)`) e usa o índice
+`idx_metric_lb_ts_upstream`, criado na migração 008.
+
+
+### Estados de entrega do alerta
+
+| `delivery` | O que significa |
+|---|---|
+| `pendente` | Na fila, esperando o despachante |
+| `enviado` | Entregue no canal com sucesso |
+| `falhou` | Esgotou `ALERT_MAX_ATTEMPTS`; o alerta continua aberto e visível |
+| `sem_canal` | Não há canal configurado. Nada foi entregue, e o alerta continua aberto. Quando o canal passa a existir, o que ainda está aberto e foi criado nas últimas `ALERT_RESUME_HOURS` volta para `pendente` |
+
+## Prontidão em dois caminhos
+
+O mesmo handler responde em dois lugares, com corpo e código idênticos:
+
+| Caminho | Para quem | CORS |
+|---|---|---|
+| `/readyz` | Orquestrador, compose, healthcheck | Não passa pela cadeia de CORS, e esses clientes não precisam |
+| `/api/readyz` | **A interface** | Passa pela cadeia pública, com a allowlist de `ALLOWED_ORIGINS` |
+
+A interface precisa usar `/api/readyz`. O `/readyz` direto é barrado pelo navegador em
+desenvolvimento (origem diferente) e responde 404 em produção, porque o nginx do frontend só
+faz proxy de `/api/`. Era por isso que a faixa de degradação nunca aparecia.

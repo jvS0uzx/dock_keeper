@@ -54,8 +54,12 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 
 func (c Config) meHandler(w http.ResponseWriter, r *http.Request) {
 	if session, ok := auth.Lookup(bearerToken(r)); ok {
+		var user database.User
+		database.DB.Where("id = ?", session.UserID).Take(&user)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"username": session.Username,
+			"nome":     user.Nome,
+			"email":    user.Email,
 			"role":     session.Role,
 			"kind":     "user",
 			"accesses": session.Accesses,
@@ -64,6 +68,8 @@ func (c Config) meHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"username": "api-token",
+		"nome":     "",
+		"email":    "",
 		"role":     auth.RoleAdmin,
 		"kind":     "token",
 		"accesses": []auth.Access{{SiteID: nil, Role: auth.RoleAdmin}},
@@ -185,6 +191,8 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username string        `json:"username"`
 		Password string        `json:"password"`
+		Nome     string        `json:"nome"`
+		Email    string        `json:"email"`
 		Role     string        `json:"role"`
 		Active   *bool         `json:"active"`
 		Accesses accessPayload `json:"accesses"`
@@ -197,6 +205,15 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 	username := strings.ToLower(strings.TrimSpace(req.Username))
 	if username == "" {
 		writeError(w, http.StatusBadRequest, "username é obrigatório")
+		return
+	}
+	nome, email, err := identidadeValida(req.Nome, req.Email)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if emailEmUso(email, 0) {
+		writeError(w, http.StatusConflict, "este e-mail já está em uso")
 		return
 	}
 	if req.Role == "" {
@@ -223,10 +240,17 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 	if req.Active != nil {
 		active = *req.Active
 	}
-	user := database.User{Username: username, PasswordHash: hash, Role: req.Role, Active: active}
+	user := database.User{
+		Username:     username,
+		Nome:         nome,
+		Email:        email,
+		PasswordHash: hash,
+		Role:         req.Role,
+		Active:       active,
+	}
 	if err := criarUsuarioComAcessos(&user, accessRows); err != nil {
 		log.Printf("[Auth] erro ao criar o usuário %q: %v", username, err)
-		writeError(w, http.StatusConflict, "usuário já existe ou os acessos são inválidos")
+		writeError(w, http.StatusConflict, "usuário ou e-mail já existe, ou os acessos são inválidos")
 		return
 	}
 	accesses := make([]auth.Access, 0, len(accessRows))
@@ -245,6 +269,8 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Password *string        `json:"password"`
+		Nome     *string        `json:"nome"`
+		Email    *string        `json:"email"`
 		Role     *string        `json:"role"`
 		Active   *bool          `json:"active"`
 		Accesses *accessPayload `json:"accesses"`
@@ -262,6 +288,30 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		updates["password_hash"] = hash
+	}
+	if req.Nome != nil || req.Email != nil {
+		nomeAtual, emailAtual := user.Nome, user.Email
+		if req.Nome != nil {
+			nomeAtual = *req.Nome
+		}
+		if req.Email != nil {
+			emailAtual = *req.Email
+		}
+		nome, email, err := identidadeValida(nomeAtual, emailAtual)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if emailEmUso(email, user.ID) {
+			writeError(w, http.StatusConflict, "este e-mail já está em uso")
+			return
+		}
+		if req.Nome != nil {
+			updates["nome"] = nome
+		}
+		if req.Email != nil {
+			updates["email"] = email
+		}
 	}
 	if req.Role != nil {
 		if !auth.ValidRole(*req.Role) {
@@ -326,6 +376,37 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 	auth.RevokeUser(user.ID)
 	auditUserTarget(r, user)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func identidadeValida(nome, email string) (string, string, error) {
+	nome = strings.TrimSpace(nome)
+	if len([]rune(nome)) > 120 {
+		return "", "", errors.New("nome passa de 120 caracteres")
+	}
+
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return nome, "", nil
+	}
+	if len([]rune(email)) > 160 {
+		return "", "", errors.New("e-mail passa de 160 caracteres")
+	}
+	usuario, dominio, ok := strings.Cut(email, "@")
+	if !ok || usuario == "" || !strings.Contains(dominio, ".") || strings.ContainsAny(email, " \t") {
+		return "", "", errors.New("e-mail inválido")
+	}
+	return nome, email, nil
+}
+
+func emailEmUso(email string, exceto uint) bool {
+	if email == "" {
+		return false
+	}
+	var contagem int64
+	database.DB.Model(&database.User{}).
+		Where("email = ? AND id <> ?", email, exceto).
+		Count(&contagem)
+	return contagem > 0
 }
 
 func auditUserTarget(r *http.Request, user database.User) {

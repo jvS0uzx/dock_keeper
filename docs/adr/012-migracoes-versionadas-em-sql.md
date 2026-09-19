@@ -30,10 +30,27 @@ linhas e nenhuma dependência nova.
 - **Hash conferido:** editar um arquivo já aplicado derruba o boot com mensagem
   dizendo para criar uma migração nova. Drift entre instalações vira erro, não
   surpresa.
-- **Banco que já existe** (criado pelo `AutoMigrate`) é adotado: a `001_baseline`
-  é registrada como aplicada sem recriar nada, e as seguintes correm normalmente.
+- **A `001_baseline` é convergente e roda sempre**, inclusive em banco que já a
+  registrou. Ela usa `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS` para
+  cada coluna, índice com `IF NOT EXISTS` e constraint dentro de bloco `DO` que
+  consulta `pg_constraint`. Nada de tabela existente é recriado, nenhum tipo é
+  alterado e nenhuma linha é tocada: ela só cria o que falta.
+- **Regra de hash do baseline:** como a 001 é convergente, o hash dela é
+  **atualizado** quando muda, em vez de derrubar o boot. Da 002 em diante a regra
+  continua estrita: arquivo aplicado que muda recusa subir.
 - `AutoMigrate` continua disponível atrás de `DB_AUTOMIGRATE=true`, para quem
   quiser o caminho antigo num ambiente descartável. O padrão é migração.
+
+## Por que convergente, e não "adota e segue"
+
+A primeira versão marcava a 001 como aplicada quando o banco já tinha tabelas, sem
+executar nada. Isso presume que um banco antigo é igual ao snapshot, e não é: o do
+dono nasceu em agosto com 21 tabelas, e as quatro criadas depois (`alerts`,
+`dashboards`, `dashboard_panels`, `annotations`) nunca foram criadas. A 002 então
+quebrava no boot ao criar FK de tabela inexistente, e o painel não subia. Uma coluna
+acrescentada a uma tabela antiga pela convergência nasce **nulável**, enquanto num
+banco novo ela vem do `CREATE TABLE` com a restrição original; é a diferença aceita
+em troca de nunca reescrever tabela com dado.
 
 ## Consequências
 

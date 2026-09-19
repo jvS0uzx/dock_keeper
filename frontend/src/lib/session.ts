@@ -9,6 +9,8 @@ export interface SessionInfo {
   token: string;
   user_id: number;
   username: string;
+  nome?: string | null;
+  email?: string | null;
   role: Role;
   expires_at: string;
   accesses: SiteAccess[];

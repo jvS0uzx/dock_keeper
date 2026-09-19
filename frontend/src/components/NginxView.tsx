@@ -1,8 +1,13 @@
 import LoadNotice from './ui/LoadNotice';
 import { useLoadStatus } from './ui/load-status';
-import { useEffect, useState, useMemo } from 'react';
-import { Globe, Server, Network } from 'lucide-react';
-import { api, type LbStat } from '../lib/api';
+import { useCallback, useEffect, useState, useMemo } from 'react';
+import { Globe, Server, Network, Link2 } from 'lucide-react';
+import { api, apiErrorMessage, type LbStat, type ServerLiveStat, type ServerRecord } from '../lib/api';
+import { deriveUpstreams, upstreamsSemCadastro } from '../lib/upstream';
+import { hasGlobalAdmin } from '../lib/panels';
+import { useDialog } from './ui/dialog-context';
+import { useSession } from './ui/session-context';
+import Select from './ui/Select';
 
 interface UpstreamAgg {
   addr: string;
@@ -76,10 +81,52 @@ const TrafficFlow = ({ upstreams }: { upstreams: UpstreamAgg[] }) => {
 };
 
 const NginxView = () => {
+  const dialog = useDialog();
+  const session = useSession();
+  const podeAssociar = hasGlobalAdmin(session.accesses);
   const [loadBalancing, setLoadBalancing] = useState<LbStat[]>([]);
+  const [servidores, setServidores] = useState<ServerLiveStat[]>([]);
+  const [cadastro, setCadastro] = useState<ServerRecord[]>([]);
+  const [escolha, setEscolha] = useState<Record<string, string>>({});
+  const [associando, setAssociando] = useState('');
   const carga = useLoadStatus();
   const { ok: cargaOk, fail: cargaFail } = carga;
   const upstreams = useMemo(() => aggregateUpstreams(loadBalancing), [loadBalancing]);
+
+  const soltos = useMemo(
+    () => upstreamsSemCadastro(deriveUpstreams(loadBalancing), servidores),
+    [loadBalancing, servidores],
+  );
+
+  const carregarCadastro = useCallback(() => {
+    if (!podeAssociar) return;
+    api.servers().then(setCadastro).catch(() => setCadastro([]));
+  }, [podeAssociar]);
+
+  useEffect(() => {
+    carregarCadastro();
+  }, [carregarCadastro]);
+
+  const associar = async (endereco: string) => {
+    const alvo = escolha[endereco];
+    if (!alvo) {
+      dialog.notify('Escolha o servidor que responde por esse endereço.', 'error');
+      return;
+    }
+
+    const servidor = cadastro.find((s) => s.id === alvo);
+    const atuais = servidor?.aliases ?? [];
+    setAssociando(endereco);
+    try {
+      await api.updateServerAliases(alvo, [...new Set([...atuais, endereco])]);
+      dialog.notify(`${endereco} passou a pertencer a ${servidor?.name ?? 'servidor'}.`, 'success');
+      carregarCadastro();
+    } catch (err) {
+      dialog.notify(apiErrorMessage(err, 'Falha ao associar o endereço.'), 'error');
+    } finally {
+      setAssociando('');
+    }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -87,6 +134,7 @@ const NginxView = () => {
       api.liveMetrics(controller.signal)
         .then(data => {
           setLoadBalancing(data.load_balancing);
+          setServidores(data.servers);
           cargaOk();
         })
         .catch(err => {
@@ -128,6 +176,48 @@ const NginxView = () => {
           )}
         </div>
       </div>
+
+      {soltos.length > 0 && (
+        <div className="panel mb-6 p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Link2 size={16} strokeWidth={1.75} className="text-warn" />
+            <h2 className="eyebrow">Endereços sem servidor cadastrado</h2>
+          </div>
+          <p className="mb-3 max-w-prose text-xs text-text-mut">
+            O Nginx encaminha para estes endereços, e nenhum servidor cadastrado os declara. Enquanto
+            isso, a malha mostra o endereço em vez do nome da máquina.
+          </p>
+          <ul className="flex flex-col gap-2">
+            {soltos.map((node) => (
+              <li
+                key={node.addr}
+                className="flex flex-col gap-2 rounded-ctrl border border-line bg-ink-850 p-3 md:flex-row md:items-center md:justify-between"
+              >
+                <span className="mono-data text-sm text-text-hi">{node.addr}</span>
+                {podeAssociar && (
+                  <div className="flex items-center gap-3">
+                    <Select
+                      ariaLabel={`Associar a ${node.addr}`}
+                      className="w-56"
+                      value={escolha[node.host] ?? ''}
+                      onChange={(v) => setEscolha((atual) => ({ ...atual, [node.host]: v }))}
+                      placeholder="Escolha o servidor"
+                      options={cadastro.map((s) => ({ value: s.id, label: `${s.name} — ${s.host_ip}` }))}
+                    />
+                    <button
+                      className="btn btn-primary btn-sm"
+                      disabled={associando === node.host}
+                      onClick={() => associar(node.host)}
+                    >
+                      Associar
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="panel flex flex-col flex-1 min-h-0 overflow-hidden">
         <div className="p-4 border-b border-line bg-ink-850 flex items-center justify-between gap-2">

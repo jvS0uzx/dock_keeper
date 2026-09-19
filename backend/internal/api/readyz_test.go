@@ -97,3 +97,67 @@ func TestReadyzMostraOEstadoDoCanalDeAlerta(t *testing.T) {
 		t.Errorf("/readyz não informa o estado do canal de alerta: %v", corpo)
 	}
 }
+
+func pedirComOrigem(t *testing.T, caminho, origem string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, caminho, nil)
+	if origem != "" {
+		req.Header.Set("Origin", origem)
+	}
+	rec := httptest.NewRecorder()
+	Routes(testConfig()).ServeHTTP(rec, req)
+	return rec
+}
+
+func TestApiReadyzRespondeIgualAoReadyz(t *testing.T) {
+	if os.Getenv("DATABASE_URL") == "" {
+		t.Skip("DATABASE_URL não definido; pulando /api/readyz com banco")
+	}
+	if database.DB == nil {
+		if err := database.Connect(); err != nil {
+			t.Skipf("banco indisponível: %v", err)
+		}
+	}
+
+	codeAntigo, corpoAntigo := pedirReadyz(t)
+	rec := pedirComOrigem(t, "/api/readyz", "")
+	if rec.Code != codeAntigo {
+		t.Fatalf("/api/readyz: status %d, /readyz devolveu %d", rec.Code, codeAntigo)
+	}
+
+	var corpoNovo map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &corpoNovo); err != nil {
+		t.Fatalf("corpo do /api/readyz: %v", err)
+	}
+	if corpoNovo["status"] != corpoAntigo["status"] {
+		t.Errorf("status = %v, esperado %v", corpoNovo["status"], corpoAntigo["status"])
+	}
+	if _, tem := corpoNovo["alertas"]; !tem {
+		t.Errorf("/api/readyz não trouxe o estado do canal de alerta: %v", corpoNovo)
+	}
+}
+
+func TestApiReadyzMandaCabecalhoDeOrigem(t *testing.T) {
+	const permitida = "https://painel.exemplo.com"
+
+	rec := pedirComOrigem(t, "/api/readyz", permitida)
+	if rec.Header().Get("Access-Control-Allow-Origin") != permitida {
+		t.Errorf("/api/readyz devolveu origem %q, esperado %q; sem isso o navegador barra a faixa de degradação",
+			rec.Header().Get("Access-Control-Allow-Origin"), permitida)
+	}
+
+	deFora := pedirComOrigem(t, "/api/readyz", "https://site-de-fora.exemplo")
+	if deFora.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("origem fora da allowlist recebeu liberação de CORS")
+	}
+}
+
+func TestApiReadyzSemBancoResponde503(t *testing.T) {
+	trocarBanco(t, nil)
+
+	rec := pedirComOrigem(t, "/api/readyz", "https://painel.exemplo.com")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("/api/readyz com banco nulo: status %d, esperado 503", rec.Code)
+	}
+}

@@ -90,7 +90,13 @@ nunca sondava o que a própria tabela consultava, então impressora que só publ
 631 caía como "dispositivo web", e NAS virava estação Windows por causa do 445.
 
 O coletor remoto já sondava as doze. O sintoma era o mesmo equipamento **mudando
-de tipo conforme quem o encontrasse**. Há um teste que trava essa concordância.
+de tipo conforme quem o encontrasse**.
+
+Desde 19/09/2026 a lista não pode mais divergir: o painel importa o pacote de
+varredura do próprio coletor (`github.com/jvS0uzx/dockkeeper_collector/scan`), e
+`DefaultPorts`, `ExpandCIDR`, `Run` e a leitura da tabela ARP existem num lugar
+só. Antes eram duas cópias do mesmo código, que já tinham divergido. Um teste em
+cada ponta fixa as doze portas contra a tabela de classificação.
 
 ## Dois escritores na mesma unidade se atrapalham
 

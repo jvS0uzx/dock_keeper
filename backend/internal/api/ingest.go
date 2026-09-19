@@ -28,6 +28,8 @@ type ingestPayload struct {
 	NetRxBps *float64 `json:"net_rx_bps"`
 	NetTxBps *float64 `json:"net_tx_bps"`
 
+	Addresses []string `json:"addresses"`
+
 	OS           string `json:"os"`
 	Platform     string `json:"platform"`
 	Arch         string `json:"arch"`
@@ -130,6 +132,8 @@ func IngestHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "metric insert failed")
 		return
 	}
+
+	database.RegistrarEnderecos(server.ID, append(p.Addresses, hostIP))
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

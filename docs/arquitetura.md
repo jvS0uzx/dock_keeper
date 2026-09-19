@@ -87,7 +87,11 @@ em ninguém. É inventário e só.
 **O que é.** Uma goroutine dentro do próprio painel (`internal/discovery`), que
 varre as faixas de `DISCOVERY_CIDRS` a cada `DISCOVERY_INTERVAL_MIN` minutos.
 
-**O que ela dá.** O mesmo que o coletor remoto, para a rede onde o painel roda.
+**O que ela dá.** O mesmo que o coletor remoto, para a rede onde o painel roda —
+literalmente o mesmo código: desde 19/09/2026 o painel importa o pacote
+`github.com/jvS0uzx/dockkeeper_collector/scan`, em vez de manter uma cópia que já
+tinha divergido. `internal/discovery` ficou só com o que é do painel: a
+classificação por porta e a persistência em `network_hosts`.
 
 **O que ela não faz.** Só aceita faixa privada (RFC1918) e recusa prefixo maior
 que `/16` — 65 mil hosts é varredura longa demais para o caso de uso e
