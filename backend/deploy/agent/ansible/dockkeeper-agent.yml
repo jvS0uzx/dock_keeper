@@ -42,6 +42,7 @@
         cmd: "mv {{ item.0 }}/{{ item.1 }} /var/lib/private/{{ agente_nome }}/{{ item.1 }}"
         removes: "{{ item.0 }}/{{ item.1 }}"
         creates: "/var/lib/private/{{ agente_nome }}/{{ item.1 }}"
+      no_log: true
       loop: "{{ ['/var/lib/private/' ~ agente_antigo, '/var/lib/' ~ agente_antigo] | product(['credential.json', 'machine-id']) | list }}"
       notify: reiniciar agente
 
@@ -49,6 +50,7 @@
       ansible.builtin.command:
         cmd: "mv {{ item.0 }}/{{ item.1 }} /var/lib/private/{{ agente_nome }}/{{ item.1 }}.anterior"
         removes: "{{ item.0 }}/{{ item.1 }}"
+      no_log: true
       loop: "{{ ['/var/lib/private/' ~ agente_antigo, '/var/lib/' ~ agente_antigo] | product(['credential.json', 'machine-id']) | list }}"
 
     - name: Remover unit, binario e config do nome antigo
@@ -104,6 +106,7 @@
           AGENT_TOKEN="{{ agente_token }}"
           AGENT_SITE="{{ agente_site }}"
           AGENT_INTERVAL="{{ agente_interval }}"
+      no_log: true
       notify: reiniciar agente
 
     - name: Instalar a unit systemd

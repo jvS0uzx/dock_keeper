@@ -17,28 +17,41 @@ services:
       retries: 10
     restart: unless-stopped
 
+  prepara-dados:
+    image: alpine:3.20
+    container_name: dockkeeper_prepara_dados
+    command: sh -c "mkdir -p /app/data && chown -R ${DOCKKEEPER_UID:-1000}:${DOCKKEEPER_GID:-1000} /app/data"
+    volumes:
+      - floorplans:/app/data
+    restart: "no"
+
   backend:
     build:
       context: ./backend
     container_name: dockkeeper_backend
+    user: "${DOCKKEEPER_UID:-1000}:${DOCKKEEPER_GID:-1000}"
     depends_on:
       postgres:
         condition: service_healthy
+      prepara-dados:
+        condition: service_completed_successfully
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: "host=postgres user=${POSTGRES_USER:-postgres} password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB:-dockkeeper} port=5432 sslmode=disable TimeZone=UTC"
       API_TOKEN: ${API_TOKEN:?defina API_TOKEN no .env}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8081}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      API_ADDR: ":8080"
+      FLOORPLAN_DIR: data/floorplans
       SSH_KEY_PATH: /run/secrets/ssh_key
       SSH_KNOWN_HOSTS: /run/secrets/known_hosts
       TRUST_PROXY_HEADERS: "true"
-      AGENT_INGEST_TOKEN: ${AGENT_INGEST_TOKEN:-}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-      ADMIN_USER: ${ADMIN_USER:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    secrets:
+      - ssh_key
+      - known_hosts
     volumes:
-      - ${SSH_KEY_PATH:-~/.ssh/id_ed25519_vps}:/run/secrets/ssh_key:ro
-      - ${SSH_KNOWN_HOSTS:-~/.ssh/known_hosts}:/run/secrets/known_hosts:ro
       - floorplans:/app/data
     restart: unless-stopped
 
@@ -49,9 +62,15 @@ services:
     depends_on:
       - backend
     ports:
-      - "${PANEL_PORT:-8081}:80"
+      - "${PANEL_BIND:-127.0.0.1}:${PANEL_PORT:-8081}:80"
     restart: unless-stopped
 
 volumes:
   pgdata:
   floorplans:
+
+secrets:
+  ssh_key:
+    file: ${SSH_KEY_PATH:-~/.ssh/id_ed25519_vps}
+  known_hosts:
+    file: ${SSH_KNOWN_HOSTS:-~/.ssh/known_hosts}

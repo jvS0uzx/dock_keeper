@@ -176,6 +176,16 @@ por SSH — veja [Fontes de dado](docs/arquitetura.md).
 
 ## Subindo o painel
 
+> [!IMPORTANTE]
+> Subindo por `docker compose`: o backend roda com o uid do host (`DOCKKEEPER_UID`, padrão
+> 1000) para conseguir ler a chave SSH e o `known_hosts`, que ficam 600 no seu disco. Se o seu
+> usuário não for 1000, defina `DOCKKEEPER_UID` e `DOCKKEEPER_GID` no `.env` com `id -u` e
+> `id -g`. O serviço `prepara-dados` ajusta o dono do volume de plantas antes do backend subir.
+>
+> O backend em container recebe o `.env` inteiro, e o painel é publicado só em `127.0.0.1:8081`:
+> o nginx do container fala HTTP puro. Para abrir à rede, ponha um proxy TLS na frente e defina
+> `PANEL_BIND` no `.env`.
+
 ### Pré-requisitos
 
 - Go 1.26 ou superior (o `go.mod` declara `go 1.26.5`)

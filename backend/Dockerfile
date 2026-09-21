@@ -16,12 +16,15 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata \
     && adduser -D -u 10001 dockkeeper
 
-USER dockkeeper
 WORKDIR /app
 
 COPY --from=build /out/dockkeeper /app/dockkeeper
 
+RUN mkdir -p /app/data && chown dockkeeper:dockkeeper /app/data
+
 VOLUME ["/app/data"]
+
+USER dockkeeper
 
 EXPOSE 8080
 

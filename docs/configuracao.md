@@ -25,14 +25,15 @@ Estas três derrubam ou incapacitam o processo:
 | `ALERT_RETENTION_DAYS` | `90` | Idade máxima de alerta resolvido ou já entregue; alerta `open` nunca é podado por idade |
 | `ADDRESS_RETENTION_DAYS` | `30` | Dias sem ver um endereço coletado antes de tirá-lo do servidor; alias manual nunca é podado |
 | `LB_MEMBERSHIP_DAYS` | `7` | Janela de memória para considerar um servidor atrás do balanceador; sobrevive a fim de semana sem tráfego |
-| `ALERT_RESUME_HOURS` | `24` | Idade máxima do alerta preso em `sem_canal` que volta para a fila quando o canal é configurado |
+| `ALERT_RESUME_HOURS` | `24` | Janela de vida do incidente, contada do último momento em que a condição foi vista (`last_seen_at`). Dentro dela, alerta preso em `sem_canal` ou `falhou` volta para a fila quando o canal volta, e a ocorrência seguinte reaproveita o mesmo alerta. Fora dela, o alerta antigo não segura mais a chave |
+| `DOCKKEEPER_UID` / `DOCKKEEPER_GID` | `1000` | Só no compose: uid e gid com que o backend roda, para ler os segredos 600 do host e escrever no volume de plantas |
 | `DB_STATEMENT_TIMEOUT` | `15s` | Limite por consulta, aplicado no DSN. Consulta travada morre sozinha em vez de segurar conexão do pool |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` ou `error`. O log sai em JSON (`log/slog`) |
 | `API_TOKEN_ALLOW_WRITE` | `false` | `true` deixa o `API_TOKEN` de máquina escrever. Por padrão ele é somente leitura, e cada escrita liberada fica na auditoria |
 | `INGEST_RATE_WINDOW` | `1m` | Janela do limite de taxa da ingestão e do enroll |
 | `INGEST_RATE_MAX` | `120` | Envios por dispositivo na janela; acima disso, 429 com `Retry-After` |
 | `INGEST_RATE_MAX_ENROLL` | `10` | Tentativas de enroll por IP na janela |
-| `DB_AUTOMIGRATE` | `false` | `true` volta a criar o esquema pelo `AutoMigrate` do GORM em vez das migrações versionadas (ADR 012). Para ambiente descartável |
+| `DB_AUTOMIGRATE` | — | **Removido.** Criava banco sem chaves estrangeiras, CHECKs e índices. Ligado, é ignorado com aviso no boot; o esquema sobe sempre pelas migrações (ADR 012) |
 | `DB_MAX_OPEN_CONNS` | `20` | Teto de conexões simultâneas. Precisa caber no `max_connections` do servidor, contando todas as réplicas |
 | `DB_MAX_IDLE_CONNS` | `5` | Conexões mantidas ociosas. Rebaixado ao teto de abertas se for maior, com aviso |
 | `DB_CONN_MAX_LIFETIME` | `30m` | Vida útil da conexão, formato `time.ParseDuration` |
@@ -47,9 +48,15 @@ que é exatamente o bug original.
 | `API_TOKEN` | — | Token de máquina. Obrigatório |
 | `API_ADDR` | `:8080` | Endereço de escuta. Útil para subir uma segunda instância sem conflito |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | Origens liberadas no CORS, separadas por vírgula |
-| `TRUST_PROXY_HEADERS` | `false` | Autoriza ler `X-Real-IP` e `X-Forwarded-For` |
+| `TRUST_PROXY_HEADERS` | `false` | Autoriza ler `X-Forwarded-For` e `X-Real-IP`, **só** quando a conexão vem de um endereço em `TRUSTED_PROXY_CIDRS` |
+| `TRUSTED_PROXY_CIDRS` | loopback e faixas privadas | Quem é proxy confiável, em CIDR separado por vírgula. Conexão de fora da lista tem os cabeçalhos ignorados. O cliente é o salto mais à direita do `X-Forwarded-For` que não está na lista; se todos estão, o mais à direita. `X-Real-IP` só vale sem `X-Forwarded-For` |
+| `INGEST_RATE_MAX_UNAUTH` | `30` | Recusas de autenticação por IP, por `INGEST_RATE_WINDOW`, nas rotas de ingestão. Acima disso o IP recebe 429 **antes** da autenticação e nada mais é auditado na janela, além de uma linha do bloqueio |
 | `SESSION_TTL` | `12h` | Vida da sessão de login, formato `time.ParseDuration`. Sem renovação: vencida, o usuário entra de novo |
 | `HOST_OFFLINE_AFTER` | `30m` | Tempo sem ser visto a partir do qual um host do inventário aparece offline na tela de rede e na planta |
+
+⚠️ O padrão de `TRUSTED_PROXY_CIDRS` cobre o nginx do compose, mas também toda a LAN privada:
+uma estação em `192.168.x` atrás do proxy pode forjar o início do `X-Forwarded-For`. Com clientes
+em faixa privada, restrinja a lista ao endereço do proxy (`TRUSTED_PROXY_CIDRS="172.18.0.5/32"`).
 
 ⚠️ `TRUST_PROXY_HEADERS=true` **só** com proxy reverso à frente. Sem ele o
 cabeçalho vem do próprio cliente, e o limite de tentativa por IP vira enfeite.
@@ -134,16 +141,17 @@ segunda resolução de DNS entre a checagem e a conexão.
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | — | Sem ele os alertas só vão para o log |
 | `TELEGRAM_CHAT_ID` | — | Idem |
-| `ALERT_MIN_SEVERITY` | `warning` | Piso de notificação: `info`, `warning`, `high` ou `critical` |
+| `ALERT_MIN_SEVERITY` | `warning` | Piso de notificação: `info`, `warning`, `high` ou `critical`. Vale para regra do motor **e** para gatilho direto (`[CRITICO]` é `critical`, `[ALERTA]` é `high`). Abaixo do piso nada é gravado nem enviado, e o log registra uma vez por `ALERT_COOLDOWN`, não a cada ciclo |
+| `ABSENCE_ALERT` | `true` | Liga a vigia de ausência. Coletor que para de reportar por 3 vezes o intervalo gera `[CRITICO]`. Estação com agente só alerta se estiver marcada (`absence_alert` no servidor, padrão `false`), e com `[ALERTA]`. `false` desliga a vigia inteira |
 | `AUTHLOG_WATCH` | `true` | Vigia de força bruta: uma sessão SSH de fundo por servidor que conta falhas de login no `auth.log` |
 | `BRUTEFORCE_THRESHOLD` | `10` | Falhas do mesmo IP na janela que disparam o `[ALERTA]` de força bruta |
 | `BRUTEFORCE_WINDOW` | `5m` | Janela deslizante da contagem de força bruta |
 | `LB_ERROR_RATIO` | `0.5` | Proporção de respostas 5xx de um upstream que dispara o `[ALERTA]`, entre 0 e 1 |
 | `LB_MIN_REQUESTS` | `20` | Requisições mínimas do upstream na janela para a proporção de 5xx valer. Abaixo disso, poucas requisições com erro não disparam |
 | `LB_WINDOW` | `5m` | Janela deslizante da proporção de 5xx por upstream |
-| `ALERT_COOLDOWN` | `30m` | Intervalo mínimo entre dois avisos da mesma chave, contado a partir da última **entrega bem-sucedida**. Enquanto houver alerta pendente da mesma chave, nada novo é enfileirado |
+| `ALERT_COOLDOWN` | `30m` | Intervalo mínimo entre dois avisos da mesma chave, contado a partir da última **entrega bem-sucedida**. Enquanto o incidente segue aberto, cada cooldown renotifica a **mesma** linha (`renotify_count`); incidente novo dentro do cooldown aparece no painel na hora e espera para avisar |
 | `ALERT_MAX_ATTEMPTS` | `8` | Tentativas de entrega antes de marcar `delivery=falhou`. O alerta continua aberto no painel (ADR 011) |
-| `ALERT_NOTIFY_RECOVERY` | `true` | Enfileira a mensagem `[OK]` quando a condição volta ao normal. O alerta é resolvido mesmo com a mensagem desligada |
+| `ALERT_NOTIFY_RECOVERY` | `true` | Enfileira a mensagem de recuperação quando a condição volta ao normal, para regra e para gatilho direto. Só sai se o incidente chegou a ser avisado. O alerta é resolvido mesmo com a mensagem desligada |
 
 ## Ingestão e identidade de dispositivo
 
@@ -266,6 +274,16 @@ com `:?`, ou seja, obrigatória. Foram acrescentadas:
 | `POSTGRES_DB` | `dockkeeper` | compose |
 | `POSTGRES_PORT` | `5433` | compose |
 | `PANEL_PORT` | `8081` | compose |
+| `PANEL_BIND` | `127.0.0.1` | compose — endereço em que o painel é publicado. O nginx do container fala HTTP puro; abrir para a rede (`0.0.0.0`) só com um proxy TLS na frente |
+
+No compose, o serviço `backend` recebe **todo** o `.env` por `env_file`, então qualquer variável
+desta página vale também em container. Seis são fixadas pelo próprio compose e ignoram o que
+estiver no `.env`, porque dentro do container o valor do host não faz sentido: `DATABASE_URL`
+(aponta para o serviço `postgres`), `SSH_KEY_PATH` e `SSH_KNOWN_HOSTS` (viram `/run/secrets/...`),
+`API_ADDR` (`:8080`, que é para onde o nginx faz proxy), `FLOORPLAN_DIR` (`data/floorplans`, dentro
+do volume) e `TRUST_PROXY_HEADERS` (`true`, porque há um nginx na frente). O script
+`.github/scripts/confere-env-compose.sh`, que também roda no CI, compara o `.env.example` com o
+que o compose entrega ao backend e falha se alguma variável ficar de fora.
 
 Havia também uma contradição de porta que mordia na primeira instalação: a
 `DATABASE_URL` do `.env.example` apontava para 5432 enquanto o compose publica o
