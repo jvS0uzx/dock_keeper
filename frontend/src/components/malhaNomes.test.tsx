@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import Dashboard from './Dashboard';
 import { DialogContext, type DialogApi } from './ui/dialog-context';
@@ -124,8 +124,8 @@ describe('malha de roteamento — nome do servidor cadastrado', () => {
     renderizar();
 
     const filtro = await screen.findByLabelText('Filtrar por IP');
-    await userEvent.click(filtro);
-    await userEvent.click(await screen.findByRole('option', { name: /balanceador/ }));
+    await semEspera().click(filtro);
+    await semEspera().click(await screen.findByRole('option', { name: /balanceador/ }));
 
     const tabela = await screen.findByRole('table');
     expect(within(tabela).getByRole('columnheader', { name: 'vps-app' })).toBeTruthy();

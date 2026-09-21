@@ -2,77 +2,169 @@ import LoadNotice from './ui/LoadNotice';
 import { useLoadStatus } from './ui/load-status';
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import { Globe, Server, Network, Link2 } from 'lucide-react';
-import { api, apiErrorMessage, type LbStat, type ServerLiveStat, type ServerRecord } from '../lib/api';
-import { deriveUpstreams, upstreamsSemCadastro } from '../lib/upstream';
+import {
+  api,
+  apiErrorMessage,
+  type LbStat,
+  type NginxUpstreamLink,
+  type ServerLiveStat,
+  type ServerRecord,
+} from '../lib/api';
+import {
+  arestasDaMalha,
+  balanceadoresDaMalha,
+  deriveUpstreams,
+  destinosDaMalha,
+  rotuloDaJanela,
+  upstreamsSemCadastro,
+  type BalanceadorDaMalha,
+  type SeveridadeDoDestino,
+} from '../lib/upstream';
 import { hasGlobalAdmin } from '../lib/panels';
 import { useDialog } from './ui/dialog-context';
 import { useSession } from './ui/session-context';
 import Select from './ui/Select';
-
-interface UpstreamAgg {
-  addr: string;
-  reqs: number;
-  severity: 'ok' | 'warn' | 'error';
-}
+import { POLL } from '../lib/polling';
 
 const ERROR_STATUSES = ['500', '502', '503', '504'];
 const WARN_STATUSES = ['400', '404', '429'];
 
-const aggregateUpstreams = (rows: LbStat[]): UpstreamAgg[] => {
-  const map: Record<string, UpstreamAgg> = {};
-  for (const r of rows) {
-    const key = r.upstream_addr || 'Local (Nginx/Cache)';
-    if (!map[key]) map[key] = { addr: key, reqs: 0, severity: 'ok' };
-    map[key].reqs += r.requests_count;
-    if (ERROR_STATUSES.includes(r.status)) map[key].severity = 'error';
-    else if (map[key].severity !== 'error' && WARN_STATUSES.includes(r.status)) map[key].severity = 'warn';
-  }
-  return Object.values(map).sort((a, b) => b.reqs - a.reqs).slice(0, 6);
-};
-
-const sevColor = (s: UpstreamAgg['severity']) =>
+const corDaSeveridade = (s: SeveridadeDoDestino) =>
   s === 'error' ? 'var(--color-crit)' : s === 'warn' ? 'var(--color-warn)' : 'var(--color-ok)';
 
-const TrafficFlow = ({ upstreams }: { upstreams: UpstreamAgg[] }) => {
-  const W = 640, H = 260;
-  const lbX = 80, lbY = H / 2;
-  const upX = W - 120;
-  const n = Math.max(upstreams.length, 1);
-  const totalReqs = upstreams.reduce((s, u) => s + u.reqs, 0);
+const LARGURA = 640;
+
+const posicao = (indice: number, total: number, altura: number): number =>
+  total <= 1 ? altura / 2 : 44 + (indice * (altura - 88)) / (total - 1);
+
+const MalhaDeTrafego = ({
+  balanceadores,
+  janela,
+}: {
+  balanceadores: BalanceadorDaMalha[];
+  janela: string;
+}) => {
+  const destinos = destinosDaMalha(balanceadores);
+  const altura = Math.max(260, 60 + Math.max(destinos.length, balanceadores.length) * 46);
+  const lbX = 86;
+  const destX = LARGURA - 150;
+  const yDoDestino = new Map(destinos.map((d, i) => [d.destino, posicao(i, destinos.length, altura)]));
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
-      <g>
-        <circle cx={lbX} cy={lbY} r="34" fill="var(--color-accent)" fillOpacity="0.08" stroke="var(--color-accent)" strokeOpacity="0.4" />
-        <circle cx={lbX} cy={lbY} r="34" fill="none" stroke="var(--color-accent)" strokeOpacity="0.25">
-          <animate attributeName="r" values="34;46;34" dur="2.5s" repeatCount="indefinite" />
-          <animate attributeName="stroke-opacity" values="0.35;0;0.35" dur="2.5s" repeatCount="indefinite" />
-        </circle>
-        <text x={lbX} y={lbY - 44} textAnchor="middle" fill="var(--color-text-faint)" fontSize="11" fontWeight="600" letterSpacing="1">LOAD BALANCER</text>
-        <text x={lbX} y={lbY + 5} textAnchor="middle" fill="var(--color-text-hi)" fontSize="10" fontFamily="var(--font-mono)">{totalReqs} req/5s</text>
-      </g>
+    <svg
+      viewBox={`0 0 ${LARGURA} ${altura}`}
+      className="w-full h-full"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label="Malha de roteamento do Nginx"
+    >
+      {balanceadores.map((balanceador, iLb) => {
+        const yLb = posicao(iLb, balanceadores.length, altura);
+        const corDoNo = balanceador.potencial ? 'var(--color-text-faint)' : 'var(--color-accent)';
 
-      {upstreams.map((u, i) => {
-        const y = n === 1 ? lbY : 40 + (i * (H - 80)) / (n - 1);
-        const color = sevColor(u.severity);
-        const pathId = `flow-${i}`;
-        const d = `M ${lbX + 34} ${lbY} C ${(lbX + upX) / 2} ${lbY}, ${(lbX + upX) / 2} ${y}, ${upX - 12} ${y}`;
-        const dots = Math.min(1 + Math.floor(u.reqs / 3), 6);
-        const dur = Math.max(0.7, 2.6 - u.reqs * 0.04);
         return (
-          <g key={u.addr}>
-            <path id={pathId} d={d} fill="none" stroke={color} strokeOpacity="0.18" strokeWidth="2" />
-            {Array.from({ length: dots }).map((_, k) => (
-              <circle key={k} r="3.5" fill={color}>
-                <animateMotion dur={`${dur}s`} begin={`${(k * dur) / dots}s`} repeatCount="indefinite">
-                  <mpath href={`#${pathId}`} />
-                </animateMotion>
+          <g key={balanceador.id || balanceador.nome}>
+            {balanceador.arestas.map((aresta, iAresta) => {
+              const yDestino = yDoDestino.get(aresta.destino) ?? altura / 2;
+              const cor = aresta.potencial ? 'var(--color-text-faint)' : corDaSeveridade(aresta.severidade);
+              const caminho = `malha-${iLb}-${iAresta}`;
+              const d = `M ${lbX + 32} ${yLb} C ${(lbX + destX) / 2} ${yLb}, ${(lbX + destX) / 2} ${yDestino}, ${destX - 12} ${yDestino}`;
+              const anima = !aresta.potencial && aresta.reqs > 0;
+              const pontos = anima ? Math.min(1 + Math.floor(aresta.reqs / 3), 6) : 0;
+              const duracao = Math.max(0.7, 2.6 - aresta.reqs * 0.04);
+
+              return (
+                <g key={`${aresta.bloco}-${aresta.destino}`}>
+                  <path
+                    id={caminho}
+                    data-testid={aresta.potencial ? 'aresta-potencial' : anima ? 'aresta-com-trafego' : 'aresta-parada'}
+                    d={d}
+                    fill="none"
+                    stroke={cor}
+                    strokeOpacity={aresta.potencial ? 0.16 : 0.22}
+                    strokeWidth="2"
+                    strokeDasharray={aresta.potencial ? '5 5' : undefined}
+                  />
+                  {Array.from({ length: pontos }).map((_, k) => (
+                    <circle key={k} r="3.5" fill={cor}>
+                      <animateMotion
+                        dur={`${duracao}s`}
+                        begin={`${(k * duracao) / pontos}s`}
+                        repeatCount="indefinite"
+                      >
+                        <mpath href={`#${caminho}`} />
+                      </animateMotion>
+                    </circle>
+                  ))}
+                </g>
+              );
+            })}
+
+            <circle
+              cx={lbX}
+              cy={yLb}
+              r="32"
+              fill={corDoNo}
+              fillOpacity="0.08"
+              stroke={corDoNo}
+              strokeOpacity="0.4"
+              strokeDasharray={balanceador.potencial ? '5 5' : undefined}
+            />
+            {!balanceador.potencial && (
+              <circle cx={lbX} cy={yLb} r="32" fill="none" stroke={corDoNo} strokeOpacity="0.25">
+                <animate attributeName="r" values="32;44;32" dur="2.5s" repeatCount="indefinite" />
+                <animate attributeName="stroke-opacity" values="0.35;0;0.35" dur="2.5s" repeatCount="indefinite" />
               </circle>
-            ))}
-            <circle cx={upX} cy={y} r="9" fill={color} fillOpacity="0.15" stroke={color} strokeOpacity="0.6" />
-            <circle cx={upX} cy={y} r="3.5" fill={color} />
-            <text x={upX + 16} y={y - 4} fill="var(--color-text-hi)" fontSize="10" fontFamily="var(--font-mono)">{u.addr}</text>
-            <text x={upX + 16} y={y + 9} fill="var(--color-text-mut)" fontSize="9">{u.reqs} reqs · {u.severity === 'ok' ? '200' : u.severity}</text>
+            )}
+            <text
+              x={lbX}
+              y={yLb - 42}
+              textAnchor="middle"
+              fill="var(--color-text-faint)"
+              fontSize="11"
+              fontWeight="600"
+            >
+              {balanceador.nome}
+            </text>
+            <text
+              x={lbX}
+              y={yLb + 4}
+              textAnchor="middle"
+              fill="var(--color-text-hi)"
+              fontSize="9"
+              fontFamily="var(--font-mono)"
+            >
+              {balanceador.potencial ? 'reserva' : `${balanceador.reqs} req`}
+            </text>
+            {!balanceador.potencial && (
+              <text
+                x={lbX}
+                y={yLb + 16}
+                textAnchor="middle"
+                fill="var(--color-text-mut)"
+                fontSize="8"
+                fontFamily="var(--font-mono)"
+              >
+                {janela}
+              </text>
+            )}
+          </g>
+        );
+      })}
+
+      {destinos.map((destino, i) => {
+        const y = posicao(i, destinos.length, altura);
+        const cor = corDaSeveridade(destino.severidade);
+        return (
+          <g key={destino.destino}>
+            <circle cx={destX} cy={y} r="9" fill={cor} fillOpacity="0.15" stroke={cor} strokeOpacity="0.6" />
+            <circle cx={destX} cy={y} r="3.5" fill={cor} />
+            <text x={destX + 16} y={y - 4} fill="var(--color-text-hi)" fontSize="10" fontFamily="var(--font-mono)">
+              {destino.rotulo}
+            </text>
+            <text x={destX + 16} y={y + 9} fill="var(--color-text-mut)" fontSize="9">
+              {destino.reqs} reqs
+            </text>
           </g>
         );
       })}
@@ -85,13 +177,18 @@ const NginxView = () => {
   const session = useSession();
   const podeAssociar = hasGlobalAdmin(session.accesses);
   const [loadBalancing, setLoadBalancing] = useState<LbStat[]>([]);
+  const [janelaDoLb, setJanelaDoLb] = useState<number | null>(null);
   const [servidores, setServidores] = useState<ServerLiveStat[]>([]);
+  const [topologia, setTopologia] = useState<NginxUpstreamLink[]>([]);
   const [cadastro, setCadastro] = useState<ServerRecord[]>([]);
   const [escolha, setEscolha] = useState<Record<string, string>>({});
   const [associando, setAssociando] = useState('');
   const carga = useLoadStatus();
   const { ok: cargaOk, fail: cargaFail } = carga;
-  const upstreams = useMemo(() => aggregateUpstreams(loadBalancing), [loadBalancing]);
+  const balanceadores = useMemo(
+    () => balanceadoresDaMalha(arestasDaMalha(topologia, servidores, loadBalancing)),
+    [topologia, servidores, loadBalancing],
+  );
 
   const soltos = useMemo(
     () => upstreamsSemCadastro(deriveUpstreams(loadBalancing), servidores),
@@ -134,7 +231,9 @@ const NginxView = () => {
       api.liveMetrics(controller.signal)
         .then(data => {
           setLoadBalancing(data.load_balancing);
+          setJanelaDoLb(data.lb_window_sec);
           setServidores(data.servers);
+          setTopologia(data.nginx_topologia ?? []);
           cargaOk();
         })
         .catch(err => {
@@ -143,7 +242,7 @@ const NginxView = () => {
     };
 
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, 2000);
+    const interval = setInterval(fetchMetrics, POLL.balanceador);
     return () => {
       clearInterval(interval);
       controller.abort();
@@ -166,13 +265,15 @@ const NginxView = () => {
           <Server size={16} strokeWidth={1.75} className="text-text-faint" />
           <h2 className="eyebrow">Fluxo de roteamento ao vivo</h2>
         </div>
-        <div className="h-[260px]">
-          {upstreams.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-text-mut text-sm">
-              {carga.error && !carga.lastOk ? carga.error : 'Aguardando tráfego no Load Balancer...'}
+        <div className="min-h-[260px]">
+          {balanceadores.length === 0 ? (
+            <div className="h-[260px] flex items-center justify-center text-text-mut text-sm">
+              {carga.error && !carga.lastOk
+                ? carga.error
+                : 'Nenhum balanceador descoberto ainda. A malha aparece assim que a sonda encontrar um Nginx com blocos upstream.'}
             </div>
           ) : (
-            <TrafficFlow upstreams={upstreams} />
+            <MalhaDeTrafego balanceadores={balanceadores} janela={rotuloDaJanela(janelaDoLb)} />
           )}
         </div>
       </div>
@@ -237,7 +338,7 @@ const NginxView = () => {
               <tr>
                 <th>Domínio / host</th>
                 <th>Upstream (proxy pass)</th>
-                <th>Requisições (5s)</th>
+                <th>Requisições ({rotuloDaJanela(janelaDoLb)})</th>
                 <th>Saúde</th>
               </tr>
             </thead>

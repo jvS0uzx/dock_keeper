@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import Dashboard from './Dashboard';
 import NginxView from './NginxView';
@@ -33,16 +33,17 @@ const base = {
   net_tx_bps: null,
   rtt_ms: null,
   addresses: [] as string[],
+  behind_lb: false,
 };
 
 const servidores = [
-  { ...base, id: 'a', name: 'VPS-1', host_ip: '198.51.100.38', addresses: ['198.51.100.38', '100.100.0.2'] },
-  { ...base, id: 'b', name: 'VPS-2', host_ip: '198.51.100.39' },
+  { ...base, id: 'a', name: 'VPS-1', host_ip: '203.0.113.38', addresses: ['203.0.113.38', '100.100.0.11'], behind_lb: true },
+  { ...base, id: 'b', name: 'VPS-2', host_ip: '203.0.113.39' },
 ];
 
 const trafego = [
-  { upstream_addr: '100.100.0.2:80', server_name: 'app.exemplo', status: '200', requests_count: 9 },
-  { upstream_addr: '100.100.0.1:80', server_name: 'app.exemplo', status: '200', requests_count: 4 },
+  { upstream_addr: '100.100.0.11:80', server_name: 'app.exemplo', status: '200', requests_count: 9 },
+  { upstream_addr: '100.100.0.10:80', server_name: 'app.exemplo', status: '200', requests_count: 4 },
 ];
 
 const api = vi.hoisted(() => ({
@@ -118,7 +119,7 @@ describe('malha com endereço de overlay', () => {
     renderizar(<Dashboard />);
 
     expect((await screen.findAllByText('VPS-1')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('100.100.0.1:80').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('100.100.0.10:80').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/não cadastrado/i).length).toBeGreaterThan(0);
   });
 
@@ -126,7 +127,7 @@ describe('malha com endereço de overlay', () => {
     renderizar(<Dashboard />);
 
     await screen.findAllByText('VPS-1');
-    const caixa = screen.getByText('100.100.0.1:80').closest('div');
+    const caixa = screen.getByText('100.100.0.10:80').closest('div');
     expect(within(caixa as HTMLElement).queryByText('VPS-2')).toBeNull();
   });
 
@@ -143,15 +144,15 @@ describe('associar upstream solto na tela de Nginx', () => {
   it('lista o endereço solto e associa ao servidor escolhido', async () => {
     renderizar(<NginxView />);
 
-    const soltos = await screen.findAllByText('100.100.0.1:80');
+    const soltos = await screen.findAllByText('100.100.0.10:80');
     const bloco = soltos.map((el) => el.closest('li')).find(Boolean);
     expect(bloco).toBeTruthy();
 
-    await userEvent.click(within(bloco as HTMLElement).getByLabelText(/associar a/i));
-    await userEvent.click(await screen.findByRole('option', { name: /VPS-2/ }));
-    await userEvent.click(within(bloco as HTMLElement).getByRole('button', { name: /associar/i }));
+    await semEspera().click(within(bloco as HTMLElement).getByLabelText(/associar a/i));
+    await semEspera().click(await screen.findByRole('option', { name: /VPS-2/ }));
+    await semEspera().click(within(bloco as HTMLElement).getByRole('button', { name: /associar/i }));
 
-    expect(api.updateServerAliases).toHaveBeenCalledWith('b', ['100.100.0.1']);
+    expect(api.updateServerAliases).toHaveBeenCalledWith('b', ['100.100.0.10']);
   });
 
   it('quem não é admin global não vê a ação de associar', async () => {

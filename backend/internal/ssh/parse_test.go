@@ -79,3 +79,11 @@ func TestTargetAddrUsaPortaConfigurada(t *testing.T) {
 		t.Errorf("addr sem porta = %q, esperado a porta padrão", got)
 	}
 }
+
+func parseNginxLine(line string) (lbKey, bool) {
+	e, ok := parseNginxEntry(line)
+	if !ok {
+		return lbKey{}, false
+	}
+	return e.bucket(), true
+}

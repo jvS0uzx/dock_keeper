@@ -16,6 +16,7 @@ import LoadNotice from './ui/LoadNotice';
 import { useLoadStatus } from './ui/load-status';
 import { useDialog } from './ui/dialog-context';
 import { useRole } from './ui/session-context';
+import { POLL } from '../lib/polling';
 
 const MAX_LOG_LINES = 100;
 
@@ -27,6 +28,39 @@ const SORT_OPTIONS = [
   { value: 'mem-desc', label: 'Memória, maior primeiro' },
   { value: 'mem-asc', label: 'Memória, menor primeiro' },
 ];
+
+const ROTULO_DO_ESTADO: Record<string, string> = {
+  created: 'criado',
+  restarting: 'reiniciando',
+  running: 'rodando',
+  removing: 'removendo',
+  paused: 'pausado',
+  exited: 'parado',
+  dead: 'morto',
+};
+
+interface EstadoExibido {
+  rotulo: string;
+  classe: string;
+  detalhe?: string;
+}
+
+const estadoDoContainer = (c: ContainerLiveStat): EstadoExibido => {
+  const rotulo = ROTULO_DO_ESTADO[c.state] ?? c.state;
+  if (!c.state) return { rotulo: 'desconhecido', classe: 'badge-muted' };
+  if (c.state === 'restarting') return { rotulo, classe: 'badge-warn' };
+  if (c.state !== 'running') return { rotulo, classe: 'badge-crit' };
+  if (c.oom_killed === true) {
+    return { rotulo: 'sem memória', classe: 'badge-warn', detalhe: 'O container foi encerrado por falta de memória.' };
+  }
+  if (c.health === 'unhealthy') {
+    return { rotulo: 'sem saúde', classe: 'badge-warn', detalhe: 'O healthcheck do container está falhando.' };
+  }
+  if (c.health === 'starting') {
+    return { rotulo: 'iniciando', classe: 'badge-info', detalhe: 'O healthcheck ainda não concluiu a primeira verificação.' };
+  }
+  return { rotulo, classe: 'badge-ok' };
+};
 
 const ContainersView = () => {
   const dialog = useDialog();
@@ -64,7 +98,7 @@ const ContainersView = () => {
         });
     };
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, 3000);
+    const interval = setInterval(fetchMetrics, POLL.containers);
     return () => {
       clearInterval(interval);
       controller.abort();
@@ -228,6 +262,8 @@ const ContainersView = () => {
                         const memLimitStr = formatBytes(c.mem_limit);
                         const memPercent = c.mem_limit > 0 ? ((c.mem_used / c.mem_limit) * 100).toFixed(1) : '0.0';
                         const isRunning = c.state === 'running';
+                        const estado = estadoDoContainer(c);
+                        const reinicios = c.restart_count ?? null;
 
                         return (
                           <tr key={c.docker_id}>
@@ -240,10 +276,23 @@ const ContainersView = () => {
                             </td>
                             <td>
                               <div className="flex flex-col gap-1 items-start">
-                                <span className={`badge ${!c.state ? 'badge-muted' : isRunning ? 'badge-ok' : 'badge-crit'}`}>
-                                  {c.state || 'desconhecido'}
+                                <span
+                                  className={`badge ${estado.classe}`}
+                                  title={estado.detalhe}
+                                  data-testid="container-estado"
+                                >
+                                  {estado.rotulo}
                                 </span>
                                 <span className="text-xs text-text-faint whitespace-nowrap" title={c.status}>{c.status}</span>
+                                {reinicios !== null && reinicios > 0 && (
+                                  <span
+                                    className="flex items-center gap-1 text-[11px] text-text-faint whitespace-nowrap"
+                                    data-testid="container-reinicios"
+                                  >
+                                    <RefreshCw size={11} strokeWidth={1.75} />
+                                    {reinicios} {reinicios === 1 ? 'reinício' : 'reinícios'}
+                                  </span>
+                                )}
                               </div>
                             </td>
                             <td className="text-right">

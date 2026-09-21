@@ -146,8 +146,8 @@ func TestRenomearNaoDerrubaAColeta(t *testing.T) {
 	sess := sessaoReal(t, "admin-rename-coleta", auth.RoleAdmin)
 	s := servidorDeRename(t, "vps-coletando", "203.0.113.215", nil)
 
-	ssh.Manager.Start(ssh.Target{ID: s.ID, Name: s.Name, Host: s.HostIP, User: s.User, Port: s.Port})
-	if !ssh.Manager.Rodando(s.ID) {
+	alvo := ssh.Target{ID: s.ID, Name: s.Name, Host: s.HostIP, User: s.User, Port: s.Port}
+	if !ssh.Manager.Start(alvo) {
 		t.Fatalf("a coleta não subiu para o servidor de teste")
 	}
 
@@ -155,7 +155,7 @@ func TestRenomearNaoDerrubaAColeta(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH: status %d (%s)", rec.Code, rec.Body.String())
 	}
-	if !ssh.Manager.Rodando(s.ID) {
+	if ssh.Manager.Start(alvo) {
 		t.Errorf("a coleta caiu depois do rename; o Manager acompanha por id e não deveria reiniciar")
 	}
 }

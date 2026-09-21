@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import MetricsHistoryView from './MetricsHistoryView';
 import { DialogContext, type DialogApi } from './ui/dialog-context';
 import { responder } from '../test/recharts';
+import { CATALOGO } from '../test/catalogo';
 
 vi.mock('recharts', async (importOriginal) => {
   const { comLarguraFixa } = await import('../test/recharts');
@@ -38,6 +39,7 @@ beforeEach(() => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     chamadas.push({ method, url, body });
 
+    if (url.pathname === '/api/metrics/catalogo') return responder(200, CATALOGO);
     if (url.pathname === '/api/metrics/live') {
       if (erroDosServidores) return responder(500, { error: erroDosServidores });
       return responder(200, { servers: [{ id: 'srv-1', name: 'estacao-01' }], containers: [], load_balancing: [] });
@@ -75,7 +77,7 @@ const ultimaConsulta = () => consultasDoHistorico().at(-1)!.url.searchParams;
 
 describe('MetricsHistoryView — janelas', () => {
   it('oferece 30d e 90d e manda como range', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     renderizar();
     await waitFor(() => expect(consultasDoHistorico().length).toBeGreaterThan(0));
     expect(ultimaConsulta().get('range')).toBe('1h');
@@ -85,10 +87,10 @@ describe('MetricsHistoryView — janelas', () => {
 
     await user.click(screen.getByRole('button', { name: '90d' }));
     await waitFor(() => expect(ultimaConsulta().get('range')).toBe('90d'));
-  }, 15000);
+  });
 
   it('período personalizado manda from e to, nunca junto de range', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     renderizar();
     await waitFor(() => expect(consultasDoHistorico().length).toBeGreaterThan(0));
 
@@ -105,7 +107,7 @@ describe('MetricsHistoryView — janelas', () => {
 
   it('mostra a mensagem do painel quando o período é recusado', async () => {
     erroDoHistorico = 'o período personalizado não pode passar de 400 dias';
-    const user = userEvent.setup();
+    const user = semEspera();
     renderizar();
     await waitFor(() => expect(consultasDoHistorico().length).toBeGreaterThan(0));
 
@@ -119,7 +121,7 @@ describe('MetricsHistoryView — janelas', () => {
 
 describe('MetricsHistoryView — anotações', () => {
   it('anotação criada aparece como marcador no gráfico', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     renderizar();
     await waitFor(() => expect(document.querySelector('.recharts-area')).not.toBeNull());
     expect(document.querySelector('.recharts-reference-line')).toBeNull();
@@ -137,8 +139,8 @@ describe('MetricsHistoryView — anotações', () => {
     expect(marcador?.textContent).toContain('deploy 2.3');
   });
 
-  it('anotação global vai com server_id nulo', { timeout: 15000 }, async () => {
-    const user = userEvent.setup();
+  it('anotação global vai com server_id nulo', async () => {
+    const user = semEspera();
     renderizar();
     await waitFor(() => expect(consultasDoHistorico().length).toBeGreaterThan(0));
 
@@ -174,13 +176,56 @@ describe('MetricsHistoryView — falha não vira vazio', () => {
 
 describe('MetricsHistoryView — latência', () => {
   it('consulta o histórico de latência com metric=rtt', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     renderizar();
     await waitFor(() => expect(consultasDoHistorico().length).toBeGreaterThan(0));
 
     await user.click(screen.getByRole('combobox', { name: 'Métrica' }));
-    await user.click(screen.getByRole('option', { name: 'Latência (ms)' }));
+    await user.click(screen.getByRole('option', { name: 'RTT' }));
 
     await waitFor(() => expect(ultimaConsulta().get('metric')).toBe('rtt'));
+  });
+});
+
+describe('MetricsHistoryView — latência não tem tendência', () => {
+  const renderizarHistorico = () =>
+    render(
+      <DialogContext.Provider value={{ confirm: vi.fn(), prompt: vi.fn(), notify: vi.fn() } as DialogApi}>
+        <MetricsHistoryView />
+      </DialogContext.Provider>,
+    );
+
+  const escolherLatencia = async () => {
+    await semEspera().click(await screen.findByLabelText('Métrica'));
+    await semEspera().click(await screen.findByRole('option', { name: 'Handshake SSH' }));
+  };
+
+  it('30d e 90d ficam desabilitados e a tela explica por quê', async () => {
+    renderizarHistorico();
+    await escolherLatencia();
+
+    expect((screen.getByRole('button', { name: '30d' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '90d' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '7d' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText(/só guarda amostras brutas por 7 dias/)).toBeTruthy();
+  });
+
+  it('quem estava em 30d volta para 7d ao escolher a latência, e nenhuma consulta de 30d sai', async () => {
+    renderizarHistorico();
+    await semEspera().click(await screen.findByRole('button', { name: '30d' }));
+    await escolherLatencia();
+
+    expect(screen.getByRole('button', { name: '7d' }).getAttribute('aria-pressed')).toBe('true');
+    const deLatencia = chamadas.filter(
+      (c) => c.url.pathname === '/api/metrics/history' && c.url.searchParams.get('metric') === 'latency',
+    );
+    expect(deLatencia.length).toBeGreaterThan(0);
+    expect(deLatencia.every((c) => c.url.searchParams.get('range') === '7d')).toBe(true);
+  });
+
+  it('outras métricas continuam com 30d e 90d', async () => {
+    renderizarHistorico();
+    expect(((await screen.findByRole('button', { name: '30d' })) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText(/só guarda amostras brutas/)).toBeNull();
   });
 });

@@ -13,7 +13,8 @@ if (!globalThis.ResizeObserver) {
   };
 }
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   localStorage.clear();
+  (await import('./lib/catalogo')).esquecerCatalogo();
 });

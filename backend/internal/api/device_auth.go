@@ -6,8 +6,8 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"github.com/jvS0uzx/dock_keeper/internal/config"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -94,7 +94,7 @@ func authenticateCredential(deviceID, secret string) (deviceAuth, error) {
 }
 
 func (d deviceAuth) allowsKind(kind string) bool {
-	return d.Legacy || d.Kind == "" || d.Kind == kind
+	return d.Legacy || d.Kind == kind
 }
 
 func refuseDeviceKind(w http.ResponseWriter, r *http.Request, cred deviceAuth, action, expected, rota string) {
@@ -175,13 +175,9 @@ func refuseDeviceAuth(w http.ResponseWriter, r *http.Request, err error, action 
 		writeError(w, http.StatusUnauthorized, "credencial de dispositivo inválida")
 		return
 	}
-	origem := r.RemoteAddr
-	if h, _, splitErr := net.SplitHostPort(r.RemoteAddr); splitErr == nil {
-		origem = h
-	}
 	auditHandledByHandler(r)
 	audit.Record(audit.Entry{
-		SourceIP:   origem,
+		SourceIP:   clientIP(r, config.Booleano("TRUST_PROXY_HEADERS", false)),
 		UserAgent:  r.UserAgent(),
 		Action:     action,
 		TargetType: "device",

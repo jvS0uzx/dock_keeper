@@ -113,7 +113,7 @@ func TestAckGravaQuemReconheceu(t *testing.T) {
 
 	a := alertaDeTeste(t, "ack", &c.siteA, database.AlertStatusOpen)
 
-	rec := chamar(t, alertAckHandler, c.viewerA, http.MethodPost, "/api/alerts/ack?id="+uintStr(a.ID), "")
+	rec := chamar(t, alertAckHandler, c.donoA, http.MethodPost, "/api/alerts/ack?id="+uintStr(a.ID), "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("ack: status %d (%s)", rec.Code, rec.Body.String())
 	}
@@ -125,8 +125,8 @@ func TestAckGravaQuemReconheceu(t *testing.T) {
 	if gravado.Status != database.AlertStatusAcked {
 		t.Errorf("status = %q, esperado acked", gravado.Status)
 	}
-	if gravado.AckedBy == nil || *gravado.AckedBy != c.viewerA.UserID {
-		t.Errorf("acked_by = %v, esperado %d", gravado.AckedBy, c.viewerA.UserID)
+	if gravado.AckedBy == nil || *gravado.AckedBy != c.donoA.UserID {
+		t.Errorf("acked_by = %v, esperado %d", gravado.AckedBy, c.donoA.UserID)
 	}
 	if gravado.AckedAt == nil {
 		t.Error("acked_at não foi gravado")

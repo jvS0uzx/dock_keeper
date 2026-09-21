@@ -3,12 +3,41 @@ import { useLoadStatus } from './ui/load-status';
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { ShieldOff } from 'lucide-react';
 import { api, apiErrorMessage, type ServerLiveStat, type ServerRecord as Server } from '../lib/api';
+import { descobertaComPendencia, estadoDoNginx, papelDoServidor } from '../lib/upstream';
 import { formatGB, formatLatency, formatLoad, formatPercent } from '../lib/format';
 import { useDialog } from './ui/dialog-context';
 import { useRole, useSession } from './ui/session-context';
 import { hasGlobalAdmin } from '../lib/panels';
+import { POLL } from '../lib/polling';
 
 const emptyForm = { name: '', host_ip: '', user: 'root' };
+
+const ROTULO_DO_ESTADO: Record<string, string> = {
+  desconhecido: 'Não verificado',
+  ausente: 'Sem Nginx',
+  inativo: 'Nginx parado',
+  sem_upstream: 'Nginx sem upstream',
+  candidato: 'Candidato',
+};
+
+const rotuloDoNginx = (live?: ServerLiveStat): { texto: string; classe: string; titulo: string } => {
+  if (!live) return { texto: 'Não verificado', classe: 'badge-muted', titulo: 'A sonda ainda não rodou neste servidor' };
+
+  const papel = papelDoServidor(live);
+  if (papel === 'principal') {
+    return { texto: 'Principal', classe: 'badge-ok', titulo: 'Recebendo tráfego agora' };
+  }
+  if (papel === 'reserva') {
+    return { texto: 'Reserva', classe: 'badge-info', titulo: 'Candidato a assumir o tráfego' };
+  }
+
+  const estado = estadoDoNginx(live);
+  return {
+    texto: ROTULO_DO_ESTADO[estado] ?? 'Não verificado',
+    classe: estado === 'inativo' ? 'badge-warn' : 'badge-muted',
+    titulo: estado === 'ausente' ? 'Este servidor não roda Nginx' : 'Descoberta automática do Nginx',
+  };
+};
 
 const ServersView = () => {
   const dialog = useDialog();
@@ -49,7 +78,7 @@ const ServersView = () => {
     const controller = new AbortController();
     fetchServers();
     fetchLiveStatus(controller.signal);
-    const interval = setInterval(() => fetchLiveStatus(controller.signal), 5000);
+    const interval = setInterval(() => fetchLiveStatus(controller.signal), POLL.servidores);
     return () => {
       clearInterval(interval);
       controller.abort();
@@ -83,6 +112,22 @@ const ServersView = () => {
       );
     } catch (err) {
       dialog.notify(apiErrorMessage(err, 'Falha ao mudar a classificação.'), 'error');
+    }
+  };
+
+  const alternarColetaDoNginx = async (server: Server, valor: boolean) => {
+    try {
+      await api.setServerCollectNginx(server.id, valor);
+      await fetchServers();
+      await fetchLiveStatus();
+      dialog.notify(
+        valor
+          ? `${server.name} passa a ter o log do Nginx coletado.`
+          : `${server.name} deixa de ter o log do Nginx coletado por ordem manual.`,
+        'success',
+      );
+    } catch (err) {
+      dialog.notify(apiErrorMessage(err, 'Falha ao mudar a coleta do Nginx.'), 'error');
     }
   };
 
@@ -209,6 +254,7 @@ const ServersView = () => {
                     <th className="text-right">RAM</th>
                     <th className="text-right">Load</th>
                     <th className="text-right">Latência</th>
+                    <th>Nginx</th>
                     <th>Balanceador</th>
                     <th className="text-right">Ação</th>
                   </tr>
@@ -250,6 +296,44 @@ const ServersView = () => {
                       >
                         {formatLatency(live?.rtt_ms ?? null)}
                       </td>
+                      <td data-testid="nginx">
+                        {(() => {
+                          const marca = rotuloDoNginx(live);
+                          const motivo = live?.nginx_motivo ?? '';
+                          const pendente = live !== undefined && descobertaComPendencia(live);
+                          const coletando = live?.collect_nginx === true;
+                          return (
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <span className={`badge ${marca.classe}`} title={marca.titulo}>
+                                  {marca.texto}
+                                </span>
+                                {coletando && (
+                                  <span className="badge badge-muted" title="Coleta do log ligada manualmente">
+                                    coleta manual
+                                  </span>
+                                )}
+                              </div>
+                              {motivo !== '' && (
+                                <span
+                                  className={`text-xs whitespace-normal ${pendente ? 'text-warn' : 'text-text-mut'}`}
+                                >
+                                  {motivo}
+                                </span>
+                              )}
+                              {podeRenomear && (
+                                <button
+                                  className="btn btn-ghost btn-sm self-start"
+                                  title="Sobreposição manual: coleta o log mesmo que a descoberta não classifique como candidato"
+                                  onClick={() => alternarColetaDoNginx(s, !coletando)}
+                                >
+                                  {coletando ? 'Parar de coletar o log' : 'Coletar log do Nginx'}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
                       <td className="whitespace-nowrap">
                         {(() => {
                           const atras = live?.behind_lb === true;
@@ -258,8 +342,10 @@ const ServersView = () => {
                             origem === 'manual'
                               ? 'Classificação manual'
                               : origem === 'trafego'
-                                ? 'Automático: apareceu como upstream do Nginx'
-                                : 'Automático: nunca apareceu como upstream';
+                                ? 'Automático: recebeu tráfego do Nginx na janela'
+                                : origem === 'configuracao'
+                                  ? 'Automático: declarado como upstream na configuração do Nginx'
+                                  : 'Automático: nunca apareceu como upstream';
                           return (
                             <div className="flex items-center gap-2">
                               <span className={`badge ${atras ? 'badge-ok' : 'badge-muted'}`} title={titulo}>

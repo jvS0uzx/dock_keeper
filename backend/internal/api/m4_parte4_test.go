@@ -113,7 +113,9 @@ func lerReadyz(t *testing.T) (int, map[string]any) {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
-	Routes(testConfig()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	req.Header.Set("Authorization", "Bearer "+testConfig().Token)
+	Routes(testConfig()).ServeHTTP(rec, req)
 	var corpo map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &corpo); err != nil {
 		t.Fatalf("corpo do /readyz: %v", err)
@@ -125,9 +127,8 @@ func TestReadyzDizDegradadoComAlertaFalho(t *testing.T) {
 	setupAuditAPI(t)
 	t.Cleanup(func() { database.DB.Where("key = ?", "p4-falho").Delete(&database.Alert{}) })
 
-	if _, corpo := lerReadyz(t); corpo["degradado"] != nil {
-		t.Skipf("o painel já está degradado por outro motivo: %v", corpo["degradado"])
-	}
+	_, antes := lerReadyz(t)
+	falhosAntes, _ := antes["alertas_falhos"].(float64)
 
 	err := database.DB.Create(&database.Alert{
 		Key: "p4-falho", Severity: "critical", Text: "[CRITICO] entrega falhou",
@@ -142,15 +143,21 @@ func TestReadyzDizDegradadoComAlertaFalho(t *testing.T) {
 	if code != http.StatusOK {
 		t.Errorf("status = %d, esperado 200: alerta falho não derruba a prontidão", code)
 	}
-	if corpo["alertas_falhos"] != float64(1) {
-		t.Errorf("alertas_falhos = %v, esperado 1", corpo["alertas_falhos"])
+	if corpo["alertas_falhos"] != falhosAntes+1 {
+		t.Errorf("alertas_falhos = %v, esperado %v", corpo["alertas_falhos"], falhosAntes+1)
 	}
 	motivos, ok := corpo["degradado"].([]any)
 	if !ok || len(motivos) == 0 {
 		t.Fatalf("degradado = %v, esperado a lista de motivos", corpo["degradado"])
 	}
-	if !strings.Contains(motivos[0].(string), "entrega falhou") {
-		t.Errorf("motivo = %v, esperado citar a entrega falhou", motivos[0])
+	citou := false
+	for _, m := range motivos {
+		if texto, ok := m.(string); ok && strings.Contains(texto, "entrega falhou") {
+			citou = true
+		}
+	}
+	if !citou {
+		t.Errorf("motivos = %v, esperado citar a entrega falhou", motivos)
 	}
 }
 

@@ -9,6 +9,7 @@ import {
   type ContainerLiveStat,
   type HistoryRange,
   type LbStat,
+  type NginxUpstreamLink,
   type ServerLiveStat,
   type ServerRecord,
 } from '../lib/api';
@@ -25,26 +26,31 @@ import { hasGlobalAdmin } from '../lib/panels';
 import { useDialog } from './ui/dialog-context';
 import { useSession } from './ui/session-context';
 import { formatBytes, formatGB, formatPercent } from '../lib/format';
-import { mediaDefinida } from '../lib/agregado';
+import { mediaDefinida, percentualDeUso } from '../lib/agregado';
 import {
+  arestasDaMalha,
+  balanceadoresDaMalha,
   carregarFiltroDaMalha,
   classificarMalha,
   deriveUpstreams,
   ehBalanceador,
+  ehPrincipal,
+  ehReserva,
   indiceDeEnderecos,
   nosDaMalha,
   rotuloDoUpstream,
   salvarFiltroDaMalha,
   splitUpstreams,
   totalRequests,
+  type ArestaDaMalha,
   type FiltroDaMalha,
   type NoDaMalha,
   type UpstreamNode,
+  rotuloDaJanela,
 } from '../lib/upstream';
 import Select, { type SelectOption } from './ui/Select';
+import { POLL } from '../lib/polling';
 
-const LIVE_POLL_MS = 2000;
-const HISTORY_POLL_MS = 30000;
 
 const ERROR_STATUSES = ['500', '502', '503', '504', '400', '404'];
 
@@ -101,6 +107,7 @@ const Gauge = ({ value, title, detalhe }: { value: number | null; title: string;
 const TRACO_ATIVO = 'color-mix(in srgb, var(--color-accent) 45%, var(--color-ink-900))';
 const TRACO_OCIOSO = 'var(--color-text-faint)';
 const TRACEJADO_OCIOSO = '4 4';
+const TRACEJADO_POTENCIAL = '5 5';
 
 const FILTROS_DA_MALHA: { value: FiltroDaMalha; label: string }[] = [
   { value: 'tudo', label: 'Tudo' },
@@ -108,13 +115,31 @@ const FILTROS_DA_MALHA: { value: FiltroDaMalha; label: string }[] = [
   { value: 'fora', label: 'Só fora do balanceador' },
 ];
 
+interface BalanceadorNaMalha {
+  id: string;
+  label: string;
+  reqs: number;
+  potencial: boolean;
+  principal: boolean;
+  arestas: ArestaDaMalha[];
+}
+
+interface ArestaParaNo {
+  reqs: number;
+  potencial: boolean;
+}
+
 const LoadBalancerFlow = ({
   stats,
   servers,
+  topologia,
+  janela,
   onAssociado,
 }: {
   stats: LbStat[];
   servers: ServerLiveStat[];
+  topologia: NginxUpstreamLink[];
+  janela: string;
   onAssociado: () => void;
 }) => {
   const session = useSession();
@@ -128,9 +153,13 @@ const LoadBalancerFlow = ({
   const escolhaRef = useRef('');
   const [salvando, setSalvando] = useState(false);
 
-  const upstreams = useMemo(() => deriveUpstreams(stats), [stats]);
-  const grupos = useMemo(() => classificarMalha(servers, upstreams), [servers, upstreams]);
-  const todosOsNodes = useMemo(() => nosDaMalha(servers, upstreams), [servers, upstreams]);
+  const destinosDeclarados = useMemo(() => topologia.map((enlace) => enlace.destino), [topologia]);
+  const upstreams = useMemo(
+    () => deriveUpstreams(stats, destinosDeclarados),
+    [stats, destinosDeclarados],
+  );
+  const grupos = useMemo(() => classificarMalha(servers, upstreams, LB_IP), [servers, upstreams]);
+  const todosOsNodes = useMemo(() => nosDaMalha(servers, upstreams, LB_IP), [servers, upstreams]);
   const nodes = filtro === 'fora' ? [] : todosOsNodes;
   const total = totalRequests(stats);
 
@@ -190,24 +219,60 @@ const LoadBalancerFlow = ({
 
   const opcoesDeServidor: SelectOption[] = cadastro.map((s) => ({ value: s.id, label: s.name }));
 
-  const lbs = useMemo(() => {
-    const byId = new Map<string, { id: string; reqs: number; ups: Map<string, number> }>();
-    for (const stat of stats) {
-      const id = stat.server_id ?? '';
-      const lb = byId.get(id) ?? { id, reqs: 0, ups: new Map<string, number>() };
-      lb.reqs += stat.requests_count;
-      for (const addr of splitUpstreams(stat.upstream_addr)) {
-        lb.ups.set(addr, (lb.ups.get(addr) ?? 0) + stat.requests_count);
-      }
-      byId.set(id, lb);
+  const arestasDaTopologia = useMemo(
+    () => arestasDaMalha(topologia, servers, stats),
+    [topologia, servers, stats],
+  );
+
+  const lbs = useMemo<BalanceadorNaMalha[]>(() => {
+    const porId = new Map<string, BalanceadorNaMalha>();
+
+    for (const servidor of grupos.balanceadores) {
+      porId.set(servidor.id, {
+        id: servidor.id,
+        label: servidor.name,
+        reqs: 0,
+        potencial: ehReserva(servidor),
+        principal: ehPrincipal(servidor),
+        arestas: [],
+      });
     }
-    if (byId.size === 0) byId.set('', { id: '', reqs: 0, ups: new Map() });
-    const name = (id: string) =>
-      id === '' ? 'Load Balancer' : (servers.find((s) => s.id === id)?.name ?? 'Balanceador');
-    return [...byId.values()]
-      .sort((a, b) => b.reqs - a.reqs || a.id.localeCompare(b.id))
-      .map((lb) => ({ ...lb, label: name(lb.id) }));
-  }, [stats, servers]);
+
+    for (const balanceador of balanceadoresDaMalha(arestasDaTopologia)) {
+      const atual = porId.get(balanceador.id);
+      if (atual === undefined) {
+        porId.set(balanceador.id, {
+          id: balanceador.id,
+          label: balanceador.id === '' ? 'Load Balancer' : balanceador.nome,
+          reqs: balanceador.reqs,
+          potencial: balanceador.potencial,
+          principal: false,
+          arestas: balanceador.arestas,
+        });
+        continue;
+      }
+      atual.reqs = balanceador.reqs;
+      atual.arestas = balanceador.arestas;
+    }
+
+    if (porId.size === 0) {
+      porId.set('', {
+        id: '',
+        label: 'Load Balancer',
+        reqs: 0,
+        potencial: false,
+        principal: false,
+        arestas: [],
+      });
+    }
+
+    return [...porId.values()].sort(
+      (a, b) =>
+        Number(a.potencial) - Number(b.potencial) ||
+        b.reqs - a.reqs ||
+        a.label.localeCompare(b.label),
+    );
+  }, [grupos.balanceadores, arestasDaTopologia]);
 
   const areaRef = useRef<HTMLDivElement>(null);
   const [largura, setLargura] = useState(0);
@@ -222,11 +287,13 @@ const LoadBalancerFlow = ({
   const enderecoParaNo = indiceDeEnderecos(nodes);
   const posicaoDoNo = new Map(nodes.map((n, i) => [n.id, i]));
   const arestas = lbs.map((lb) => {
-    const porNo = new Map<string, number>();
-    for (const [addr, reqs] of lb.ups.entries()) {
-      const id = enderecoParaNo.get(addr);
+    const porNo = new Map<string, ArestaParaNo>();
+    for (const aresta of lb.arestas) {
+      const id = enderecoParaNo.get(aresta.destino);
       if (id === undefined) continue;
-      porNo.set(id, (porNo.get(id) ?? 0) + reqs);
+      const atual = porNo.get(id) ?? { reqs: 0, potencial: lb.potencial || aresta.potencial };
+      atual.reqs += aresta.reqs;
+      porNo.set(id, atual);
     }
     return porNo;
   });
@@ -290,7 +357,7 @@ const LoadBalancerFlow = ({
           )}
           <span data-testid="malha-trafego" className={`badge ${total > 0 ? 'badge-ok' : 'badge-muted'}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${total > 0 ? 'bg-ok animate-pulse' : 'bg-text-faint'}`} />
-            {`${total} req / 5s`}
+            {`${total} req / ${janela}`}
           </span>
         </div>
       </div>
@@ -310,59 +377,72 @@ const LoadBalancerFlow = ({
               viewBox={`0 0 ${w} ${alturaConteudo}`}
               aria-hidden="true"
             >
-              {lbs.map((lb, li) => (
-                <g key={`lb-${lb.id}`}>
-                  <path
-                    id={`path-in-${li}`}
-                    data-testid="malha-aresta"
-                    d={curva(xIn, yMeio, xLbIn, yLb(li))}
-                    fill="none"
-                    stroke={lb.reqs > 0 ? TRACO_ATIVO : TRACO_OCIOSO}
-                    strokeDasharray={lb.reqs > 0 ? undefined : TRACEJADO_OCIOSO}
-                    strokeWidth="1.25"
-                  />
-                  {lb.reqs > 0 && (
-                    <circle r="3" fill="var(--color-accent)">
-                      <animateMotion dur="1.1s" repeatCount="indefinite">
-                        <mpath href={`#path-in-${li}`} />
-                      </animateMotion>
-                    </circle>
-                  )}
-                  {[...arestas[li].entries()].map(([idDoNo, reqs]) => {
-                    const ui = posicaoDoNo.get(idDoNo);
-                    if (ui === undefined) return null;
-                    return (
-                      <g key={`edge-${lb.id}-${idDoNo}`}>
-                        <path
-                          id={`edge-${li}-${ui}`}
-                          data-testid="malha-aresta"
-                          data-de={lb.id}
-                          data-para={idDoNo}
-                          d={curva(xLbOut, yLb(li), xUp, yNo(ui))}
-                          fill="none"
-                          stroke={reqs > 0 ? TRACO_ATIVO : TRACO_OCIOSO}
-                          strokeDasharray={reqs > 0 ? undefined : TRACEJADO_OCIOSO}
-                          strokeWidth="1.25"
-                        />
-                        {reqs > 0 &&
-                          Array.from({ length: Math.min(reqs, 5) }).map((_, i) => (
-                            <circle key={`p-${li}-${ui}-${i}`} r="3" fill="var(--color-accent)">
-                              <animateMotion dur="1.5s" begin={`${i * 0.3}s`} repeatCount="indefinite">
-                                <mpath href={`#edge-${li}-${ui}`} />
-                              </animateMotion>
-                            </circle>
-                          ))}
-                      </g>
-                    );
-                  })}
-                </g>
-              ))}
+              {lbs.map((lb, li) => {
+                const entrandoAnima = !lb.potencial && lb.reqs > 0;
+                return (
+                  <g key={`lb-${lb.id}`}>
+                    <path
+                      id={`path-in-${li}`}
+                      data-testid="malha-aresta"
+                      data-estado={lb.potencial ? 'potencial' : entrandoAnima ? 'com-trafego' : 'parada'}
+                      d={curva(xIn, yMeio, xLbIn, yLb(li))}
+                      fill="none"
+                      stroke={entrandoAnima ? TRACO_ATIVO : TRACO_OCIOSO}
+                      strokeDasharray={
+                        lb.potencial ? TRACEJADO_POTENCIAL : entrandoAnima ? undefined : TRACEJADO_OCIOSO
+                      }
+                      strokeOpacity={lb.potencial ? 0.45 : undefined}
+                      strokeWidth="1.25"
+                    />
+                    {entrandoAnima && (
+                      <circle r="3" fill="var(--color-accent)">
+                        <animateMotion dur="1.1s" repeatCount="indefinite">
+                          <mpath href={`#path-in-${li}`} />
+                        </animateMotion>
+                      </circle>
+                    )}
+                    {[...arestas[li].entries()].map(([idDoNo, aresta]) => {
+                      const ui = posicaoDoNo.get(idDoNo);
+                      if (ui === undefined) return null;
+                      const anima = !aresta.potencial && aresta.reqs > 0;
+                      return (
+                        <g key={`edge-${lb.id}-${idDoNo}`}>
+                          <path
+                            id={`edge-${li}-${ui}`}
+                            data-testid="malha-aresta"
+                            data-estado={aresta.potencial ? 'potencial' : anima ? 'com-trafego' : 'parada'}
+                            data-de={lb.id}
+                            data-para={idDoNo}
+                            d={curva(xLbOut, yLb(li), xUp, yNo(ui))}
+                            fill="none"
+                            stroke={anima ? TRACO_ATIVO : TRACO_OCIOSO}
+                            strokeDasharray={
+                              aresta.potencial ? TRACEJADO_POTENCIAL : anima ? undefined : TRACEJADO_OCIOSO
+                            }
+                            strokeOpacity={aresta.potencial ? 0.45 : undefined}
+                            strokeWidth="1.25"
+                          />
+                          {anima &&
+                            Array.from({ length: Math.min(aresta.reqs, 5) }).map((_, i) => (
+                              <circle key={`p-${li}-${ui}-${i}`} r="3" fill="var(--color-accent)">
+                                <animateMotion dur="1.5s" begin={`${i * 0.3}s`} repeatCount="indefinite">
+                                  <mpath href={`#edge-${li}-${ui}`} />
+                                </animateMotion>
+                              </circle>
+                            ))}
+                        </g>
+                      );
+                    })}
+                  </g>
+                );
+              })}
               {nodes.map((node, ui) => {
                 if (arestas.some((porNo) => porNo.has(node.id))) return null;
                 return (
                   <path
                     key={`idle-${node.id}`}
                     data-testid="malha-aresta"
+                    data-estado="parada"
                     d={curva(xLbOut, yLb(0), xUp, yNo(ui))}
                     fill="none"
                     stroke={TRACO_OCIOSO}
@@ -387,25 +467,52 @@ const LoadBalancerFlow = ({
               <span className="eyebrow mt-2">Internet</span>
             </div>
 
-            {lbs.map((lb, li) => (
-              <div
-                key={`lb-box-${lb.id}`}
-                data-testid="malha-lb"
-                className="absolute z-10 left-1/2 flex flex-col items-center"
-                style={{ top: yLb(li), transform: 'translate(-50%, -50%)' }}
-              >
+            {lbs.map((lb, li) => {
+              const recebendo = !lb.potencial && lb.reqs > 0;
+              const papel = lb.potencial ? 'reserva' : lb.principal ? 'principal' : '';
+              return (
                 <div
-                  className={`w-14 h-14 rounded-card bg-ink-800 border flex items-center justify-center transition-colors ${
-                    lb.reqs > 0 ? 'border-accent/40' : 'border-line'
-                  }`}
+                  key={`lb-box-${lb.id}`}
+                  data-testid="malha-lb"
+                  data-papel={lb.potencial ? 'reserva' : lb.principal ? 'principal' : 'indefinido'}
+                  className="absolute z-10 left-1/2 flex flex-col items-center"
+                  style={{ top: yLb(li), transform: 'translate(-50%, -50%)' }}
                 >
-                  <Server size={24} strokeWidth={1.75} className={lb.reqs > 0 ? 'text-accent' : 'text-text-mut'} />
+                  <div
+                    className={`w-14 h-14 rounded-card bg-ink-800 border flex items-center justify-center transition-colors ${
+                      lb.potencial
+                        ? 'border-dashed border-line opacity-70'
+                        : recebendo
+                          ? 'border-accent/40'
+                          : 'border-line'
+                    }`}
+                  >
+                    <Server
+                      size={24}
+                      strokeWidth={1.75}
+                      className={
+                        lb.potencial ? 'text-text-faint' : recebendo ? 'text-accent' : 'text-text-mut'
+                      }
+                    />
+                  </div>
+                  <span className="eyebrow mt-2 max-w-[150px] truncate" title={lb.label}>
+                    {lb.label}
+                  </span>
+                  {papel !== '' && (
+                    <span
+                      className={`text-[10px] ${lb.potencial ? 'text-text-faint' : 'text-accent'}`}
+                      title={
+                        lb.potencial
+                          ? 'Candidato a balanceador: assumiria o tráfego se a principal cair'
+                          : 'Balanceador que está recebendo tráfego agora'
+                      }
+                    >
+                      {papel}
+                    </span>
+                  )}
                 </div>
-                <span className="eyebrow mt-2 max-w-[150px] truncate" title={lb.label}>
-                  {lb.label}
-                </span>
-              </div>
-            ))}
+              );
+            })}
 
             {nodes.map((node, ui) => (
               <div
@@ -453,7 +560,7 @@ const LoadBalancerFlow = ({
                     </span>
                   )}
                   {node.reqs > 0 ? (
-                    <span className="text-[10px] mono-data text-accent">{`${node.reqs} req / 5s`}</span>
+                    <span className="text-[10px] mono-data text-accent">{`${node.reqs} req / ${janela}`}</span>
                   ) : (
                     <span className="text-[10px] text-text-faint truncate">sem tráfego na janela</span>
                   )}
@@ -568,7 +675,15 @@ const groupTrafficByProject = (stats: LbStat[], nodes: UpstreamNode[]): ProjectT
   return Array.from(projects.values()).sort((a, b) => b.total - a.total);
 };
 
-const LoadBalancerDashboard = ({ stats, servers }: { stats: LbStat[]; servers: ServerLiveStat[] }) => {
+const LoadBalancerDashboard = ({
+  stats,
+  servers,
+  janela,
+}: {
+  stats: LbStat[];
+  servers: ServerLiveStat[];
+  janela: string;
+}) => {
   const nodes = useMemo(() => deriveUpstreams(stats), [stats]);
   const projects = useMemo(() => groupTrafficByProject(stats, nodes), [stats, nodes]);
   const totalErrors = projects.reduce((acc, p) => acc + p.errors, 0);
@@ -577,7 +692,7 @@ const LoadBalancerDashboard = ({ stats, servers }: { stats: LbStat[]; servers: S
     <div className="flex flex-col gap-6 anim-rise">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
         <div className="stat-card">
-          <span className="eyebrow">Erros HTTP na janela (5s)</span>
+          <span className="eyebrow">Erros HTTP na janela ({janela})</span>
           <div className="flex items-baseline gap-3 mt-2">
             <span className={`stat-value text-4xl ${totalErrors > 0 ? 'text-crit' : 'text-ok'}`}>{totalErrors}</span>
             <span className="text-xs text-text-mut">respostas 5xx/4xx</span>
@@ -622,7 +737,7 @@ const LoadBalancerDashboard = ({ stats, servers }: { stats: LbStat[]; servers: S
                   </th>
                 ))}
                 <th className="text-right">Local/Cache</th>
-                <th className="text-right">Total req/5s</th>
+                <th className="text-right">Total req / {janela}</th>
                 <th className="text-right">Erros</th>
               </tr>
             </thead>
@@ -672,6 +787,8 @@ export default function Dashboard() {
   const [servers, setServers] = useState<ServerLiveStat[]>([]);
   const [containers, setContainers] = useState<ContainerLiveStat[]>([]);
   const [loadBalancing, setLoadBalancing] = useState<LbStat[]>([]);
+  const [topologiaDoNginx, setTopologiaDoNginx] = useState<NginxUpstreamLink[]>([]);
+  const [janelaDoLb, setJanelaDoLb] = useState<number | null>(null);
   const carga = useLoadStatus();
   const { ok: cargaOk, fail: cargaFail } = carga;
   const disco = useLoadStatus();
@@ -696,6 +813,8 @@ export default function Dashboard() {
         setServers(data.servers);
         setContainers(data.containers);
         setLoadBalancing(data.load_balancing);
+        setTopologiaDoNginx(data.nginx_topologia ?? []);
+        setJanelaDoLb(data.lb_window_sec);
         cargaOk();
       })
       .catch((err) => cargaFail(err, 'Falha ao ler as métricas ao vivo.'));
@@ -709,6 +828,8 @@ export default function Dashboard() {
           setServers(data.servers);
           setContainers(data.containers);
           setLoadBalancing(data.load_balancing);
+          setTopologiaDoNginx(data.nginx_topologia ?? []);
+          setJanelaDoLb(data.lb_window_sec);
           cargaOk();
         })
         .catch((err) => {
@@ -716,7 +837,7 @@ export default function Dashboard() {
         });
     };
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, LIVE_POLL_MS);
+    const interval = setInterval(fetchMetrics, POLL.aoVivo);
     return () => {
       clearInterval(interval);
       controller.abort();
@@ -743,7 +864,7 @@ export default function Dashboard() {
         });
     };
     fetchHistory();
-    const interval = setInterval(fetchHistory, HISTORY_POLL_MS);
+    const interval = setInterval(fetchHistory, POLL.historicoDoPainel);
     return () => {
       clearInterval(interval);
       controller.abort();
@@ -763,11 +884,11 @@ export default function Dashboard() {
 
   const memUsed = onlineServers.reduce((acc, s) => acc + s.mem_used, 0);
   const memTotal = onlineServers.reduce((acc, s) => acc + s.mem_total, 0);
-  const memPercent = memTotal > 0 ? (memUsed / memTotal) * 100 : 0;
+  const memPercent = percentualDeUso(memUsed, memTotal);
 
   const diskUsed = onlineServers.reduce((acc, s) => acc + s.disk_used, 0);
   const diskTotal = onlineServers.reduce((acc, s) => acc + s.disk_total, 0);
-  const diskPercent = diskTotal > 0 ? (diskUsed / diskTotal) * 100 : 0;
+  const diskPercent = percentualDeUso(diskUsed, diskTotal);
 
   const isUp = onlineServers.length > 0;
   const offlineCount = scopedServers.length - onlineServers.length;
@@ -816,7 +937,7 @@ export default function Dashboard() {
       </div>
 
       {isLoadBalancerSelected ? (
-        <LoadBalancerDashboard stats={loadBalancing} servers={servers} />
+        <LoadBalancerDashboard stats={loadBalancing} servers={servers} janela={rotuloDaJanela(janelaDoLb)} />
       ) : (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 mb-6 stagger">
@@ -855,7 +976,13 @@ export default function Dashboard() {
           </div>
 
           {selectedServerId === 'all' && (
-            <LoadBalancerFlow stats={loadBalancing} servers={servers} onAssociado={recarregarVivo} />
+            <LoadBalancerFlow
+              stats={loadBalancing}
+              servers={servers}
+              topologia={topologiaDoNginx}
+              janela={rotuloDaJanela(janelaDoLb)}
+              onAssociado={recarregarVivo}
+            />
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-6 h-56 stagger">

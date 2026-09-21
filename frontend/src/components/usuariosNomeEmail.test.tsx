@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import LoginView from './LoginView';
 import Sidebar from './Sidebar';
@@ -12,9 +13,9 @@ import { SiteScopeContext, type SiteScopeState } from './ui/site-scope-context';
 const contas = [
   {
     id: 1,
-    username: 'joaosouza@example.com',
+    username: 'joaosouza@exemplo.com.br',
     nome: 'João Vitor Souza',
-    email: 'joaosouza@example.com',
+    email: 'joaosouza@exemplo.com.br',
     role: 'admin' as const,
     active: true,
     last_login: null,
@@ -45,7 +46,7 @@ beforeEach(() => {
 });
 
 const sessao = (extra: Partial<SessionState> = {}): SessionState => ({
-  username: 'joaosouza@example.com',
+  username: 'joaosouza@exemplo.com.br',
   role: 'admin',
   accesses: [{ site_id: null, role: 'admin' }],
   isToken: false,
@@ -63,8 +64,13 @@ const escopo: SiteScopeState = {
   sitesError: null,
 };
 
+const preencher = async (usuario: ReturnType<typeof userEvent.setup>, campo: HTMLElement, texto: string) => {
+  await usuario.click(campo);
+  await usuario.paste(texto);
+};
+
 describe('conta com nome e e-mail', () => {
-  it('cria a conta enviando nome e e-mail', { timeout: 15000 }, async () => {
+  it('cria a conta enviando nome e e-mail', async () => {
     render(
       <SessionContext.Provider value={sessao()}>
         <DialogContext.Provider value={dialogo}>
@@ -74,18 +80,19 @@ describe('conta com nome e e-mail', () => {
     );
 
     await screen.findByText('João Vitor Souza');
+    const usuario = semEspera();
 
-    await userEvent.type(screen.getByLabelText('Usuário'), 'maria.silva');
-    await userEvent.type(screen.getByLabelText('Nome'), 'Maria Silva');
-    await userEvent.type(screen.getByLabelText('E-mail'), 'maria@example.com');
-    await userEvent.type(screen.getByLabelText('Senha'), 'senha-de-teste-1234');
-    await userEvent.click(screen.getByRole('button', { name: /criar conta/i }));
+    await preencher(usuario, screen.getByLabelText('Usuário'), 'maria.silva');
+    await preencher(usuario, screen.getByLabelText('Nome'), 'Maria Silva');
+    await preencher(usuario, screen.getByLabelText('E-mail'), 'maria@exemplo.com.br');
+    await preencher(usuario, screen.getByLabelText('Senha'), 'senha-de-teste-1234');
+    await usuario.click(screen.getByRole('button', { name: /criar conta/i }));
 
     expect(api.createUser).toHaveBeenCalledWith(
       expect.objectContaining({
         username: 'maria.silva',
         nome: 'Maria Silva',
-        email: 'maria@example.com',
+        email: 'maria@exemplo.com.br',
       }),
     );
   });
@@ -120,7 +127,7 @@ describe('conta com nome e e-mail', () => {
         </SiteScopeContext.Provider>
       </SessionContext.Provider>,
     );
-    expect(screen.getByText('joaosouza@example.com')).toBeTruthy();
+    expect(screen.getByText('joaosouza@exemplo.com.br')).toBeTruthy();
   });
 
   it('o login avisa que aceita usuário ou e-mail', () => {

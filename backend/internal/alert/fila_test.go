@@ -85,6 +85,10 @@ func setupFila(t *testing.T) *telegramFalso {
 	return falso
 }
 
+func Notify(key, msg string) bool {
+	return Enqueue(Entrada{Key: key, Text: msg})
+}
+
 func alertasDaChave(t *testing.T, key string) []database.Alert {
 	t.Helper()
 

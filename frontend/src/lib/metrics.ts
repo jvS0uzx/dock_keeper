@@ -1,4 +1,4 @@
-import type { DashboardMetric, HistoryMetric, HistoryRange, HistoryWindow } from './api';
+import type { HistoryRange, HistoryWindow, MetricaDoCatalogo } from './api';
 import { formatLatency, formatRate } from './format';
 
 export const NO_TEMPERATURE = 'sem sensor';
@@ -26,51 +26,33 @@ export const formatHandshake = (ms: number | null): string =>
 export const isAbove = (value: number | null, threshold: number): boolean =>
   value !== null && value >= threshold;
 
-export interface HistoryMetricDefinition {
-  key: HistoryMetric;
-  label: string;
-  unit: string;
-}
+export const ESCOPO_CONTAINER = 'container';
 
-export const HISTORY_METRICS: HistoryMetricDefinition[] = [
-  { key: 'cpu', label: 'CPU', unit: '%' },
-  { key: 'mem', label: 'Memória', unit: '%' },
-  { key: 'disk', label: 'Disco', unit: '%' },
-  { key: 'load', label: 'Load', unit: '' },
-  { key: 'temperature', label: 'Temperatura', unit: '°C' },
-  { key: 'latency', label: HANDSHAKE_LABEL, unit: 'ms' },
-  { key: 'net_rx', label: 'Rede RX', unit: 'B/s' },
-  { key: 'net_tx', label: 'Rede TX', unit: 'B/s' },
-  { key: 'rtt', label: 'Latência (ms)', unit: 'ms' },
-];
+const UNIDADE_TAXA = 'bytes/s';
+const UNIDADE_TEMPO = 'ms';
 
-const RATE_METRICS = new Set<string>(['net_rx', 'net_tx']);
+export const ehTaxa = (unidade: string): boolean => unidade === UNIDADE_TAXA;
 
-export const isRateMetric = (metric: string): boolean => RATE_METRICS.has(metric);
-
-export const formatMetricValue = (metric: string, value: number): string => {
-  if (isRateMetric(metric)) return formatRate(value);
-  if (metric === 'rtt') return formatLatency(value);
-  const unit = HISTORY_METRICS.find((m) => m.key === metric)?.unit ?? '';
-  return `${value}${unit}`;
+export const formatarPorUnidade = (unidade: string, value: number): string => {
+  if (unidade === UNIDADE_TAXA) return formatRate(value);
+  if (unidade === UNIDADE_TEMPO) return formatLatency(value);
+  return `${value}${unidade}`;
 };
 
-export const RULE_METRIC_LABELS: Record<string, string> = {
-  cpu: 'CPU (%)',
-  mem: 'Memória (%)',
-  disk: 'Disco (%)',
-  load: 'Load',
-  temperature: 'Temperatura (°C)',
-  net_rx: 'Rede RX (bytes/s)',
-  net_tx: 'Rede TX (bytes/s)',
-  rtt: 'Latência (ms)',
-};
-
-export const formatRuleThreshold = (metric: string, threshold: number): string => {
-  if (isRateMetric(metric)) return formatRate(threshold);
-  if (metric === 'rtt') return `${threshold} ms`;
+export const formatarLimiar = (unidade: string, threshold: number): string => {
+  if (unidade === UNIDADE_TAXA) return formatRate(threshold);
+  if (unidade === UNIDADE_TEMPO) return `${threshold} ${UNIDADE_TEMPO}`;
   return String(threshold);
 };
+
+export const rotuloComUnidade = (metrica: MetricaDoCatalogo): string =>
+  metrica.unidade ? `${metrica.rotulo} (${metrica.unidade})` : metrica.rotulo;
+
+export const metricasDoHistorico = (catalogo: MetricaDoCatalogo[]): MetricaDoCatalogo[] =>
+  catalogo.filter((m) => m.escopo !== ESCOPO_CONTAINER);
+
+export const metricasDePainelERegra = (catalogo: MetricaDoCatalogo[]): MetricaDoCatalogo[] =>
+  metricasDoHistorico(catalogo).filter((m) => m.em_regra);
 
 export const HISTORY_RANGES: HistoryRange[] = ['1h', '6h', '24h', '7d', '30d', '90d'];
 
@@ -85,16 +67,17 @@ export const RANGE_MS: Record<HistoryRange, number> = {
   '90d': 90 * 24 * HOUR_MS,
 };
 
+const MAIOR_JANELA_SEM_TENDENCIA_MS = RANGE_MS['7d'];
+
+export const AVISO_SEM_TENDENCIA =
+  'Esta métrica não entra na tendência: o painel só guarda amostras brutas por 7 dias, então 30d e 90d não têm o que mostrar.';
+
+export const janelaIndisponivel = (metrica: MetricaDoCatalogo | undefined, range: HistoryRange): boolean =>
+  metrica !== undefined && !metrica.tem_tendencia && RANGE_MS[range] > MAIOR_JANELA_SEM_TENDENCIA_MS;
+
 export const windowBounds = (janela: HistoryWindow, now: number = Date.now()): { from: string; to: string } => {
   if (typeof janela === 'string') {
     return { from: new Date(now - RANGE_MS[janela]).toISOString(), to: new Date(now).toISOString() };
   }
   return { from: janela.from, to: janela.to ?? new Date(now).toISOString() };
 };
-
-export const DASHBOARD_METRICS = HISTORY_METRICS.filter(
-  (m): m is HistoryMetricDefinition & { key: DashboardMetric } => m.key !== 'latency',
-);
-
-export const metricLabel = (metric: string): string =>
-  HISTORY_METRICS.find((m) => m.key === metric)?.label ?? metric;

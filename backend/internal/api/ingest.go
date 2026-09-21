@@ -3,8 +3,8 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"github.com/jvS0uzx/dock_keeper/internal/config"
 	"log"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -63,8 +63,12 @@ func IngestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if recusasAnonimasNoTeto(w, r) {
+		return
+	}
 	cred, err := authenticateDevice(r)
 	if err != nil {
+		contarRecusaAnonima(r)
 		refuseDeviceAuth(w, r, err, "ingest.legacy_token_disabled")
 		return
 	}
@@ -72,7 +76,7 @@ func IngestHandler(w http.ResponseWriter, r *http.Request) {
 		refuseDeviceKind(w, r, cred, "ingest.kind_mismatch", kindAgent, "métrica")
 		return
 	}
-	if !limitarTaxa(w, chaveDeIngestao(r, cred), tetoDeIngestao()) {
+	if !limitarTaxa(w, r, chaveDeIngestao(r, cred), tetoDeIngestao()) {
 		return
 	}
 
@@ -86,10 +90,7 @@ func IngestHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "hostname required")
 		return
 	}
-	hostIP := r.RemoteAddr
-	if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		hostIP = h
-	}
+	hostIP := clientIP(r, config.Booleano("TRUST_PROXY_HEADERS", false))
 
 	declarada := siteOfAgent(p)
 	if !cred.siteMatches(declarada) {
@@ -133,7 +134,7 @@ func IngestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	database.RegistrarEnderecos(server.ID, append(p.Addresses, hostIP))
+	database.RegistrarEnderecosDoAgente(server.ID, p.Addresses, hostIP)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

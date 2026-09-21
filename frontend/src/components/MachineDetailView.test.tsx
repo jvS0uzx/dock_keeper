@@ -3,6 +3,27 @@ import { render, screen } from '@testing-library/react';
 
 import MachineDetailView from './MachineDetailView';
 import { NavigationContext } from './ui/navigation-context';
+import { CATALOGO } from '../test/catalogo';
+import { DialogContext } from './ui/dialog-context';
+import { SessionContext, type SessionState } from './ui/session-context';
+
+const leitor: SessionState = {
+  username: 'l',
+  role: 'viewer',
+  accesses: [{ site_id: null, role: 'viewer' }],
+  isToken: false,
+  logout: vi.fn(),
+};
+
+const Contexto = ({ children }: { children: React.ReactNode }) => (
+  <SessionContext.Provider value={leitor}>
+    <DialogContext.Provider value={{ confirm: vi.fn(), prompt: vi.fn(), notify: vi.fn() }}>
+      <NavigationContext.Provider value={{ openSite: vi.fn(), openMachine: vi.fn(), goBack: vi.fn() }}>
+        {children}
+      </NavigationContext.Provider>
+    </DialogContext.Provider>
+  </SessionContext.Provider>
+);
 
 const maquina = {
   id: 'srv-1',
@@ -37,6 +58,7 @@ const api = vi.hoisted(() => ({
   searchLogs: vi.fn(),
   networkHosts: vi.fn(),
   history: vi.fn(),
+  metricsCatalog: vi.fn(),
 }));
 
 vi.mock('../lib/api', async (importOriginal) => ({
@@ -52,6 +74,7 @@ beforeEach(() => {
   api.searchLogs.mockReset().mockResolvedValue([]);
   api.networkHosts.mockReset().mockResolvedValue({ hosts: [] });
   api.history.mockReset().mockResolvedValue([]);
+  api.metricsCatalog.mockReset().mockResolvedValue(CATALOGO);
 });
 
 afterEach(() => {
@@ -60,9 +83,9 @@ afterEach(() => {
 
 const renderizar = () =>
   render(
-    <NavigationContext.Provider value={{ openSite: vi.fn(), openMachine: vi.fn(), goBack: vi.fn() }}>
+    <Contexto>
       <MachineDetailView serverId="srv-1" />
-    </NavigationContext.Provider>,
+    </Contexto>,
   );
 
 const statDe = async (rotulo: string) => {
@@ -75,9 +98,9 @@ const statDe = async (rotulo: string) => {
 describe('MachineDetailView — taxa de rede', () => {
   it('mostra a taxa atual e travessão quando não há medição', async () => {
     render(
-      <NavigationContext.Provider value={{ openSite: vi.fn(), openMachine: vi.fn(), goBack: vi.fn() }}>
+      <Contexto>
         <MachineDetailView serverId="srv-1" />
-      </NavigationContext.Provider>,
+      </Contexto>,
     );
 
     expect(await statDe('Rede RX')).toContain('1.5 KB/s');

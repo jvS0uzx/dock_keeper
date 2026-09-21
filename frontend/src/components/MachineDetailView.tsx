@@ -10,7 +10,6 @@ import {
 import {
   api,
   apiErrorMessage,
-  type HistoryMetric,
   type HistoryRange,
   type LogEntryRecord,
   type NetworkHostView,
@@ -20,27 +19,28 @@ import {
 import { formatGB, formatDateTime, formatLatency, formatLoad, formatPercent, formatRate } from '../lib/format';
 import {
   HANDSHAKE_LABEL,
-  HISTORY_METRICS,
   NO_HANDSHAKE_HINT,
   NO_NETWORK_HINT,
   NO_RTT_HINT,
   NO_TEMPERATURE_HINT,
   formatHandshake,
-  formatMetricValue,
+  ehTaxa,
+  formatarPorUnidade,
+  metricasDoHistorico,
   formatTemperature,
-  isRateMetric,
 } from '../lib/metrics';
 import Select from './ui/Select';
 import { useNavigation } from './ui/navigation-context';
 import LoadNotice from './ui/LoadNotice';
+import MachineAdminPanel from './MachineAdminPanel';
+import { useCatalogo } from './ui/useCatalogo';
 import { useLoadStatus } from './ui/load-status';
+import { POLL } from '../lib/polling';
 
 interface MachineDetailViewProps {
   serverId: string;
 }
 
-const LIVE_POLL_MS = 10000;
-const HISTORY_POLL_MS = 30000;
 const LOG_LIMIT = 50;
 
 const USAGE_WARN = 75;
@@ -48,15 +48,11 @@ const USAGE_CRITICAL = 90;
 const TEMP_WARN = 70;
 const TEMP_CRITICAL = 85;
 
-const METRICS = HISTORY_METRICS;
-
 const RANGES: HistoryRange[] = ['1h', '6h', '24h', '7d'];
 
-const METRIC_THRESHOLD: Partial<Record<HistoryMetric, number>> = {
-  cpu: USAGE_WARN,
-  mem: USAGE_WARN,
-  disk: USAGE_WARN,
-  temperature: TEMP_WARN,
+const LIMIAR_POR_UNIDADE: Record<string, number> = {
+  '%': USAGE_WARN,
+  '°C': TEMP_WARN,
 };
 
 const DEVICE_LABELS: Record<string, string> = {
@@ -149,13 +145,16 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
   const [inventoryError, setInventoryError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
-  const [metric, setMetric] = useState<HistoryMetric>('cpu');
+  const catalogo = useCatalogo();
+  const opcoesDeMetrica = useMemo(() => metricasDoHistorico(catalogo.metricas), [catalogo.metricas]);
+  const [escolhida, setMetric] = useState('');
+  const metric = escolhida || (opcoesDeMetrica[0]?.nome ?? '');
   const [range, setRange] = useState<HistoryRange>('1h');
   const [history, setHistory] = useState<{ time: string; value: number }[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  const activeMetric = METRICS.find((m) => m.key === metric) ?? METRICS[0];
-  const threshold = METRIC_THRESHOLD[metric];
+  const unidade = catalogo.unidade(metric);
+  const threshold = LIMIAR_POR_UNIDADE[unidade];
 
   const fetchLive = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -172,7 +171,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
   useEffect(() => {
     const controller = new AbortController();
     fetchLive(controller.signal);
-    const interval = setInterval(() => fetchLive(controller.signal), LIVE_POLL_MS);
+    const interval = setInterval(() => fetchLive(controller.signal), POLL.maquina);
     return () => {
       clearInterval(interval);
       controller.abort();
@@ -215,6 +214,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
   }, [machine?.host_ip]);
 
   const fetchHistory = useCallback(async (signal?: AbortSignal) => {
+    if (!metric) return;
     setLoadingHistory(true);
     try {
       const points = await api.history(serverId, metric, range, signal);
@@ -236,7 +236,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
   useEffect(() => {
     const controller = new AbortController();
     fetchHistory(controller.signal);
-    const interval = setInterval(() => fetchHistory(controller.signal), HISTORY_POLL_MS);
+    const interval = setInterval(() => fetchHistory(controller.signal), POLL.historicoDaMaquina);
     return () => {
       clearInterval(interval);
       controller.abort();
@@ -288,7 +288,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
     emptyChartMessage = NO_TEMPERATURE_HINT;
   } else if (metric === 'rtt' && machine.kind !== 'ssh') {
     emptyChartMessage = NO_RTT_HINT;
-  } else if (isRateMetric(metric) && machine.net_rx_bps === null && machine.net_tx_bps === null) {
+  } else if (ehTaxa(unidade) && machine.net_rx_bps === null && machine.net_tx_bps === null) {
     emptyChartMessage = NO_NETWORK_HINT;
   }
 
@@ -404,6 +404,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
       </div>
 
       <div className="panel p-4 md:p-6">
+        <LoadNotice error={catalogo.erro} className="mb-4" />
         <div className="flex flex-wrap items-end gap-4 mb-6">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="machine-metric" className="eyebrow">
@@ -412,9 +413,9 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
             <Select
               id="machine-metric"
               value={metric}
-              onChange={(v) => setMetric(v as HistoryMetric)}
+              onChange={setMetric}
               className="min-w-[160px]"
-              options={METRICS.map((m) => ({ value: m.key, label: m.label }))}
+              options={opcoesDeMetrica.map((m) => ({ value: m.nome, label: m.rotulo }))}
             />
           </div>
 
@@ -474,8 +475,8 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
                   tick={{ fill: 'var(--color-text-faint)', fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
-                  width={isRateMetric(metric) ? 72 : 48}
-                  tickFormatter={(v: number) => formatMetricValue(metric, v)}
+                  width={ehTaxa(unidade) ? 72 : 48}
+                  tickFormatter={(v: number) => formatarPorUnidade(unidade, v)}
                 />
                 <Tooltip
                   contentStyle={{
@@ -487,7 +488,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
                   }}
                   labelStyle={{ color: 'var(--color-text-mut)' }}
                   itemStyle={{ color: 'var(--color-text-hi)' }}
-                  formatter={(value) => [formatMetricValue(metric, Number(value)), activeMetric.label]}
+                  formatter={(value) => [formatarPorUnidade(unidade, Number(value)), catalogo.rotulo(metric)]}
                 />
                 {threshold !== undefined && (
                   <ReferenceLine
@@ -576,6 +577,8 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
           </div>
         </Panel>
       </div>
+
+      <MachineAdminPanel machine={machine} />
 
       <Panel title={`Últimas linhas de log (${logs.length})`} Icon={ScrollText}>
         {logsError ? (

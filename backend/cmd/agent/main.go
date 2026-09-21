@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -34,14 +35,14 @@ const (
 )
 
 type metricsPayload struct {
-	Hostname  string  `json:"hostname"`
-	CPU       float64 `json:"cpu"`
-	MemUsed   int64   `json:"mem_used"`
-	MemTotal  int64   `json:"mem_total"`
-	Load1     float64 `json:"load1"`
-	DiskUsed  int64   `json:"disk_used"`
-	DiskTotal int64   `json:"disk_total"`
-	Uptime    float64 `json:"uptime"`
+	Hostname  string   `json:"hostname"`
+	CPU       *float64 `json:"cpu,omitempty"`
+	MemUsed   int64    `json:"mem_used"`
+	MemTotal  int64    `json:"mem_total"`
+	Load1     *float64 `json:"load1,omitempty"`
+	DiskUsed  int64    `json:"disk_used"`
+	DiskTotal int64    `json:"disk_total"`
+	Uptime    float64  `json:"uptime"`
 
 	TemperatureC *float64 `json:"temperature_c,omitempty"`
 
@@ -193,8 +194,8 @@ func (a *agente) run(ctx context.Context) {
 		err := push(ctx, a.client, a.endpoint, a.cred, a.legado, payload)
 		switch {
 		case err == nil:
-			log.Printf("[Agent] enviado (cpu=%.1f%% mem=%d/%d temp=%s rede=%s/%s usuário=%q)",
-				payload.CPU, payload.MemUsed, payload.MemTotal, formatTemp(payload.TemperatureC),
+			log.Printf("[Agent] enviado (cpu=%s mem=%d/%d temp=%s rede=%s/%s usuário=%q)",
+				formatPct(payload.CPU), payload.MemUsed, payload.MemTotal, formatTemp(payload.TemperatureC),
 				formatTaxa(payload.NetRxBps), formatTaxa(payload.NetTxBps), payload.LoggedUser)
 		case ctx.Err() != nil:
 			log.Println("[Agent] encerrado com envio em andamento cancelado")
@@ -229,6 +230,38 @@ func formatTemp(t *float64) string {
 	return strconv.FormatFloat(*t, 'f', 1, 64) + "°C"
 }
 
+func medirCPU(ler func() ([]float64, error)) *float64 {
+	pcts, err := ler()
+	if err != nil {
+		log.Printf("[Agent] cpu indisponível: %v", err)
+		return nil
+	}
+	if len(pcts) == 0 {
+		return nil
+	}
+	v := pcts[0]
+	return &v
+}
+
+func medirLoad(so string, ler func() (*load.AvgStat, error)) *float64 {
+	if so == "windows" {
+		return nil
+	}
+	avg, err := ler()
+	if err != nil || avg == nil {
+		return nil
+	}
+	v := avg.Load1
+	return &v
+}
+
+func formatPct(v *float64) string {
+	if v == nil {
+		return "sem medida"
+	}
+	return strconv.FormatFloat(*v, 'f', 1, 64) + "%"
+}
+
 func collect(hostname, siteCode string, intervalSec int) metricsPayload {
 	p := metricsPayload{
 		Hostname:          hostname,
@@ -237,11 +270,7 @@ func collect(hostname, siteCode string, intervalSec int) metricsPayload {
 		ReportIntervalSec: intervalSec,
 	}
 
-	if pcts, err := cpu.Percent(cpuSampleWindow, false); err == nil && len(pcts) > 0 {
-		p.CPU = pcts[0]
-	} else if err != nil {
-		log.Printf("[Agent] cpu indisponível: %v", err)
-	}
+	p.CPU = medirCPU(func() ([]float64, error) { return cpu.Percent(cpuSampleWindow, false) })
 
 	if vm, err := mem.VirtualMemory(); err == nil {
 		p.MemUsed = int64(vm.Used)
@@ -250,9 +279,7 @@ func collect(hostname, siteCode string, intervalSec int) metricsPayload {
 		log.Printf("[Agent] mem indisponível: %v", err)
 	}
 
-	if avg, err := load.Avg(); err == nil {
-		p.Load1 = avg.Load1
-	}
+	p.Load1 = medirLoad(runtime.GOOS, load.Avg)
 
 	if du, err := disk.Usage(rootPath()); err == nil {
 		p.DiskUsed = int64(du.Used)

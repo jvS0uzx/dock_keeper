@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log"
 	"strings"
@@ -21,6 +22,9 @@ const (
 	defaultBackoffBase  = time.Minute
 	defaultBackoffMax   = time.Hour
 	defaultDespachoLote = 10
+
+	sufixoRecuperacao = ":recuperacao"
+	vistoACada        = time.Minute
 )
 
 var (
@@ -39,6 +43,14 @@ type Entrada struct {
 	ServerID *string
 	SiteID   *uint
 	RuleID   *uint
+
+	AlvoTipo string
+	AlvoID   string
+	AlvoNome string
+	Metrica  string
+	Valor    *float64
+	Limiar   *float64
+	Unidade  string
 }
 
 func maxAttempts() int {
@@ -54,24 +66,34 @@ func severityFromText(texto string) string {
 	case strings.HasPrefix(texto, "[CRITICO]"):
 		return "critical"
 	case strings.HasPrefix(texto, "[ALERTA]"):
+		return "high"
+	case strings.HasPrefix(texto, "[AVISO]"):
 		return "warning"
 	default:
 		return "info"
 	}
 }
 
-func Notify(key, msg string) bool {
-	return Enqueue(Entrada{Key: key, Text: msg, Severity: severityFromText(msg)})
-}
-
 func Enqueue(e Entrada) bool {
 	e.Key = strings.TrimSpace(e.Key)
 	e.Text = strings.TrimSpace(e.Text)
-	if e.Key == "" || e.Text == "" {
+	if e.Key == "" {
 		return false
 	}
 	if e.Severity == "" {
 		e.Severity = severityFromText(e.Text)
+	}
+	if e.Text == "" {
+		e.Text = textoDoAlvo(alertaDaEntrada(e))
+	}
+	if e.Text == "" {
+		return false
+	}
+	if abaixoDoMinimo(e.Severity) {
+		if claimSlot("abaixo-do-minimo:" + e.Key) {
+			log.Printf("[Alert] (abaixo do mínimo notificável) %s", e.Text)
+		}
+		return false
 	}
 
 	if database.DB == nil {
@@ -83,20 +105,25 @@ func Enqueue(e Entrada) bool {
 	}
 
 	now := agora().UTC()
-	if suppressed(e.Key, now) {
-		return false
+	incidente, existe, err := incidenteVivo(e.Key, now)
+	if err != nil {
+		return descartar(e, err)
+	}
+	if existe {
+		return renotificar(incidente, e, now)
 	}
 
-	alerta := database.Alert{
-		Key: e.Key, Severity: e.Severity, Text: e.Text,
-		Status: database.AlertStatusOpen, ServerID: e.ServerID, SiteID: e.SiteID, RuleID: e.RuleID,
-		CreatedAt: now, Delivery: database.AlertDeliveryPendente, NextAttemptAt: &now,
+	proxima := now
+	if ultimo := ultimoAviso(e.Key); ultimo != nil && now.Sub(ultimo.UTC()) < cooldown {
+		proxima = ultimo.UTC().Add(cooldown)
 	}
+	alerta := alertaDaEntrada(e)
+	alerta.Status = database.AlertStatusOpen
+	alerta.ServerID, alerta.SiteID, alerta.RuleID = e.ServerID, e.SiteID, e.RuleID
+	alerta.CreatedAt, alerta.LastSeenAt = now, &now
+	alerta.Delivery, alerta.NextAttemptAt = database.AlertDeliveryPendente, &proxima
 	if err := database.DB.Create(&alerta).Error; err != nil {
-		observabilidade.AlertasDescartados.Add(1)
-		log.Printf("[Alert] erro ao enfileirar %q, alerta descartado para não segurar quem detectou: %v | %s",
-			e.Key, err, e.Text)
-		return false
+		return descartar(e, err)
 	}
 
 	observabilidade.AlertasEnfileirados.Add(1)
@@ -104,22 +131,76 @@ func Enqueue(e Entrada) bool {
 	return true
 }
 
-func suppressed(key string, now time.Time) bool {
-	var pendentes int64
-	if err := database.DB.Model(&database.Alert{}).
-		Where("key = ? AND delivery IN ?", key,
-			[]string{database.AlertDeliveryPendente, database.AlertDeliverySemCanal}).
-		Count(&pendentes).Error; err == nil && pendentes > 0 {
-		return true
+func descartar(e Entrada, err error) bool {
+	observabilidade.AlertasDescartados.Add(1)
+	log.Printf("[Alert] erro ao enfileirar %q, alerta descartado para não segurar quem detectou: %v | %s",
+		e.Key, err, e.Text)
+	return false
+}
+
+func incidenteVivo(key string, now time.Time) (database.Alert, bool, error) {
+	var incidente database.Alert
+	err := database.DB.
+		Where("key = ? AND status <> ? AND COALESCE(last_seen_at, created_at) >= ?",
+			key, database.AlertStatusResolved, now.Add(-janelaDeRetomada())).
+		Order("id desc").Take(&incidente).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return incidente, false, nil
+	}
+	return incidente, err == nil, err
+}
+
+func ultimoAviso(key string) *time.Time {
+	var ultimo sql.NullTime
+	err := database.DB.Model(&database.Alert{}).Where("key = ?", key).
+		Select("MAX(last_notified_at)").Scan(&ultimo).Error
+	if err != nil || !ultimo.Valid {
+		return nil
+	}
+	return &ultimo.Time
+}
+
+func renotificar(incidente database.Alert, e Entrada, now time.Time) bool {
+	mudanca := map[string]any{}
+	if incidente.LastSeenAt == nil || now.Sub(incidente.LastSeenAt.UTC()) >= vistoACada {
+		mudanca["last_seen_at"] = now
 	}
 
-	var ultimo database.Alert
-	err := database.DB.Where("key = ? AND delivery = ?", key, database.AlertDeliveryEnviado).
-		Order("last_attempt_at desc").Take(&ultimo).Error
-	if err != nil || ultimo.LastAttemptAt == nil {
+	avisar := incidente.Status == database.AlertStatusOpen &&
+		incidente.Delivery == database.AlertDeliveryEnviado &&
+		(incidente.LastNotifiedAt == nil || now.Sub(incidente.LastNotifiedAt.UTC()) >= cooldown)
+	if avisar {
+		mudanca["last_seen_at"] = now
+		mudanca["text"] = e.Text
+		mudanca["severity"] = e.Severity
+		mudanca["alvo_tipo"] = ponteiroDeTexto(e.AlvoTipo)
+		mudanca["alvo_id"] = ponteiroDeTexto(e.AlvoID)
+		mudanca["alvo_nome"] = ponteiroDeTexto(e.AlvoNome)
+		mudanca["metrica"] = ponteiroDeTexto(e.Metrica)
+		mudanca["valor"] = e.Valor
+		mudanca["limiar"] = e.Limiar
+		mudanca["unidade"] = ponteiroDeTexto(e.Unidade)
+		mudanca["delivery"] = database.AlertDeliveryPendente
+		mudanca["attempts"] = 0
+		mudanca["next_attempt_at"] = now
+		mudanca["last_error"] = ""
+		mudanca["renotify_count"] = gorm.Expr("renotify_count + 1")
+	}
+	if len(mudanca) == 0 {
 		return false
 	}
-	return now.Sub(ultimo.LastAttemptAt.UTC()) < cooldown
+
+	err := database.DB.Model(&database.Alert{}).Where("id = ?", incidente.ID).Updates(mudanca).Error
+	if err != nil {
+		log.Printf("[Alert] erro ao atualizar o incidente #%d de %q: %v", incidente.ID, e.Key, err)
+		return false
+	}
+	if avisar {
+		reabrirLinhas(incidente.ID, now)
+		observabilidade.AlertasEnfileirados.Add(1)
+		log.Printf("[Alert] renotificado (#%d): %s", incidente.ID, e.Text)
+	}
+	return avisar
 }
 
 func Recovered(e Entrada) bool {
@@ -127,20 +208,72 @@ func Recovered(e Entrada) bool {
 		return false
 	}
 
+	var abertos []database.Alert
+	err := database.DB.Where("key = ? AND status <> ?", e.Key, database.AlertStatusResolved).
+		Order("id asc").Find(&abertos).Error
+	if err != nil {
+		log.Printf("[Alert] erro ao procurar o alerta aberto de %q: %v", e.Key, err)
+		return false
+	}
+	if len(abertos) == 0 {
+		return false
+	}
+
 	now := agora().UTC()
-	err := database.DB.Model(&database.Alert{}).
+	err = database.DB.Model(&database.Alert{}).
 		Where("key = ? AND status <> ?", e.Key, database.AlertStatusResolved).
 		Updates(map[string]any{"status": database.AlertStatusResolved, "resolved_at": now}).Error
 	if err != nil {
 		log.Printf("[Alert] erro ao resolver %q: %v", e.Key, err)
-	}
-	if !RecoveryEnabled() {
 		return false
 	}
 
-	e.Key += ":recuperacao"
-	e.Severity = "info"
-	return Enqueue(e)
+	anunciado := false
+	for _, a := range abertos {
+		anunciado = anunciado || a.LastNotifiedAt != nil
+		if e.ServerID == nil {
+			e.ServerID = a.ServerID
+		}
+		if e.SiteID == nil {
+			e.SiteID = a.SiteID
+		}
+		if e.RuleID == nil {
+			e.RuleID = a.RuleID
+		}
+	}
+	if !anunciado || !RecoveryEnabled() || strings.TrimSpace(e.Text) == "" {
+		return false
+	}
+
+	ok := alertaDaEntrada(e)
+	ok.Key, ok.Severity, ok.Text = e.Key+sufixoRecuperacao, "info", strings.TrimSpace(e.Text)
+	ok.Status, ok.ResolvedAt = database.AlertStatusResolved, &now
+	ok.ServerID, ok.SiteID, ok.RuleID = e.ServerID, e.SiteID, e.RuleID
+	ok.CreatedAt, ok.LastSeenAt = now, &now
+	ok.Delivery, ok.NextAttemptAt = database.AlertDeliveryPendente, &now
+	if err := database.DB.Create(&ok).Error; err != nil {
+		log.Printf("[Alert] erro ao enfileirar a recuperação de %q: %v", e.Key, err)
+		return false
+	}
+	observabilidade.AlertasEnfileirados.Add(1)
+	log.Printf("[Alert] enfileirado (#%d): %s", ok.ID, ok.Text)
+	return true
+}
+
+func ChavesAbertas(prefixo string) []string {
+	if database.DB == nil {
+		return nil
+	}
+
+	var chaves []string
+	err := database.DB.Model(&database.Alert{}).
+		Where("status <> ? AND starts_with(key, ?)", database.AlertStatusResolved, prefixo).
+		Distinct().Pluck("key", &chaves).Error
+	if err != nil {
+		log.Printf("[Alert] erro ao listar os alertas abertos de %q: %v", prefixo, err)
+		return nil
+	}
+	return chaves
 }
 
 func StartDispatcher(ctx context.Context) <-chan struct{} {
@@ -163,19 +296,13 @@ func dispatchPending(now time.Time) int {
 		return 0
 	}
 
-	retomarSemCanal(now)
+	dispensarResolvidos()
+	retomarPresos(now)
 
+	ativos := canaisAtivos()
 	claimed := claimBatch(now)
 	for _, alerta := range claimed {
-		err := Deliver(alerta.Text)
-		switch {
-		case errors.Is(err, ErrSemCanal):
-			registerSemCanal(alerta, agora().UTC())
-		case err != nil:
-			registerFailure(alerta, err, agora().UTC())
-		default:
-			registerSuccess(alerta, agora().UTC())
-		}
+		entregarAlerta(alerta, ativos, agora().UTC())
 	}
 	return len(claimed)
 }
@@ -184,27 +311,53 @@ func janelaDeRetomada() time.Duration {
 	return time.Duration(config.Inteiro("ALERT_RESUME_HOURS", retomadaPadraoHoras)) * time.Hour
 }
 
-func retomarSemCanal(now time.Time) {
-	if Status().Estado == EstadoDesligado {
+func dispensarResolvidos() {
+	now := agora().UTC()
+	for _, caso := range []struct{ filtro, destino string }{
+		{"last_notified_at IS NULL", database.AlertDeliveryDispensado},
+		{"last_notified_at IS NOT NULL", database.AlertDeliveryEnviado},
+	} {
+		filtrar := func() *gorm.DB {
+			return database.DB.Model(&database.Alert{}).
+				Where("status = ? AND delivery = ? AND key NOT LIKE ?",
+					database.AlertStatusResolved, database.AlertDeliveryPendente, "%"+sufixoRecuperacao).
+				Where(caso.filtro)
+		}
+
+		ids := idsDeAlertas(filtrar())
+		err := filtrar().Updates(map[string]any{"delivery": caso.destino, "next_attempt_at": nil}).Error
+		if err != nil {
+			log.Printf("[Alert] erro ao dispensar a entrega de alertas já resolvidos: %v", err)
+			continue
+		}
+		dispensarLinhas(ids, caso.destino, now)
+	}
+}
+
+func retomarPresos(now time.Time) {
+	saude := Status()
+	if saude.Estado == EstadoDesligado {
 		return
 	}
 
 	corte := now.Add(-janelaDeRetomada())
-	res := database.DB.Model(&database.Alert{}).
-		Where("delivery = ? AND status = ? AND created_at >= ?",
-			database.AlertDeliverySemCanal, database.AlertStatusOpen, corte).
-		Updates(map[string]any{
-			"delivery":        database.AlertDeliveryPendente,
-			"next_attempt_at": nil,
-			"last_error":      "",
-		})
-	if res.Error != nil {
-		log.Printf("[Alert] erro ao retomar alertas sem canal: %v", res.Error)
+
+	presos := idsDeAlertas(database.DB.Model(&database.Alert{}).
+		Where("delivery = ? AND status = ? AND COALESCE(last_seen_at, created_at) >= ?",
+			database.AlertDeliverySemCanal, database.AlertStatusOpen, corte))
+	if n := retomarAlertas(presos, now); n > 0 {
+		observabilidade.AlertasSemCanal.Add(-n)
+		log.Printf("[Alert] canal de volta: %d alerta(s) preso(s) voltaram para a fila", n)
+	}
+
+	if saude.Estado != EstadoOK || saude.VerificadoEm == nil {
 		return
 	}
-	if res.RowsAffected > 0 {
-		observabilidade.AlertasSemCanal.Add(-res.RowsAffected)
-		log.Printf("[Alert] canal de volta: %d alerta(s) preso(s) voltaram para a fila", res.RowsAffected)
+	falhos := idsDeAlertas(database.DB.Model(&database.Alert{}).
+		Where("delivery = ? AND status = ? AND COALESCE(last_seen_at, created_at) >= ? AND last_attempt_at < ?",
+			database.AlertDeliveryFalhou, database.AlertStatusOpen, corte, saude.VerificadoEm.UTC()))
+	if n := retomarAlertas(falhos, now); n > 0 {
+		log.Printf("[Alert] canal respondendo de novo: %d alerta(s) que falharam voltaram para a fila", n)
 	}
 }
 
@@ -230,6 +383,7 @@ func claimBatch(now time.Time) []database.Alert {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Where("delivery = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
 				database.AlertDeliveryPendente, now).
+			Where("status <> ? OR key LIKE ?", database.AlertStatusResolved, "%"+sufixoRecuperacao).
 			Order("created_at asc, id asc").
 			Limit(defaultDespachoLote).
 			Find(&lote).Error; err != nil {
@@ -254,49 +408,6 @@ func claimBatch(now time.Time) []database.Alert {
 		return nil
 	}
 	return lote
-}
-
-func registerSuccess(alerta database.Alert, now time.Time) {
-	err := database.DB.Model(&database.Alert{}).Where("id = ?", alerta.ID).
-		Updates(map[string]any{
-			"delivery":        database.AlertDeliveryEnviado,
-			"attempts":        alerta.Attempts + 1,
-			"last_attempt_at": now,
-			"next_attempt_at": nil,
-			"last_error":      "",
-		}).Error
-	if err != nil {
-		log.Printf("[Alert] erro ao marcar o alerta %d como enviado: %v", alerta.ID, err)
-		return
-	}
-	observabilidade.AlertasEntregues.Add(1)
-}
-
-func registerFailure(alerta database.Alert, falha error, now time.Time) {
-	tentativas := alerta.Attempts + 1
-	mudanca := map[string]any{
-		"attempts":        tentativas,
-		"last_attempt_at": now,
-		"last_error":      falha.Error(),
-	}
-
-	if tentativas >= maxAttempts() {
-		mudanca["delivery"] = database.AlertDeliveryFalhou
-		mudanca["next_attempt_at"] = nil
-		observabilidade.AlertasFalhos.Add(1)
-		log.Printf("[Alert] alerta %d desistiu depois de %d tentativas e segue aberto no painel: %v",
-			alerta.ID, tentativas, falha)
-	} else {
-		proxima := now.Add(retryDelay(tentativas))
-		mudanca["next_attempt_at"] = proxima
-		log.Printf("[Alert] alerta %d falhou na tentativa %d, nova tentativa em %s: %v",
-			alerta.ID, tentativas, retryDelay(tentativas), falha)
-	}
-
-	if err := database.DB.Model(&database.Alert{}).Where("id = ?", alerta.ID).
-		Updates(mudanca).Error; err != nil {
-		log.Printf("[Alert] erro ao registrar a falha do alerta %d: %v", alerta.ID, err)
-	}
 }
 
 func retryDelay(tentativas int) time.Duration {

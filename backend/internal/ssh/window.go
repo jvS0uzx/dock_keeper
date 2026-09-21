@@ -52,6 +52,21 @@ func (w *slidingWindow) add(key string, now time.Time, hit bool) (total, hits in
 	return total, hits
 }
 
+func (w *slidingWindow) hits(key string, now time.Time) int {
+	buckets := expire(w.keys[key], now.Add(-w.span), w.step)
+	if len(buckets) == 0 {
+		delete(w.keys, key)
+		return 0
+	}
+	w.keys[key] = buckets
+
+	n := 0
+	for _, b := range buckets {
+		n += b.hits
+	}
+	return n
+}
+
 func (w *slidingWindow) sweep(cutoff time.Time) {
 	for k, buckets := range w.keys {
 		if rest := expire(buckets, cutoff, w.step); len(rest) == 0 {

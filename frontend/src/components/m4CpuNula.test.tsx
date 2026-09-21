@@ -128,6 +128,27 @@ describe('CPU e load sem medição', () => {
     expect(await screen.findByText(/média de 2 de 3 hosts/i)).toBeTruthy();
   });
 
+  it('Dashboard sem nenhum host online mostra travessão nos três medidores, não 0.0%', async () => {
+    api.liveMetrics.mockResolvedValue({
+      servers: servidores.map((s) => ({ ...s, online: false })),
+      containers: [],
+      load_balancing: [],
+    });
+
+    renderizar(<Dashboard />);
+
+    await screen.findByText('CPU do host');
+    for (const titulo of ['CPU do host', 'Memória', 'Disco']) {
+      const medidor = screen
+        .getAllByText(titulo)
+        .map((el) => el.closest('.stat-card'))
+        .find((cartao): cartao is HTMLElement => cartao instanceof HTMLElement);
+      if (!medidor) throw new Error(`medidor ${titulo} não encontrado`);
+      expect(within(medidor).getByText('—')).toBeTruthy();
+      expect(within(medidor).queryByText('0.0%')).toBeNull();
+    }
+  });
+
   it('StationsView não conta o host sem medida como pressionado', async () => {
     api.liveMetrics.mockResolvedValue({
       servers: [{ ...base, id: 'd', name: 'estacao-sem-medida', kind: 'agent', cpu: null, load1: null }],

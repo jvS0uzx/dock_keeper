@@ -142,16 +142,44 @@ segura os eventos e a tela fica parada, sem erro nenhum aparecer. Ver
 
 ## Banco
 
-PostgreSQL, com GORM. O schema é criado e atualizado por `AutoMigrate` no boot;
-não há passo de migração manual nem diretório de migrações.
-
-Duas coisas que o `AutoMigrate` não expressa e vivem como funções de migração
-explícitas em `internal/database/connection.go`:
-
-- `migrateNetworkHostSiteIP` — o índice único do inventário é sobre a *expressão*
-  `(COALESCE(site_id,0), ip)`, que tag de GORM não escreve;
-- `migrateServerMachineID` — índice único **parcial**, com `WHERE machine_id <> ''`.
+PostgreSQL, com GORM para consulta. O esquema sobe **só** pelas migrações versionadas em
+`internal/database/migracoes/` (ADR 012); o `AutoMigrate` e `DB_AUTOMIGRATE` foram removidos,
+porque criavam um banco sem chaves estrangeiras, CHECKs e índices. Os índices que tag de GORM
+não expressa (o de expressão do inventário e o parcial de `machine_id`) vivem no baseline.
 
 O pool é configurado explicitamente (`DB_MAX_OPEN_CONNS` e companhia). Sem teto,
 as goroutines de coleta somadas aos handlers HTTP esgotam o `max_connections` do
 Postgres com `FATAL: sorry, too many clients`.
+
+## Registro único de métrica
+
+Tudo o que o backend sabe sobre uma métrica mora em `internal/metricas`: nome, rótulo, unidade,
+escopo (servidor, container ou ambos), a expressão SQL na série bruta, as colunas de média e
+máxima na tendência (ou a ausência delas) e o acessor que o motor de regras usa. O histórico, a
+validação de regra e de painel, o motor e o `GET /api/metrics/catalogo` consultam esse registro;
+não existe outra lista de métricas no backend, e o frontend lê o catálogo.
+
+Acrescentar uma métrica toca **cinco** arquivos:
+
+1. `internal/metricas/metricas.go`, a entrada no registro;
+2. `internal/database/schema.go`, os campos em `MetricServer` e, se houver tendência, em `MetricServerTrend`;
+3. uma migração nova em `internal/database/migracoes/`, com as colunas e, se o motor avalia a
+   métrica, o `ck_alert_rules_metric` recriado (o CHECK é SQL e não lê Go; o teste
+   `TestCheckDoBancoBateComORegistro` falha enquanto os dois divergirem);
+4. `internal/database/trends.go`, a agregação da tendência, quando houver;
+5. o ponto de coleta: `internal/ssh/client.go` para SSH ou `internal/api/ingest.go` para o agente.
+   Métrica coletada pelos dois caminhos toca os dois, e aí são seis.
+
+## Dívida registrada: estado global do pacote `alert`
+
+`internal/alert` guarda em variáveis de pacote o canal (`token`, `chatID`, `enabled`, `apiBase`), o
+`cooldown`, o relógio `agora`, o mapa `lastSent` e a saúde do canal. Os testes do pacote trocam
+esses valores direto e restauram no `Cleanup`; são cerca de cinquenta pontos em sete arquivos, e é
+por isso que o pacote só roda com `-p 1` e não aceita `t.Parallel()`.
+
+O conserto é um tipo `Canal` com esses campos, criado no `main` e injetado em quem alerta. Não
+foi feito na Missão 5: reescreveria todo o conjunto de testes do pacote mais crítico do painel sem
+mudar comportamento, e o risco não se pagava no mesmo ciclo em que o ciclo de vida do alerta
+mudou. Já está isolado o que custava pouco: os gatilhos de `ssh` e `network` recebem `notifyAlert`
+e `resolveAlert` injetáveis, e nenhum teste fora do pacote `alert` toca o estado dele. Quem pegar:
+comece por `telegram.go` e `saude.go`, que concentram as variáveis, e troque `setupFila` primeiro.

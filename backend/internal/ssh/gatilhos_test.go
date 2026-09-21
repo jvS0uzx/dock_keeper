@@ -8,11 +8,14 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jvS0uzx/dock_keeper/internal/alert"
 )
 
 type avisoCapturado struct {
-	chave string
-	texto string
+	chave  string
+	texto  string
+	origem alert.Entrada
 }
 
 func capturarAvisos(t *testing.T) func() []avisoCapturado {
@@ -21,10 +24,10 @@ func capturarAvisos(t *testing.T) func() []avisoCapturado {
 	var mu sync.Mutex
 	var avisos []avisoCapturado
 	original := notifyAlert
-	notifyAlert = func(chave, texto string) bool {
+	notifyAlert = func(e alert.Entrada) bool {
 		mu.Lock()
 		defer mu.Unlock()
-		avisos = append(avisos, avisoCapturado{chave, texto})
+		avisos = append(avisos, avisoCapturado{e.Key, e.Text, e})
 		return true
 	}
 	t.Cleanup(func() { notifyAlert = original })

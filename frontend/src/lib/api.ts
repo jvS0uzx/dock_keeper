@@ -8,6 +8,17 @@ import {
   type SiteAccess,
 } from './session';
 
+export type NginxEstado = 'desconhecido' | 'ausente' | 'inativo' | 'sem_upstream' | 'candidato';
+
+export type NginxPapel = 'nenhum' | 'principal' | 'reserva';
+
+export interface NginxUpstreamLink {
+  server_id: string;
+  bloco: string;
+  destino: string;
+  observado_em: string;
+}
+
 export interface ServerLiveStat {
   id: string;
   host_ip: string;
@@ -31,8 +42,13 @@ export interface ServerLiveStat {
   temperature_c: number | null;
   collect_nginx: boolean;
   addresses: string[];
+  absence_alert?: boolean;
   behind_lb?: boolean;
-  behind_lb_origem?: 'manual' | 'trafego' | 'nenhum';
+  behind_lb_origem?: 'manual' | 'trafego' | 'configuracao' | 'nenhum';
+  nginx_estado?: NginxEstado;
+  nginx_motivo?: string;
+  nginx_papel?: NginxPapel;
+  nginx_checado_em?: string | null;
   net_rx_bps: number | null;
   net_tx_bps: number | null;
   rtt_ms: number | null;
@@ -48,6 +64,9 @@ export interface ContainerLiveStat {
   cpu: number;
   mem_used: number;
   mem_limit: number;
+  health?: string | null;
+  restart_count?: number | null;
+  oom_killed?: boolean | null;
 }
 
 export interface LbStat {
@@ -62,6 +81,8 @@ export interface LiveMetrics {
   servers: ServerLiveStat[];
   containers: ContainerLiveStat[];
   load_balancing: LbStat[];
+  lb_window_sec: number | null;
+  nginx_topologia?: NginxUpstreamLink[];
 }
 
 export interface HistoryPoint {
@@ -77,6 +98,8 @@ export interface ServerRecord {
   port: number;
   created_at: string;
   aliases?: string[] | null;
+  addresses?: string[] | null;
+  absence_alert?: boolean;
 }
 
 export interface DomainRecord {
@@ -219,7 +242,15 @@ export interface PortInfo {
   process: string;
 }
 
-export type HistoryMetric = 'cpu' | 'mem' | 'disk' | 'load' | 'temperature' | 'latency' | 'net_rx' | 'net_tx' | 'rtt';
+export interface MetricaDoCatalogo {
+  nome: string;
+  rotulo: string;
+  unidade: string;
+  tem_tendencia: boolean;
+  escopo: string;
+  em_regra: boolean;
+}
+
 export type HistoryRange = '1h' | '6h' | '24h' | '7d' | '30d' | '90d';
 
 export interface CustomWindow {
@@ -229,12 +260,10 @@ export interface CustomWindow {
 
 export type HistoryWindow = HistoryRange | CustomWindow;
 
-export type DashboardMetric = 'cpu' | 'mem' | 'disk' | 'load' | 'temperature' | 'net_rx' | 'net_tx' | 'rtt';
-
 export interface DashboardPanelInput {
   title: string;
   server_id: string;
-  metric: DashboardMetric;
+  metric: string;
   range: HistoryRange;
   width: 1 | 2;
 }
@@ -369,7 +398,7 @@ export const apiErrorMessage = (err: unknown, fallback: string): string => {
 };
 
 export type AlertStatus = 'open' | 'acked' | 'resolved';
-export type AlertDelivery = 'pendente' | 'enviado' | 'falhou' | 'sem_canal';
+export type AlertDelivery = 'pendente' | 'enviado' | 'falhou' | 'sem_canal' | 'dispensado';
 
 export interface AlertItem {
   id: number;
@@ -382,13 +411,25 @@ export interface AlertItem {
   rule_id: number | null;
   created_at: string;
   acked_at: string | null;
-  acked_by: string | null;
+  acked_by: number | null;
   resolved_at: string | null;
   delivery: AlertDelivery;
   attempts: number;
   next_attempt_at: string | null;
   last_attempt_at: string | null;
   last_error: string;
+  renotify_count: number;
+  last_notified_at: string | null;
+  last_seen_at: string | null;
+  server_name: string | null;
+  site_name: string | null;
+  alvo_tipo: string | null;
+  alvo_id: string | null;
+  alvo_nome: string | null;
+  metrica: string | null;
+  valor: number | null;
+  limiar: number | null;
+  unidade: string | null;
 }
 
 export interface Readiness {
@@ -410,6 +451,7 @@ export interface AlertSummary {
 
 export interface AlertQuery {
   status?: AlertStatus | 'all';
+  site_id?: number;
   limit?: number;
   from?: string;
   to?: string;
@@ -479,8 +521,9 @@ export const api = {
     return asArray<AlertItem>(await request<unknown>(`/api/alerts${qs ? `?${qs}` : ''}`, { signal }));
   },
 
-  async alertsSummary(signal?: AbortSignal): Promise<AlertSummary> {
-    const data = await request<Partial<AlertSummary>>('/api/alerts/summary', { signal });
+  async alertsSummary(siteId: number | null = null, signal?: AbortSignal): Promise<AlertSummary> {
+    const qs = siteId === null ? '' : `?site_id=${siteId}`;
+    const data = await request<Partial<AlertSummary>>(`/api/alerts/summary${qs}`, { signal });
     return { open: data.open ?? 0, acked: data.acked ?? 0, falhou: data.falhou ?? 0 };
   },
 
@@ -506,12 +549,17 @@ export const api = {
       })),
       containers: data.containers ?? [],
       load_balancing: data.load_balancing ?? [],
+      lb_window_sec: typeof data.lb_window_sec === 'number' && data.lb_window_sec > 0 ? data.lb_window_sec : null,
     };
+  },
+
+  async metricsCatalog(signal?: AbortSignal): Promise<MetricaDoCatalogo[]> {
+    return asArray<MetricaDoCatalogo>(await request('/api/metrics/catalogo', { signal }));
   },
 
   async history(
     serverId: string,
-    metric: HistoryMetric,
+    metric: string,
     janela: HistoryWindow,
     signal?: AbortSignal,
   ): Promise<HistoryPoint[]> {
@@ -578,8 +626,16 @@ export const api = {
     return request<ServerRecord>(`/api/servers?id=${encodeURIComponent(id)}`, send('PATCH', { aliases }));
   },
 
+  setServerAbsenceAlert(id: string, absence_alert: boolean) {
+    return request<ServerRecord>(`/api/servers?id=${encodeURIComponent(id)}`, send('PATCH', { absence_alert }));
+  },
+
   setServerBehindLb(id: string, behind_lb: boolean | null) {
     return request<ServerRecord>(`/api/servers?id=${encodeURIComponent(id)}`, send('PATCH', { behind_lb }));
+  },
+
+  setServerCollectNginx(id: string, collect_nginx: boolean) {
+    return request<ServerRecord>(`/api/servers?id=${encodeURIComponent(id)}`, send('PATCH', { collect_nginx }));
   },
 
   renameServer(id: string, name: string) {

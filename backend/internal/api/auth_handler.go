@@ -24,7 +24,8 @@ func (c Config) loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ip := clientIP(r, c.TrustProxyHeaders)
-	if !c.logins.allowed(ip, req.Username) {
+	conta := auth.ContaDoLogin(req.Username)
+	if !c.logins.allowed(ip, conta) {
 		w.Header().Set("Retry-After", strconv.Itoa(int(c.logins.window.Seconds())))
 		writeError(w, http.StatusTooManyRequests, "tentativas demais; aguarde alguns minutos")
 		return
@@ -33,7 +34,7 @@ func (c Config) loginHandler(w http.ResponseWriter, r *http.Request) {
 	session, err := auth.Login(req.Username, req.Password)
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials), errors.Is(err, auth.ErrUserInactive):
-		c.logins.fail(ip, req.Username)
+		c.logins.fail(ip, conta)
 		writeError(w, http.StatusUnauthorized, "usuário ou senha inválidos")
 		return
 	case err != nil:
@@ -42,7 +43,7 @@ func (c Config) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.logins.succeed(req.Username)
+	c.logins.succeed(conta)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, session)
 }
@@ -212,8 +213,17 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if emailEmUso(email, 0) {
+	emUso, err := emailEmUso(email, 0)
+	if err != nil {
+		log.Printf("[API] erro ao conferir o e-mail %q: %v", email, err)
+		writeError(w, http.StatusInternalServerError, "falha ao conferir se o e-mail já está em uso")
+		return
+	}
+	if emUso {
 		writeError(w, http.StatusConflict, "este e-mail já está em uso")
+		return
+	}
+	if recusarIdentidadeCruzada(w, username, email, 0) {
 		return
 	}
 	if req.Role == "" {
@@ -302,8 +312,17 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if emailEmUso(email, user.ID) {
+		emUso, err := emailEmUso(email, user.ID)
+		if err != nil {
+			log.Printf("[API] erro ao conferir o e-mail %q: %v", email, err)
+			writeError(w, http.StatusInternalServerError, "falha ao conferir se o e-mail já está em uso")
+			return
+		}
+		if emUso {
 			writeError(w, http.StatusConflict, "este e-mail já está em uso")
+			return
+		}
+		if recusarIdentidadeCruzada(w, user.Username, email, user.ID) {
 			return
 		}
 		if req.Nome != nil {
@@ -321,10 +340,6 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 		updates["role"] = *req.Role
 	}
 	if req.Active != nil {
-		if !*req.Active && isLastAdmin(user) {
-			writeError(w, http.StatusConflict, "não é possível desativar o último administrador")
-			return
-		}
 		updates["active"] = *req.Active
 	}
 	if len(updates) == 0 && req.Accesses == nil {
@@ -332,12 +347,35 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var rows []database.UserSiteAccess
 	if req.Accesses != nil {
-		rows, err := validateAccesses(*req.Accesses)
+		validas, err := validateAccesses(*req.Accesses)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		rows = validas
+	}
+
+	papelDepois, ativoDepois := user.Role, user.Active
+	if req.Role != nil {
+		papelDepois = *req.Role
+	}
+	if req.Active != nil {
+		ativoDepois = *req.Active
+	}
+	semAdmin, err := deixariaSemAdminGlobal(user, papelDepois, ativoDepois, rows)
+	if err != nil {
+		log.Printf("[Auth] erro ao conferir o último administrador: %v", err)
+		writeError(w, http.StatusInternalServerError, "falha ao conferir se este é o último administrador")
+		return
+	}
+	if semAdmin {
+		writeError(w, http.StatusConflict, "este é o último administrador global ativo: não pode ser desativado, rebaixado nem restrito a uma unidade")
+		return
+	}
+
+	if req.Accesses != nil {
 		if err := replaceAccesses(user.ID, rows); err != nil {
 			log.Printf("[Auth] erro ao trocar acessos do usuário %d: %v", user.ID, err)
 			writeError(w, http.StatusInternalServerError, "falha ao gravar os acessos")
@@ -363,7 +401,13 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if isLastAdmin(user) {
+	semAdmin, err := deixariaSemAdminGlobal(user, "", false, nil)
+	if err != nil {
+		log.Printf("[Auth] erro ao conferir o último administrador: %v", err)
+		writeError(w, http.StatusInternalServerError, "falha ao conferir se este é o último administrador")
+		return
+	}
+	if semAdmin {
 		writeError(w, http.StatusConflict, "não é possível remover o último administrador")
 		return
 	}
@@ -398,30 +442,85 @@ func identidadeValida(nome, email string) (string, string, error) {
 	return nome, email, nil
 }
 
-func emailEmUso(email string, exceto uint) bool {
+func emailEmUso(email string, exceto uint) (bool, error) {
 	if email == "" {
-		return false
+		return false, nil
 	}
 	var contagem int64
-	database.DB.Model(&database.User{}).
+	err := database.DB.Model(&database.User{}).
 		Where("email = ? AND id <> ?", email, exceto).
-		Count(&contagem)
-	return contagem > 0
+		Count(&contagem).Error
+	if err != nil {
+		return false, err
+	}
+	return contagem > 0, nil
+}
+
+func identidadeCruzada(username, email string, exceto uint) (bool, error) {
+	var contagem int64
+	err := database.DB.Model(&database.User{}).
+		Where("id <> ?", exceto).
+		Where("(email <> '' AND email = ?) OR (? <> '' AND username = ?)", username, email, email).
+		Count(&contagem).Error
+	if err != nil {
+		return false, err
+	}
+	return contagem > 0, nil
+}
+
+func recusarIdentidadeCruzada(w http.ResponseWriter, username, email string, exceto uint) bool {
+	cruzada, err := identidadeCruzada(username, email, exceto)
+	if err != nil {
+		log.Printf("[API] erro ao conferir username e e-mail de %q: %v", username, err)
+		writeError(w, http.StatusInternalServerError, "falha ao conferir se o username ou o e-mail já identifica outra conta")
+		return true
+	}
+	if cruzada {
+		writeError(w, http.StatusConflict, "o username não pode ser o e-mail de outro usuário, nem o e-mail o username de outro")
+		return true
+	}
+	return false
 }
 
 func auditUserTarget(r *http.Request, user database.User) {
 	auditTarget(r, "user", strconv.FormatUint(uint64(user.ID), 10), user.Username, nil)
 }
 
-func isLastAdmin(user database.User) bool {
-	if user.Role != auth.RoleAdmin {
-		return false
+func adminGlobalEfetivo(papel string, acessos []database.UserSiteAccess) bool {
+	if len(acessos) == 0 {
+		return papel == auth.RoleAdmin
 	}
-	var admins int64
-	database.DB.Model(&database.User{}).
-		Where("role = ? AND active = ? AND id <> ?", auth.RoleAdmin, true, user.ID).
-		Count(&admins)
-	return admins == 0
+	for _, a := range acessos {
+		if a.SiteID == nil && a.Role == auth.RoleAdmin {
+			return true
+		}
+	}
+	return false
+}
+
+func deixariaSemAdminGlobal(user database.User, papelDepois string, ativoDepois bool, acessosDepois []database.UserSiteAccess) (bool, error) {
+	var atuais []database.UserSiteAccess
+	if err := database.DB.Where("user_id = ?", user.ID).Find(&atuais).Error; err != nil {
+		return false, err
+	}
+	if !user.Active || !adminGlobalEfetivo(user.Role, atuais) {
+		return false, nil
+	}
+	if acessosDepois == nil {
+		acessosDepois = atuais
+	}
+	if ativoDepois && adminGlobalEfetivo(papelDepois, acessosDepois) {
+		return false, nil
+	}
+
+	var outros int64
+	err := database.DB.Raw(`
+		SELECT count(*) FROM users u
+		WHERE u.active AND u.id <> ?
+		  AND (EXISTS (SELECT 1 FROM user_site_accesses a WHERE a.user_id = u.id AND a.site_id IS NULL AND a.role = ?)
+		    OR (u.role = ? AND NOT EXISTS (SELECT 1 FROM user_site_accesses a WHERE a.user_id = u.id)))
+	`, user.ID, auth.RoleAdmin, auth.RoleAdmin).Scan(&outros).Error
+	return outros == 0, err
 }
 
 func userFromQuery(w http.ResponseWriter, r *http.Request) (database.User, bool) {

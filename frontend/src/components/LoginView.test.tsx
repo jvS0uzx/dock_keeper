@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import LoginView from './LoginView';
 import { loadSession } from '../lib/session';
@@ -22,7 +22,7 @@ const sessaoValida: SessionInfo = {
 };
 
 const preencherEEnviar = async (usuario: string, senha: string) => {
-  const user = userEvent.setup();
+  const user = semEspera();
   await user.type(screen.getByLabelText('Usuário ou e-mail'), usuario);
   await user.type(screen.getByLabelText('Senha'), senha);
   await user.click(screen.getByRole('button', { name: /entrar/i }));
@@ -66,7 +66,7 @@ describe('LoginView', () => {
   });
 
   it('o botão fica desabilitado enquanto usuário ou senha estiverem vazios', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     render(<LoginView onLogin={vi.fn()} />);
 
     const botao = screen.getByRole('button', { name: /entrar/i }) as HTMLButtonElement;

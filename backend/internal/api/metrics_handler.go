@@ -7,6 +7,7 @@ import (
 
 	"github.com/jvS0uzx/dock_keeper/internal/config"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/metricas"
 )
 
 type ContainerLiveStat struct {
@@ -19,6 +20,10 @@ type ContainerLiveStat struct {
 	CPU      float64 `json:"cpu"`
 	MemUsed  int64   `json:"mem_used"`
 	MemLimit int64   `json:"mem_limit"`
+
+	Health       *string `json:"health"`
+	RestartCount *int    `json:"restart_count"`
+	OOMKilled    *bool   `json:"oom_killed"`
 }
 
 type ServerLiveStat struct {
@@ -47,9 +52,16 @@ type ServerLiveStat struct {
 	NetTxBps       *float64 `json:"net_tx_bps"`
 	RTTMs          *float64 `json:"rtt_ms"`
 	Addresses      []string `json:"addresses"`
+	Aliases        []string `json:"aliases"`
+	AbsenceAlert   bool     `json:"absence_alert"`
 	BehindLB       bool     `json:"behind_lb"`
 	BehindLBOrigem string   `json:"behind_lb_origem"`
 	CollectNginx   bool     `json:"collect_nginx"`
+
+	NginxEstado    string     `json:"nginx_estado"`
+	NginxMotivo    string     `json:"nginx_motivo"`
+	NginxPapel     string     `json:"nginx_papel"`
+	NginxChecadoEm *time.Time `json:"nginx_checado_em"`
 
 	LiveWindowSec int `json:"live_window_sec"`
 }
@@ -62,27 +74,77 @@ type LbStat struct {
 	ServerID      string `json:"server_id"`
 }
 
-type LiveResponse struct {
-	Servers       []ServerLiveStat    `json:"servers"`
-	Containers    []ContainerLiveStat `json:"containers"`
-	LoadBalancing []LbStat            `json:"load_balancing"`
+type NginxTopologiaItem struct {
+	ServerID    string    `json:"server_id"`
+	Bloco       string    `json:"bloco"`
+	Destino     string    `json:"destino"`
+	ObservadoEm time.Time `json:"observado_em"`
 }
 
-const metricLookback = "10 minutes"
+type LiveResponse struct {
+	Servers        []ServerLiveStat     `json:"servers"`
+	Containers     []ContainerLiveStat  `json:"containers"`
+	LoadBalancing  []LbStat             `json:"load_balancing"`
+	NginxTopologia []NginxTopologiaItem `json:"nginx_topologia"`
+	LBWindowSec    int                  `json:"lb_window_sec"`
+}
+
+type metricaDoCatalogo struct {
+	Nome         string `json:"nome"`
+	Rotulo       string `json:"rotulo"`
+	Unidade      string `json:"unidade"`
+	TemTendencia bool   `json:"tem_tendencia"`
+	Escopo       string `json:"escopo"`
+	EmRegra      bool   `json:"em_regra"`
+}
+
+func catalogoDeMetricasHandler(w http.ResponseWriter, _ *http.Request) {
+	todas := metricas.Todas()
+	out := make([]metricaDoCatalogo, 0, len(todas))
+	for _, m := range todas {
+		out = append(out, metricaDoCatalogo{
+			Nome: m.Nome, Rotulo: m.Rotulo, Unidade: m.Unidade,
+			TemTendencia: m.TemTendencia(), Escopo: m.Escopo, EmRegra: m.Avaliavel(),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
 
 const containerLiveWindow = "30 seconds"
 
-const lbWindow = "5 seconds"
+const lbWindowSec = 5
 
 const membroPadraoDias = 7
 
-func membroDaMalha(s database.Server, enderecos []string, upstreams map[string]bool) (bool, string) {
+func janelaDaMalha() time.Duration {
+	pedida := config.Dias("LB_MEMBERSHIP_DAYS", membroPadraoDias)
+	retencao := database.RetentionDays("METRIC_RETENTION_DAYS", database.DefaultMetricRetentionDays)
+	if retencao > 0 && pedida > retencao {
+		return retencao
+	}
+	return pedida
+}
+
+func AvisarJanelaDaMalha() {
+	pedida := config.Dias("LB_MEMBERSHIP_DAYS", membroPadraoDias)
+	if efetiva := janelaDaMalha(); efetiva < pedida {
+		log.Printf("[API] LB_MEMBERSHIP_DAYS pede %s, mas METRIC_RETENTION_DAYS poda metric_load_balancers em %s; a malha usa %s",
+			pedida, efetiva, efetiva)
+	}
+}
+
+func membroDaMalha(s database.Server, enderecos []string, upstreams, declarados map[string]bool) (bool, string) {
 	if s.BehindLB != nil {
 		return *s.BehindLB, "manual"
 	}
 	for _, endereco := range enderecos {
 		if upstreams[endereco] {
 			return true, "trafego"
+		}
+	}
+	for _, endereco := range enderecos {
+		if declarados[endereco] {
+			return true, "configuracao"
 		}
 	}
 	return false, "nenhum"
@@ -128,9 +190,11 @@ func liveMetricsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := LiveResponse{
-		Servers:       make([]ServerLiveStat, 0, len(servers)),
-		Containers:    []ContainerLiveStat{},
-		LoadBalancing: []LbStat{},
+		Servers:        make([]ServerLiveStat, 0, len(servers)),
+		Containers:     []ContainerLiveStat{},
+		LoadBalancing:  []LbStat{},
+		NginxTopologia: []NginxTopologiaItem{},
+		LBWindowSec:    lbWindowSec,
 	}
 
 	ids := make([]string, 0, len(servers))
@@ -143,10 +207,22 @@ func liveMetricsHandler(w http.ResponseWriter, r *http.Request) {
 		enderecos = map[string][]string{}
 	}
 
-	upstreams, err := database.UpstreamsRecentes(config.Dias("LB_MEMBERSHIP_DAYS", membroPadraoDias))
+	aliases, err := database.AliasesPorServidor(ids)
+	if err != nil {
+		log.Printf("[API] erro ao ler aliases dos servidores: %v", err)
+		aliases = map[string][]string{}
+	}
+
+	upstreams, err := database.UpstreamsRecentes(janelaDaMalha())
 	if err != nil {
 		log.Printf("[API] erro ao ler upstreams recentes: %v", err)
 		upstreams = map[string]bool{}
+	}
+
+	declarados, err := database.UpstreamsDeclarados()
+	if err != nil {
+		log.Printf("[API] erro ao ler upstreams declarados: %v", err)
+		declarados = map[string]bool{}
 	}
 
 	for _, s := range servers {
@@ -154,10 +230,17 @@ func liveMetricsHandler(w http.ResponseWriter, r *http.Request) {
 			ID: s.ID, HostIP: s.HostIP, Name: s.Name,
 			Kind: s.Kind, SiteID: s.SiteID, OS: s.OS, Platform: s.Platform,
 			Arch: s.Arch, LastUser: s.LastUser, AgentVersion: s.AgentVersion,
-			CollectNginx: s.CollectNginx,
+			CollectNginx: s.CollectNginx, AbsenceAlert: s.AbsenceAlert,
+			Aliases: aliases[s.ID],
+
+			NginxEstado: s.NginxEstado, NginxMotivo: s.NginxMotivo,
+			NginxPapel: s.NginxPapel, NginxChecadoEm: s.NginxChecadoEm,
+		}
+		if stat.Aliases == nil {
+			stat.Aliases = []string{}
 		}
 		stat.Addresses = unirEnderecos(s.HostIP, enderecos[s.ID])
-		stat.BehindLB, stat.BehindLBOrigem = membroDaMalha(s, stat.Addresses, upstreams)
+		stat.BehindLB, stat.BehindLBOrigem = membroDaMalha(s, stat.Addresses, upstreams, declarados)
 		window := database.LiveWindowFor(s.ReportIntervalSec)
 		stat.LiveWindowSec = int(window / time.Second)
 
@@ -216,12 +299,16 @@ func liveMetricsHandler(w http.ResponseWriter, r *http.Request) {
 			CPU:      m.CPUUsagePercent,
 			MemUsed:  m.MemUsedBytes,
 			MemLimit: m.MemLimitBytes,
+
+			Health:       m.Health,
+			RestartCount: m.RestartCount,
+			OOMKilled:    m.OOMKilled,
 		})
 	}
 
 	lbTx := scope.apply(database.From(r.Context()).Model(&database.MetricLoadBalancer{})).
 		Select("upstream_addr, server_name, status, SUM(requests_count) AS requests_count, COALESCE(server_id::text, '') AS server_id").
-		Where("timestamp >= NOW() - INTERVAL '" + lbWindow + "'").
+		Where("timestamp >= NOW() - make_interval(secs => ?)", lbWindowSec).
 		Group("upstream_addr, server_name, status, COALESCE(server_id::text, '')")
 	if err := lbTx.Scan(&res.LoadBalancing).Error; err != nil {
 		log.Printf("[API] erro ao agregar load balancer: %v", err)
@@ -230,28 +317,37 @@ func liveMetricsHandler(w http.ResponseWriter, r *http.Request) {
 		res.LoadBalancing = []LbStat{}
 	}
 
+	if topologia, err := topologiaDoNginx(ids); err != nil {
+		log.Printf("[API] erro ao ler a topologia do nginx: %v", err)
+	} else {
+		res.NginxTopologia = topologia
+	}
+
 	writeJSON(w, http.StatusOK, res)
 }
 
-func consultaUltimasMetricas() string {
-	return `
-		SELECT m.*
-		FROM servers s
-		JOIN LATERAL (
-			SELECT *
-			FROM metric_servers
-			WHERE server_id = s.id
-			  AND timestamp >= NOW() - INTERVAL '` + metricLookback + `'
-			ORDER BY timestamp DESC
-			LIMIT 1
-		) m ON TRUE
-		WHERE s.deleted_at IS NULL
-	`
+func topologiaDoNginx(ids []string) ([]NginxTopologiaItem, error) {
+	fora := []NginxTopologiaItem{}
+	if len(ids) == 0 {
+		return fora, nil
+	}
+	err := database.DB.Model(&database.NginxUpstream{}).
+		Select("server_id::text AS server_id, bloco, destino, observado_em").
+		Where("server_id IN ?", ids).
+		Order("server_id ASC, bloco ASC, destino ASC").
+		Scan(&fora).Error
+	if err != nil {
+		return nil, err
+	}
+	if fora == nil {
+		fora = []NginxTopologiaItem{}
+	}
+	return fora, nil
 }
 
 func lastServerMetrics() (map[string]database.MetricServer, error) {
 	var rows []database.MetricServer
-	err := database.DB.Raw(consultaUltimasMetricas()).Scan(&rows).Error
+	err := database.DB.Raw(database.ConsultaUltimasMetricas).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

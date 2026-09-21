@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, EyeOff } from 'lucide-react';
 
 import { api, apiErrorMessage, type Readiness } from '../lib/api';
+import { POLL } from '../lib/polling';
 
-const INTERVALO_MS = 30000;
 
 interface Props {
   irParaAlertas: () => void;
@@ -41,7 +41,7 @@ const DegradacaoAviso = ({ irParaAlertas }: Props) => {
       }
     };
     ler();
-    const timer = setInterval(ler, INTERVALO_MS);
+    const timer = setInterval(ler, POLL.saudeDoPainel);
     return () => {
       vivo = false;
       clearInterval(timer);

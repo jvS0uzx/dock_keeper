@@ -37,7 +37,44 @@ despachante de fundo, supervisionado pelo `safego`, faz a entrega.
   última tentativa. Enquanto existe alerta pendente da mesma chave, nada novo é
   enfileirado: durante uma queda do Telegram a fila não incha.
 - A recuperação resolve o alerta correspondente e enfileira uma mensagem `[OK]`,
-  controlada por `ALERT_NOTIFY_RECOVERY`.
+  controlada por `ALERT_NOTIFY_RECOVERY`. *(Revisto em 2026-09-19; ver a seção
+  seguinte.)*
+
+## Revisão de 2026-09-19 — o ciclo de vida do incidente
+
+A primeira versão tratava cada disparo como linha nova. A auditoria de 19/09 mostrou o
+custo: oito horas de CPU alta viravam 16 alertas `open`, só regra do motor resolvia o
+próprio alerta, a mensagem de recuperação aparecia como problema aberto, e um alerta
+preso em `sem_canal` calava a chave para sempre. O desenho atual:
+
+- **Um incidente, um alerta.** `Enqueue` procura o alerta não resolvido da chave visto
+  (`last_seen_at`) dentro de `ALERT_RESUME_HOURS` e o reaproveita. A renotificação a
+  cada `ALERT_COOLDOWN` devolve a **mesma** linha para `pendente`, soma
+  `renotify_count` e, entregue, grava `last_notified_at`. `Notify` deixou de existir:
+  todo chamador usa `Enqueue`, com `server_id` e `site_id`.
+- **Alerta antigo não cala a chave.** Incidente sem sinal de vida além da janela, ou
+  resolvido, não é mais o incidente corrente: a ocorrência seguinte abre alerta novo.
+- **Reconhecer silencia.** Alerta `acked` continua sendo o incidente e para de
+  renotificar. Desde a mesma revisão, reconhecer exige operador na unidade do alerta.
+- **Incidente novo dentro do cooldown** é gravado na hora, para o painel mostrar, com
+  `next_attempt_at` no fim do cooldown. O cooldown segura o canal, não o registro.
+- **Todo gatilho resolve o próprio alerta**, com evidência positiva de que a condição
+  voltou (a tabela está em `docs/metricas.md`). Silêncio não resolve.
+- **Recuperação condicionada.** A mensagem de recuperação só existe se o incidente
+  chegou a ser avisado no canal. Ela é uma linha própria (`<chave>:recuperacao`) que
+  **nasce `resolved`**, herda a origem do incidente, e é a única linha resolvida que o
+  despachante entrega.
+- **`dispensado`.** Alerta resolvido antes da primeira entrega não é enviado: avisar de
+  um problema que já acabou é ruído. A entrega fica `dispensado`, e não `pendente` para
+  sempre nem `enviado`, que seria mentira. Se já havia sido avisado antes e foi
+  resolvido no meio de uma renotificação, volta para `enviado`.
+- **`falhou` é retomado.** Dentro de `ALERT_RESUME_HOURS`, cada sinal de canal de pé
+  posterior à última falha dá ao alerta uma tentativa. Sem sinal novo, sem tentativa.
+- **Piso único.** `ALERT_MIN_SEVERITY` é aplicado dentro de `Enqueue`, então vale para
+  regra e para gatilho, e o aviso de "abaixo do mínimo" sai uma vez por cooldown.
+
+A entrega continua sendo **ao menos uma vez**, e a renotificação herda a mesma
+garantia: a linha renotificada passa pela mesma reserva com prazo.
 
 ## Entrega é ao menos uma vez
 
@@ -55,8 +92,9 @@ depois de um restart não é bug.
   `/api/alerts/summary` mostram `open`, `acked` e quantos falharam na entrega.
   Alerta não depende mais de o Telegram estar de pé para existir.
 - Ack e resolve são registrados com autor e auditados.
-- Custo: uma tabela a mais, que cresce com o volume de alerta e ainda não tem
-  poda própria; a retenção entra junto com o trabalho de particionamento.
+- Custo: uma tabela a mais. Com um incidente por linha ela cresce com o número de
+  incidentes, não com a duração deles; alerta resolvido é podado por
+  `ALERT_RETENTION_DAYS`.
 - O despachante é mais um ponto que precisa estar vivo. Ele roda sob `safego`, que
   o reinicia depois de pânico, e o atraso aparece como alerta `pendente` antigo.
 

@@ -2,12 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   carregarFiltroDaMalha,
   classificarMalha,
-  nosDaTopologia,
   deriveUpstreams,
   enderecosDoServidor,
   salvarFiltroDaMalha,
-  hostsDeServidores,
-  resumoDaMalha,
   rotuloDoUpstream,
   splitUpstreams,
   totalRequests,
@@ -157,19 +154,19 @@ describe('rotuloDoUpstream', () => {
   });
 
   it('não casa por último octeto: o caso real da rede overlay', () => {
-    const reais = [servidor('VPS-2', '198.51.100.39'), servidor('VPS-1', '198.51.100.38')];
-    const overlay = { addr: '100.100.0.1:80', host: '100.100.0.1', reqs: 5 };
+    const reais = [servidor('VPS-2', '203.0.113.39'), servidor('VPS-1', '203.0.113.38')];
+    const overlay = { addr: '100.100.0.10:80', host: '100.100.0.10', reqs: 5 };
 
-    expect(rotuloDoUpstream(overlay, reais)).toBe('100.100.0.1:80');
+    expect(rotuloDoUpstream(overlay, reais)).toBe('100.100.0.10:80');
     expect(upstreamCadastrado(overlay, reais)).toBe(false);
   });
 
   it('casa pelo endereço extra que o servidor declara', () => {
     const comOverlay = [
-      { ...servidor('VPS-2', '198.51.100.39'), addresses: ['198.51.100.39', '100.100.0.1'] },
-      servidor('VPS-1', '198.51.100.38'),
+      { ...servidor('VPS-2', '203.0.113.39'), addresses: ['203.0.113.39', '100.100.0.10'] },
+      servidor('VPS-1', '203.0.113.38'),
     ];
-    const node = { addr: '100.100.0.1:80', host: '100.100.0.1', reqs: 5 };
+    const node = { addr: '100.100.0.10:80', host: '100.100.0.10', reqs: 5 };
 
     expect(rotuloDoUpstream(node, comOverlay)).toBe('VPS-2');
     expect(upstreamCadastrado(node, comOverlay)).toBe(true);
@@ -193,56 +190,34 @@ describe('rotuloDoUpstream', () => {
   });
 });
 
-describe('hostsDeServidores', () => {
-  it('lista os servidores cadastrados e deixa o balanceador de fora', () => {
-    const hosts = hostsDeServidores(
-      [servidor('vps-app', '10.0.0.1'), servidor('lb', '10.0.0.9', true), servidor('vps-banco', '10.0.0.2')],
-      ['203.0.113.1'],
-    );
-    expect(hosts).toEqual(['10.0.0.1', '10.0.0.2']);
-  });
-
-  it('ignora estação com agente, que não é upstream', () => {
-    expect(hostsDeServidores([servidor('estacao', '10.0.0.5', false, 'agent')], [])).toEqual([]);
-  });
-
-  it('cai no fallback do .env quando nada está cadastrado', () => {
-    expect(hostsDeServidores([], ['203.0.113.1', '203.0.113.2'])).toEqual(['203.0.113.1', '203.0.113.2']);
-  });
-});
-
 describe('malha com endereço solto', () => {
   const cadastrados = [
-    { ...servidor('VPS-1', '198.51.100.38'), addresses: ['198.51.100.38', '100.100.0.2'] },
-    servidor('VPS-2', '198.51.100.39'),
+    { ...servidor('VPS-1', '203.0.113.38'), addresses: ['203.0.113.38', '100.100.0.11'] },
+    servidor('VPS-2', '203.0.113.39'),
   ];
 
   const nodes = [
-    { addr: '100.100.0.2:80', host: '100.100.0.2', reqs: 9 },
-    { addr: '100.100.0.1:80', host: '100.100.0.1', reqs: 4 },
+    { addr: '100.100.0.11:80', host: '100.100.0.11', reqs: 9 },
+    { addr: '100.100.0.10:80', host: '100.100.0.10', reqs: 4 },
   ];
 
   it('lista só os upstreams sem correspondência', () => {
-    expect(upstreamsSemCadastro(nodes, cadastrados).map((n) => n.host)).toEqual(['100.100.0.1']);
-  });
-
-  it('conta máquinas conhecidas e endereços soltos, sem inventar VPS a mais', () => {
-    expect(resumoDaMalha(nodes, cadastrados)).toEqual({ conhecidas: 1, soltos: 1 });
+    expect(upstreamsSemCadastro(nodes, cadastrados).map((n) => n.host)).toEqual(['100.100.0.10']);
   });
 });
 
 describe('grupos da malha, com os dados reais do dono', () => {
-  const lb = { ...servidor('Load Balancer', '198.51.100.38', true), addresses: ['198.51.100.38'] };
-  const vps1 = { ...servidor('VPS-1', '198.51.100.25'), addresses: ['198.51.100.25'] };
-  const vps2 = { ...servidor('VPS-2', '198.51.100.39'), addresses: ['198.51.100.39', '100.100.0.1'] };
-  const email = { ...servidor('VPS E-mail', '198.51.100.50'), addresses: ['198.51.100.50'] };
+  const lb = { ...servidor('Load Balancer', '203.0.113.38', true), addresses: ['203.0.113.38'] };
+  const vps1 = { ...servidor('VPS-1', '203.0.113.25'), addresses: ['203.0.113.25'], behind_lb: true };
+  const vps2 = { ...servidor('VPS-2', '203.0.113.39'), addresses: ['203.0.113.39', '100.100.0.10'], behind_lb: true };
+  const email = { ...servidor('VPS E-mail', '203.0.113.50'), addresses: ['203.0.113.50'] };
   const estacao = servidor('estacao-recepcao', '192.168.1.10', false, 'agent');
   const cadastrados = [lb, vps1, vps2, email, estacao];
 
   const nodes = [
-    { addr: '198.51.100.25:80', host: '198.51.100.25', reqs: 12 },
-    { addr: '100.100.0.1:80', host: '100.100.0.1', reqs: 7 },
-    { addr: '100.100.0.2:80', host: '100.100.0.2', reqs: 3 },
+    { addr: '203.0.113.25:80', host: '203.0.113.25', reqs: 12 },
+    { addr: '100.100.0.10:80', host: '100.100.0.10', reqs: 7 },
+    { addr: '100.100.0.11:80', host: '100.100.0.11', reqs: 3 },
   ];
 
   it('separa balanceador, quem está atrás dele e quem está fora', () => {
@@ -261,11 +236,11 @@ describe('grupos da malha, com os dados reais do dono', () => {
 
   it('o endereço solto não vira máquina de nenhum grupo', () => {
     const grupos = classificarMalha(cadastrados, nodes);
-    expect(grupos.soltos.map((n) => n.host)).toEqual(['100.100.0.2']);
+    expect(grupos.soltos.map((n) => n.host)).toEqual(['100.100.0.11']);
   });
 
-  it('sem tráfego na janela, quem está cadastrado fica fora do balanceador', () => {
-    const grupos = classificarMalha([vps1, email], []);
+  it('quem o backend marca fora do balanceador fica fora, com ou sem tráfego na janela', () => {
+    const grupos = classificarMalha([{ ...vps1, behind_lb: false }, email], nodes);
     expect(grupos.atras).toEqual([]);
     expect(grupos.fora.map((s) => s.name)).toEqual(['VPS-1', 'VPS E-mail']);
   });
@@ -287,68 +262,36 @@ describe('preferência do filtro da malha', () => {
 });
 
 describe('topologia desenhada mesmo sem tráfego', () => {
-  const vps1 = { ...servidor('VPS-1', '198.51.100.25'), behind_lb: true, behind_lb_origem: 'trafego' };
-  const vps2 = { ...servidor('VPS-2', '198.51.100.39'), behind_lb: true, behind_lb_origem: 'manual' };
-  const email = { ...servidor('VPS E-mail', '198.51.100.50'), behind_lb: false, behind_lb_origem: 'nenhum' };
-  const lb = servidor('Load Balancer', '198.51.100.38', true);
-
-  it('quem está atrás do balanceador aparece com zero requisição', () => {
-    const nos = nosDaTopologia([lb, vps1, vps2, email], []);
-
-    expect(nos.map((n) => n.host)).toEqual(['198.51.100.25', '198.51.100.39']);
-    expect(nos.every((n) => n.reqs === 0)).toBe(true);
-  });
-
-  it('upstream com tráfego não vira nó duplicado', () => {
-    const upstreams = [{ addr: '198.51.100.25:80', host: '198.51.100.25', reqs: 12 }];
-    const nos = nosDaTopologia([lb, vps1, vps2, email], upstreams);
-
-    expect(nos.map((n) => n.addr)).toEqual(['198.51.100.25:80', '198.51.100.39:80']);
-    expect(nos[0].reqs).toBe(12);
-    expect(nos[1].reqs).toBe(0);
-  });
-
-  it('endereço sem cadastro continua na topologia', () => {
-    const upstreams = [{ addr: '100.100.0.2:80', host: '100.100.0.2', reqs: 3 }];
-    const nos = nosDaTopologia([lb, email], upstreams);
-
-    expect(nos.map((n) => n.host)).toEqual(['100.100.0.2']);
-  });
+  const vps1 = { ...servidor('VPS-1', '203.0.113.25'), behind_lb: true, behind_lb_origem: 'trafego' };
+  const email = { ...servidor('VPS E-mail', '203.0.113.50'), behind_lb: false, behind_lb_origem: 'nenhum' };
+  const lb = servidor('Load Balancer', '203.0.113.38', true);
 
   it('marcação manual manda no grupo, mesmo com tráfego na janela', () => {
-    const upstreams = [{ addr: '198.51.100.50:80', host: '198.51.100.50', reqs: 4 }];
+    const upstreams = [{ addr: '203.0.113.50:80', host: '203.0.113.50', reqs: 4 }];
     const grupos = classificarMalha([lb, vps1, email], upstreams);
 
     expect(grupos.fora.map((s) => s.name)).toEqual(['VPS E-mail']);
     expect(grupos.atras.map((s) => s.name)).toEqual(['VPS-1']);
   });
-
-  it('sem behind_lb no payload, vale ter aparecido como upstream', () => {
-    const semCampo = servidor('VPS-3', '198.51.100.60');
-    const upstreams = [{ addr: '198.51.100.60:80', host: '198.51.100.60', reqs: 2 }];
-
-    expect(classificarMalha([semCampo], upstreams).atras.map((s) => s.name)).toEqual(['VPS-3']);
-    expect(classificarMalha([semCampo], []).fora.map((s) => s.name)).toEqual(['VPS-3']);
-  });
 });
 
 describe('nós da malha por máquina', () => {
   const servidores = [
-    { id: 'lb', name: 'Load Balancer', host_ip: '198.51.100.38', addresses: ['198.51.100.38'], collect_nginx: true },
-    { id: 'v1', name: 'VPS-1', host_ip: '198.51.100.25', addresses: ['198.51.100.25'], behind_lb: true },
+    { id: 'lb', name: 'Load Balancer', host_ip: '203.0.113.38', addresses: ['203.0.113.38'], collect_nginx: true },
+    { id: 'v1', name: 'VPS-1', host_ip: '203.0.113.25', addresses: ['203.0.113.25'], behind_lb: true },
     {
       id: 'v2',
       name: 'VPS-2',
-      host_ip: '198.51.100.39',
-      addresses: ['198.51.100.39', '100.100.0.2'],
+      host_ip: '203.0.113.39',
+      addresses: ['203.0.113.39', '100.100.0.11'],
       behind_lb: true,
     },
   ];
 
   const upstreams = [
-    { addr: '198.51.100.25:80', host: '198.51.100.25', reqs: 68 },
-    { addr: '198.51.100.39:80', host: '198.51.100.39', reqs: 35 },
-    { addr: '100.100.0.2:80', host: '100.100.0.2', reqs: 11 },
+    { addr: '203.0.113.25:80', host: '203.0.113.25', reqs: 68 },
+    { addr: '203.0.113.39:80', host: '203.0.113.39', reqs: 35 },
+    { addr: '100.100.0.11:80', host: '100.100.0.11', reqs: 11 },
   ];
 
   it('soma os endereços da mesma máquina num nó só', () => {
@@ -357,7 +300,7 @@ describe('nós da malha por máquina', () => {
     expect(nos).toHaveLength(2);
     const vps2 = nos.find((n) => n.rotulo === 'VPS-2');
     expect(vps2?.reqs).toBe(46);
-    expect(vps2?.enderecos).toEqual(['198.51.100.39:80', '100.100.0.2:80']);
+    expect(vps2?.enderecos).toEqual(['203.0.113.39:80', '100.100.0.11:80']);
     expect(nos.filter((n) => n.rotulo === 'VPS-2')).toHaveLength(1);
   });
 
@@ -368,7 +311,7 @@ describe('nós da malha por máquina', () => {
     );
 
     const soltos = nos.filter((n) => !n.cadastrado);
-    expect(soltos.map((n) => n.rotulo).sort()).toEqual(['100.100.0.2:80', '198.51.100.39:80']);
+    expect(soltos.map((n) => n.rotulo).sort()).toEqual(['100.100.0.11:80', '203.0.113.39:80']);
     expect(soltos.every((n) => n.enderecos.length === 1)).toBe(true);
   });
 
@@ -384,7 +327,7 @@ describe('nós da malha por máquina', () => {
     const nos = nosDaMalha(servidores, upstreams);
     const indice = indiceDeEnderecos(nos);
 
-    expect(indice.get('198.51.100.39:80')).toBe(indice.get('100.100.0.2:80'));
-    expect(indice.get('198.51.100.25:80')).not.toBe(indice.get('100.100.0.2:80'));
+    expect(indice.get('203.0.113.39:80')).toBe(indice.get('100.100.0.11:80'));
+    expect(indice.get('203.0.113.25:80')).not.toBe(indice.get('100.100.0.11:80'));
   });
 });

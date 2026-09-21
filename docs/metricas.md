@@ -153,6 +153,12 @@ consumidores que não podem depender um do outro — o painel, que decide o rót
 de online, e o motor de regras, que decide se a métrica é fresca o bastante para
 avaliar. Enquanto estava duplicada, divergiu.
 
+A busca no banco segue a mesma regra. Painel e motor leem a última amostra de cada host pela
+mesma consulta, `database.ConsultaUltimasMetricas`, que olha para trás exatamente a janela do
+host (`GREATEST(report_interval_sec * 3, 30)` segundos). Antes havia um `metricLookback` de
+10 minutos cravado nos dois lugares, abaixo da janela de qualquer agente com intervalo acima de
+200 s: um agente de 5 min tinha janela de 15 min e nunca era encontrado.
+
 Intervalo desconhecido — coleta por SSH, cujo ritmo é o do script remoto, ou
 agente antigo que não informa — fica no piso de 30 s.
 
@@ -224,14 +230,68 @@ tamanho da resposta com o status.
 
 ## Gatilhos de alerta sem regra
 
-Além do motor de regras, três avisos saem sozinhos, com o mesmo cooldown por
-chave (`ALERT_COOLDOWN`):
+Além do motor de regras, os avisos abaixo saem sozinhos, com o mesmo cooldown por
+chave (`ALERT_COOLDOWN`) e o mesmo piso (`ALERT_MIN_SEVERITY`). Todos carregam a origem
+(`server_id` e `site_id`), então o operador da filial enxerga o alerta do próprio servidor.
 
 | Aviso | Chave | Quando |
 |---|---|---|
 | `[CRITICO]` stream do nginx caiu | `nginx_down:<servidor>` | A sessão que lê o access log cai, em servidor com `collect_nginx` |
 | `[ALERTA]` upstream com 5xx | `lb_upstream_5xx:<servidor>:<upstream>` | Na janela `LB_WINDOW` (5 min), o upstream recebeu pelo menos `LB_MIN_REQUESTS` (20) requisições e a proporção de 5xx chegou a `LB_ERROR_RATIO` (0,5) |
 | `[ALERTA]` força bruta | `bruteforce:<servidor>:<ip>` | Um mesmo IP de origem acumulou `BRUTEFORCE_THRESHOLD` (10) ou mais tentativas falhas na janela `BRUTEFORCE_WINDOW` (5 min) |
+| `[CRITICO]` VPS inalcançável | `host_unreachable:<servidor>` | O stream de métricas por SSH cai |
+| `[ALERTA]` container parado | `container_down:<servidor>:<container>` | O `docker ps` do host devolve o container em estado diferente de `running` |
+| `[CRITICO]` certificado inválido | `ssl_invalid:<domínio>` | A verificação TLS do domínio falha |
+| `[ALERTA]` certificado vencendo | `ssl_expiring:<domínio>` | Certificado válido com 14 dias ou menos |
+| `[ALERTA]` estação sem reportar | `agent_absent:<servidor>` | Servidor `kind=agent` **marcado com `absence_alert`** sem métrica há mais de 3 vezes o `report_interval_sec` (piso de 30 s) |
+| `[CRITICO]` coletor sem reportar | `collector_absent:<device_id>` | Credencial `collector` sem contato há mais de 3 vezes o intervalo de inventário (declarado, ou 15 min) |
+
+### Quando cada gatilho se resolve sozinho
+
+Todo gatilho fecha o próprio alerta. "Voltou" tem definição por gatilho, e sempre exige
+evidência positiva: silêncio não resolve nada.
+
+| Gatilho | O alerta vira `resolved` quando |
+|---|---|
+| `host_unreachable` | O SSH reconectou **e** a primeira amostra de métrica da nova sessão foi lida. Conectar e cair antes da amostra não conta |
+| `nginx_down` | A sessão que lê o access log abriu e continua de pé 30 s depois. Sessão que abre e cai em seguida (arquivo inexistente, permissão) não conta |
+| `container_down` | O mesmo container aparece como `running`. Container removido do host **não** resolve: sumir não é voltar, e o alerta fica para o operador fechar |
+| `ssl_invalid` | A verificação seguinte encontra o certificado válido |
+| `ssl_expiring` | O certificado está válido com mais de 14 dias (foi renovado) |
+| `bruteforce` | A janela `BRUTEFORCE_WINDOW` esvaziou: nenhuma falha de login daquele IP no período. Conferido a cada fatia da janela, não só quando chega linha nova |
+| `lb_upstream_5xx` | Na janela `LB_WINDOW` o upstream recebeu pelo menos `LB_MIN_REQUESTS` e a proporção de 5xx ficou abaixo de `LB_ERROR_RATIO`. Upstream que parou de receber tráfego **não** resolve: o balanceador pode tê-lo tirado de rotação justamente por estar morto |
+| `agent_absent`, `collector_absent` | O dispositivo voltou a reportar dentro da janela. Dispositivo revogado ou servidor removido fecha o alerta em silêncio, sem mensagem de recuperação |
+| regra do motor | A métrica voltou para dentro do limite |
+
+O painel lembra o que estava aberto: ao reiniciar, cada vigia recarrega do banco os alertas
+abertos do seu servidor, então um container que voltou a rodar durante a parada do painel
+ainda fecha o alerta dele.
+
+### Alerta de ausência
+
+`host_unreachable` só existe para servidor coletado por SSH. Para a estação com agente e para o
+coletor, quem percebe o silêncio é a vigia de ausência (`ABSENCE_ALERT`, ligada por padrão), que
+roda a cada 30 s:
+
+- **Agente, só o marcado:** estação desligada às 18h é rotina, e alerta que dispara todo dia por
+  motivo normal mata o sistema de alerta. Por isso a estação só é vigiada quando o servidor tem
+  `absence_alert` verdadeiro (`PATCH /api/servers?id=` com `{"absence_alert":true}`; padrão
+  `false`), e o aviso sai como `[ALERTA]`, não `[CRITICO]`. Desmarcar fecha o alerta aberto em
+  silêncio. A conta é a última métrica gravada contra `LiveWindowFor(report_interval_sec)`, isto é, 3 vezes
+  o intervalo declarado, com piso de 30 s.
+- **Coletor:** `last_seen_at` da credencial contra 3 vezes o intervalo de inventário. O coletor
+  declara o intervalo em `report_interval_sec` no envio; sem isso o painel assume 15 min (janela
+  de 45 min). Coletor configurado com intervalo maior **precisa** declarar, ou alerta em falso.
+  Máquina reinstalada (mesmo `machine_id`, credencial nova) conta pela credencial vista por último.
+- **Quem não alerta:** credencial revogada, servidor removido, e coletor autenticado só pelo
+  token compartilhado legado, porque não há credencial para acompanhar. Agente legado é
+  acompanhado normalmente, pela métrica.
+- **Painel recém-iniciado:** nenhum dispositivo é acusado antes de o painel estar no ar há uma
+  janela inteira. Enquanto ele esteve fora ninguém conseguia reportar.
+
+Coletor é infraestrutura: alerta sempre, como `[CRITICO]`. Marque como vigiada a estação que
+precisa ficar ligada (recepção, servidor de arquivos com agente); não há horário de silêncio por
+unidade.
 
 O vigia de força bruta é uma sessão SSH de fundo por servidor, ligada por padrão
 (`AUTHLOG_WATCH`). Ele roda `tail -n 0 -F` no `auth.log` — com `sudo` quando

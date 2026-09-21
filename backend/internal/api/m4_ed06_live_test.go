@@ -78,8 +78,14 @@ func TestLiveUsaOIndiceDeServidorETempo(t *testing.T) {
 		t.Fatalf("analyze: %v", err)
 	}
 
+	tx := database.DB.Begin()
+	defer tx.Rollback()
+	if err := tx.Exec("SET LOCAL enable_seqscan = off").Error; err != nil {
+		t.Fatalf("desligar a varredura sequencial: %v", err)
+	}
+
 	var plano []string
-	linhas, err := database.DB.Raw("EXPLAIN " + consultaUltimasMetricas()).Rows()
+	linhas, err := tx.Raw("EXPLAIN " + database.ConsultaUltimasMetricas).Rows()
 	if err != nil {
 		t.Fatalf("explain: %v", err)
 	}
@@ -95,7 +101,7 @@ func TestLiveUsaOIndiceDeServidorETempo(t *testing.T) {
 	texto := strings.Join(plano, "\n")
 	t.Logf("plano:\n%s", texto)
 	if !strings.Contains(texto, "Index Scan") && !strings.Contains(texto, "Index Only Scan") {
-		t.Skipf("o plano não usou índice nesta base de teste; plano real:\n%s", texto)
+		t.Fatalf("nem com a varredura sequencial desligada o plano usou índice: a consulta do live não é servida por idx_metricserver_srv_ts:\n%s", texto)
 	}
 	if strings.Contains(texto, "Seq Scan on metric_servers") {
 		t.Errorf("o plano ainda varre metric_servers inteira:\n%s", texto)

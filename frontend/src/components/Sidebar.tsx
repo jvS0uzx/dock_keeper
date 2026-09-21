@@ -12,6 +12,7 @@ import { useSession } from './ui/session-context';
 import { ALL_SITES, useSiteScope } from './ui/site-scope-context';
 import Select from './ui/Select';
 import logo from '../assets/dockkeeper.png';
+import { POLL } from '../lib/polling';
 
 interface SidebarProps {
   activeTab: string;
@@ -41,30 +42,29 @@ const TABS: Record<string, { label: string; icon: LucideIcon }> = {
   audit: { label: 'Log de Auditoria', icon: FileClock },
 };
 
-const RESUMO_MS = 15000;
 
 const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => {
   const session = useSession();
-  const { siteId, setSiteId, sites, sitesError } = useSiteScope();
+  const { siteId, numericSiteId, setSiteId, sites, sitesError } = useSiteScope();
   const [alertasAbertos, setAlertasAbertos] = useState(0);
 
   useEffect(() => {
     let vivo = true;
     const carregar = async () => {
       try {
-        const resumo = await api.alertsSummary();
+        const resumo = await api.alertsSummary(numericSiteId);
         if (vivo) setAlertasAbertos(resumo.open);
       } catch {
         return;
       }
     };
     carregar();
-    const timer = setInterval(carregar, RESUMO_MS);
+    const timer = setInterval(carregar, POLL.resumoDeAlertas);
     return () => {
       vivo = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [numericSiteId]);
 
   const visibleTabs = PANELS[panel].tabs.filter(
     (id) => !ADMIN_TABS.has(id) || hasGlobalAdmin(session.accesses),
@@ -189,7 +189,7 @@ const Sidebar = ({ activeTab, setActiveTab, panel, setPanel }: SidebarProps) => 
             </button>
           )}
         </div>
-        <div className="eyebrow mt-3 text-center">v2.1.0</div>
+        <div className="eyebrow mt-3 text-center">v{__APP_VERSION__}</div>
       </div>
     </aside>
   );

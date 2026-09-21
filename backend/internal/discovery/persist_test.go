@@ -61,8 +61,8 @@ func TestPersistUpsertNaoDuplica(t *testing.T) {
 	}
 
 	segunda := fetch(t, testIPKnown)
-	if segunda.OpenPorts != "445,3389,22" {
-		t.Errorf("open_ports = %q, esperado a lista nova", segunda.OpenPorts)
+	if segunda.OpenPorts != "22,445,3389" {
+		t.Errorf("open_ports = %q, esperado a lista nova normalizada", segunda.OpenPorts)
 	}
 	if !segunda.LastSeen.After(primeira.LastSeen) {
 		t.Errorf("last_seen não avançou: %v -> %v", primeira.LastSeen, segunda.LastSeen)

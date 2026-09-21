@@ -18,3 +18,5 @@ que costuma sumir quando alguém revisita a escolha meses depois.
 | [010](010-dashboards-relacionais-com-dono.md) | Dashboards relacionais, com dono e recorte na leitura |
 | [011](011-alerta-em-fila-persistida.md) | O alerta vira linha no banco antes de virar mensagem |
 | [012](012-migracoes-versionadas-em-sql.md) | Esquema por migração versionada, não por AutoMigrate |
+| [013](013-entrega-por-canal-e-alvo-estruturado.md) | Entrega por canal, e o alerta deixa de ser um texto de Telegram |
+| [014](014-balanceador-descoberto-e-eleito-por-trafego.md) | O balanceador é descoberto por sonda e eleito pelo tráfego |

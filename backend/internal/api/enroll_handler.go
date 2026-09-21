@@ -86,7 +86,7 @@ func (c Config) enrollTokensHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c Config) enrollHandler(w http.ResponseWriter, r *http.Request) {
-	if !limitarTaxa(w, "enroll-ip:"+clientIP(r, config.Booleano("TRUST_PROXY_HEADERS", false)), tetoDeEnroll()) {
+	if !limitarTaxa(w, r, "enroll-ip:"+clientIP(r, config.Booleano("TRUST_PROXY_HEADERS", false)), tetoDeEnroll()) {
 		return
 	}
 

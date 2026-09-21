@@ -3,13 +3,13 @@ import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
 } from 'recharts';
 import { AlertTriangle } from 'lucide-react';
-import type { Annotation, HistoryMetric, HistoryPoint } from '../../lib/api';
+import type { Annotation, HistoryPoint } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
-import { formatMetricValue, isRateMetric } from '../../lib/metrics';
+import { ehTaxa, formatarPorUnidade } from '../../lib/metrics';
 
 interface MetricChartProps {
   points: HistoryPoint[];
-  metric: HistoryMetric;
+  unidade: string;
   label: string;
   annotations?: Annotation[];
   loading?: boolean;
@@ -46,7 +46,7 @@ const AnnotationMarker = ({ viewBox, annotation }: MarkerProps) => {
 };
 
 const MetricChart = ({
-  points, metric, label, annotations = [], loading = false, error = null,
+  points, unidade, label, annotations = [], loading = false, error = null,
   emptyMessage = 'Sem dados no período selecionado.',
 }: MetricChartProps) => {
   const gradientId = `fill-${useId().replace(/:/g, '')}`;
@@ -96,8 +96,8 @@ const MetricChart = ({
           tick={{ fill: 'var(--color-text-faint)', fontSize: 11 }}
           tickLine={false}
           axisLine={false}
-          width={isRateMetric(metric) ? 72 : 48}
-          tickFormatter={(v: number) => formatMetricValue(metric, v)}
+          width={ehTaxa(unidade) ? 72 : 48}
+          tickFormatter={(v: number) => formatarPorUnidade(unidade, v)}
         />
         <Tooltip
           contentStyle={{
@@ -110,7 +110,7 @@ const MetricChart = ({
           labelStyle={{ color: 'var(--color-text-mut)' }}
           itemStyle={{ color: 'var(--color-text-hi)' }}
           labelFormatter={(ms) => formatDateTime(new Date(Number(ms)).toISOString())}
-          formatter={(value) => [formatMetricValue(metric, Number(value)), label]}
+          formatter={(value) => [formatarPorUnidade(unidade, Number(value)), label]}
         />
         {annotations.map((a) => (
           <ReferenceLine

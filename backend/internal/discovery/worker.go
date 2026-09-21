@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +19,8 @@ import (
 
 const (
 	defaultInterval = 15 * time.Minute
+
+	MaxPortasGravadas = 128
 )
 
 type Sweeper struct {
@@ -185,7 +188,7 @@ func persist(hosts []scan.Host, siteID *uint) {
 			IP:         h.IP,
 			Hostname:   h.Hostname,
 			MAC:        h.MAC,
-			OpenPorts:  joinPorts(h.OpenPorts),
+			OpenPorts:  JoinPorts(h.OpenPorts),
 			DeviceType: DeviceType(h.OpenPorts),
 			SiteID:     siteID,
 			FirstSeen:  now,
@@ -233,9 +236,27 @@ func prune() {
 	}
 }
 
-func joinPorts(ports []int) string {
-	parts := make([]string, len(ports))
-	for i, p := range ports {
+func NormalizarPortas(ports []int) []int {
+	vistas := make(map[int]bool, len(ports))
+	out := make([]int, 0, len(ports))
+	for _, p := range ports {
+		if p < 1 || p > 65535 || vistas[p] {
+			continue
+		}
+		vistas[p] = true
+		out = append(out, p)
+	}
+	slices.Sort(out)
+	if len(out) > MaxPortasGravadas {
+		out = out[:MaxPortasGravadas]
+	}
+	return out
+}
+
+func JoinPorts(ports []int) string {
+	normalizadas := NormalizarPortas(ports)
+	parts := make([]string, len(normalizadas))
+	for i, p := range normalizadas {
 		parts[i] = strconv.Itoa(p)
 	}
 	return strings.Join(parts, ",")

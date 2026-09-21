@@ -212,6 +212,14 @@ deriva dele a janela de tolerância antes de dar a máquina como offline. Ver
 
 Temperatura ausente sai **fora do JSON**, não como zero. Ver o mesmo documento.
 
+O mesmo vale para `cpu` e `load1`, desde 19/09/2026. Se a leitura falha, o campo não sai
+do envio e o painel grava `NULL`; o resto da amostra (memória, disco, rede) segue
+normalmente. **No Windows `load1` nunca é enviado**, porque a plataforma não tem load
+average: antes o agente mandava `0.00` como se fosse medida, e uma regra `load < X`
+ou `cpu < X` disparava em falso em toda estação. Um zero medido de verdade (máquina
+ociosa) continua saindo como `0`. No log de envio, a CPU sem leitura aparece como
+`cpu=sem medida`.
+
 A taxa de rede vai em `net_rx_bps` e `net_tx_bps`, em bytes por segundo. O agente
 soma os contadores das interfaces físicas e divide a diferença entre dois ciclos
 pelo tempo decorrido. Ficam de fora as interfaces cujo nome começa com `lo`,

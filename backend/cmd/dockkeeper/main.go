@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"github.com/jvS0uzx/dock_keeper/internal/discovery"
 	"github.com/jvS0uzx/dock_keeper/internal/logstore"
+	"github.com/jvS0uzx/dock_keeper/internal/malha"
 	"github.com/jvS0uzx/dock_keeper/internal/network"
 	"github.com/jvS0uzx/dock_keeper/internal/observabilidade"
 	"github.com/jvS0uzx/dock_keeper/internal/rules"
@@ -42,7 +44,11 @@ func main() {
 	observabilidade.Configurar()
 	log.Println("Iniciando motor DockKeeper...")
 
-	_ = godotenv.Load("../.env", ".env")
+	for _, arquivo := range []string{"../.env", ".env"} {
+		if err := godotenv.Load(arquivo); err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Printf("Arquivo %s ignorado, não foi possível ler: %v", arquivo, err)
+		}
+	}
 
 	cfg, err := api.LoadConfig(apiAddr())
 	if err != nil {
@@ -71,9 +77,12 @@ func main() {
 	logRetention := database.RetentionDays("LOG_RETENTION_DAYS", database.DefaultLogRetentionDays)
 	logstore.StartRetention(logRetention, retentionSweep)
 
+	api.AvisarJanelaDaMalha()
+
 	network.StartSSLWorker(sslInterval)
 
 	rules.StartEngine(rulesInterval)
+	rules.StartAbsenceWatch(rulesInterval)
 
 	startCollectors(cfg.SSHKeyPath)
 
@@ -82,6 +91,7 @@ func main() {
 
 	alert.StartHealthWatch(ctx)
 	alert.StartDispatcher(ctx)
+	malha.StartWorker(ctx, 0)
 	discovery.Default.Start(ctx)
 
 	if err := api.StartServer(ctx, cfg); err != nil {
@@ -111,6 +121,7 @@ func startCollectors(sshKeyPath string) {
 			User:         s.User,
 			Port:         s.Port,
 			KeyPath:      sshKeyPath,
+			SiteID:       s.SiteID,
 			CollectNginx: s.CollectNginx,
 		})
 		started++

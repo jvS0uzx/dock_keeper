@@ -32,10 +32,6 @@ const defaultAlertRetentionDays = 90
 
 const defaultAddressRetentionDays = 30
 
-func PruneAlertsParaTeste(maxAge time.Duration) {
-	pruneAlerts(maxAge)
-}
-
 func pruneAlerts(maxAge time.Duration) {
 	cutoff := time.Now().UTC().Add(-maxAge)
 	sql := `DELETE FROM alerts WHERE id IN (

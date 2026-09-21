@@ -1,0 +1,18 @@
+export const POLL = {
+  aoVivo: 2000,
+  balanceador: 2000,
+  containers: 3000,
+  servidores: 5000,
+  estacoes: 10000,
+  maquina: 10000,
+  certificados: 10000,
+  alertas: 15000,
+  resumoDeAlertas: 15000,
+  unidade: 15000,
+  serieDoGrafico: 15000,
+  inventarioDeRede: 20000,
+  planta: 20000,
+  saudeDoPainel: 30000,
+  historicoDoPainel: 30000,
+  historicoDaMaquina: 30000,
+} as const;

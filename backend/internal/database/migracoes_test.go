@@ -54,6 +54,15 @@ func bancoVazio(t *testing.T) *gorm.DB {
 }
 
 func trocarBancoNoDSN(dsn, nome string) string {
+	if strings.Contains(dsn, "dbname=") {
+		campos := strings.Fields(dsn)
+		for i, campo := range campos {
+			if strings.HasPrefix(campo, "dbname=") {
+				campos[i] = "dbname=" + nome
+				return strings.Join(campos, " ")
+			}
+		}
+	}
 	if i := strings.LastIndex(dsn, "/"); i >= 0 {
 		resto := ""
 		if j := strings.Index(dsn[i:], "?"); j >= 0 {
@@ -62,6 +71,24 @@ func trocarBancoNoDSN(dsn, nome string) string {
 		return dsn[:i+1] + nome + resto
 	}
 	return dsn
+}
+
+func TestTrocarBancoNoDSNCobreOsDoisFormatos(t *testing.T) {
+	casos := []struct {
+		nome     string
+		dsn      string
+		esperado string
+	}{
+		{"url", "postgres://u:s@localhost:5433/dockkeeper?sslmode=disable", "postgres://u:s@localhost:5433/alvo?sslmode=disable"},
+		{"chave-valor", "host=localhost user=u password=s dbname=dockkeeper port=5433 sslmode=disable", "host=localhost user=u password=s dbname=alvo port=5433 sslmode=disable"},
+	}
+	for _, caso := range casos {
+		t.Run(caso.nome, func(t *testing.T) {
+			if got := trocarBancoNoDSN(caso.dsn, "alvo"); got != caso.esperado {
+				t.Errorf("trocarBancoNoDSN = %q, esperado %q", got, caso.esperado)
+			}
+		})
+	}
 }
 
 func versaoAplicada(t *testing.T, db *gorm.DB) int {

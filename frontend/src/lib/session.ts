@@ -27,6 +27,11 @@ const roleRank: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 };
 export const canOperate = (role: Role): boolean => roleRank[role] >= roleRank.operator;
 export const canAdmin = (role: Role): boolean => roleRank[role] >= roleRank.admin;
 
+export const podeOperarNaUnidade = (accesses: SiteAccess[], siteId: number | null): boolean =>
+  accesses.some(
+    (a) => canOperate(a.role) && (a.site_id === null || (siteId !== null && a.site_id === siteId)),
+  );
+
 const STORAGE_KEY = 'dockkeeper.session';
 
 export const loadSession = (): SessionInfo | null => {

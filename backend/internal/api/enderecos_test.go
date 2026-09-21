@@ -18,7 +18,7 @@ func TestIngestaoGravaEnderecosDeclarados(t *testing.T) {
 	database.DB.Unscoped().Where("name = ?", "estacao-enderecos").Delete(&database.Server{})
 
 	corpo := `{"hostname":"estacao-enderecos","machine_id":"m-enderecos","cpu":12.5,` +
-		`"addresses":["100.100.0.2","10.9.0.4","127.0.0.1","nao-e-ip"]}`
+		`"addresses":["100.100.0.11","10.9.0.4","127.0.0.1","nao-e-ip"]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/ingest/metrics", strings.NewReader(corpo))
 	req.Header.Set(headerLegacyToken, "token-enderecos")
 	rec := httptest.NewRecorder()
@@ -45,7 +45,7 @@ func TestIngestaoGravaEnderecosDeclarados(t *testing.T) {
 	for _, a := range porServidor[server.ID] {
 		guardados[a] = true
 	}
-	if !guardados["100.100.0.2"] || !guardados["10.9.0.4"] {
+	if !guardados["100.100.0.11"] || !guardados["10.9.0.4"] {
 		t.Errorf("endereços declarados não foram gravados: %v", porServidor[server.ID])
 	}
 	if guardados["127.0.0.1"] || guardados["nao-e-ip"] {
@@ -59,7 +59,7 @@ func TestLiveDevolveEnderecos(t *testing.T) {
 	s := servidorDeRename(t, "vps-live-enderecos", "203.0.113.240", nil)
 
 	database.RegistrarEnderecos(s.ID, []string{"10.4.0.1"})
-	database.RegistrarAliases(s.ID, []string{"100.100.0.1"})
+	database.RegistrarAliases(s.ID, []string{"100.100.0.10"})
 
 	rec := pedirComSessao(t, http.MethodGet, "/api/metrics/live", "", sess)
 	if rec.Code != http.StatusOK {
@@ -85,7 +85,7 @@ func TestLiveDevolveEnderecos(t *testing.T) {
 		for _, a := range srv.Addresses {
 			tem[a] = true
 		}
-		if !tem["10.4.0.1"] || !tem["100.100.0.1"] {
+		if !tem["10.4.0.1"] || !tem["100.100.0.10"] {
 			t.Errorf("live trouxe addresses=%v, esperado coletado e alias juntos", srv.Addresses)
 		}
 		if !tem[srv.HostIP] {
@@ -102,7 +102,7 @@ func TestPatchGravaAliasManual(t *testing.T) {
 	s := servidorDeRename(t, "vps-com-alias", "203.0.113.241", nil)
 
 	rec := pedirComSessao(t, http.MethodPatch, "/api/servers?id="+s.ID,
-		`{"aliases":["100.100.0.2","10.5.0.7"]}`, sess)
+		`{"aliases":["100.100.0.11","10.5.0.7"]}`, sess)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH com aliases: status %d, esperado 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -122,7 +122,7 @@ func TestPatchAliasInvalidoRecusa(t *testing.T) {
 	s := servidorDeRename(t, "vps-alias-ruim", "203.0.113.242", nil)
 
 	rec := pedirComSessao(t, http.MethodPatch, "/api/servers?id="+s.ID,
-		`{"aliases":["100.100.0.2","nao-e-ip"]}`, sess)
+		`{"aliases":["100.100.0.11","nao-e-ip"]}`, sess)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("alias inválido: status %d, esperado 400 (%s)", rec.Code, rec.Body.String())
 	}

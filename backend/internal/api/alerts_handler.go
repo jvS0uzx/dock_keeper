@@ -50,9 +50,84 @@ func alertLimit(raw string) (int, bool) {
 	return n, true
 }
 
+type alertaComOrigem struct {
+	database.Alert
+	ServerName *string `json:"server_name"`
+	SiteName   *string `json:"site_name"`
+}
+
+func escopoDosAlertas(w http.ResponseWriter, r *http.Request) (siteScope, bool) {
+	escopo, status := resolveScope(sessionFrom(r), r)
+	switch status {
+	case 0:
+		return escopo, true
+	case http.StatusBadRequest:
+		writeError(w, status, "site_id inválido: use o id da unidade, none ou all")
+	default:
+		writeError(w, status, "unidade fora do seu alcance")
+	}
+	return siteScope{}, false
+}
+
+func comOrigem(r *http.Request, alertas []database.Alert) ([]alertaComOrigem, error) {
+	servidores, unidades := []string{}, []uint{}
+	for _, a := range alertas {
+		if a.ServerID != nil {
+			servidores = append(servidores, *a.ServerID)
+		}
+		if a.SiteID != nil {
+			unidades = append(unidades, *a.SiteID)
+		}
+	}
+
+	nomeDoServidor := map[string]string{}
+	if len(servidores) > 0 {
+		var linhas []database.Server
+		err := database.From(r.Context()).Unscoped().Select("id", "name").Where("id IN ?", servidores).Find(&linhas).Error
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range linhas {
+			nomeDoServidor[s.ID] = s.Name
+		}
+	}
+	nomeDaUnidade := map[uint]string{}
+	if len(unidades) > 0 {
+		var linhas []database.Site
+		err := database.From(r.Context()).Select("id", "name").Where("id IN ?", unidades).Find(&linhas).Error
+		if err != nil {
+			return nil, err
+		}
+		for _, u := range linhas {
+			nomeDaUnidade[u.ID] = u.Name
+		}
+	}
+
+	out := make([]alertaComOrigem, 0, len(alertas))
+	for _, a := range alertas {
+		linha := alertaComOrigem{Alert: a}
+		if a.ServerID != nil {
+			if nome, ok := nomeDoServidor[*a.ServerID]; ok {
+				linha.ServerName = &nome
+			}
+		}
+		if a.SiteID != nil {
+			if nome, ok := nomeDaUnidade[*a.SiteID]; ok {
+				linha.SiteName = &nome
+			}
+		}
+		out = append(out, linha)
+	}
+	return out, nil
+}
+
 func alertsHandler(w http.ResponseWriter, r *http.Request) {
-	sess := sessionFrom(r)
 	q := r.URL.Query()
+
+	escopo, ok := escopoDosAlertas(w, r)
+	if !ok {
+		return
+	}
 
 	status, ok := alertStatusFilter(q.Get("status"))
 	if !ok {
@@ -65,7 +140,7 @@ func alertsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx := database.From(r.Context()).Model(&database.Alert{})
+	tx := escopo.apply(database.From(r.Context()).Model(&database.Alert{}))
 	if status != "all" {
 		tx = tx.Where("status = ?", status)
 	}
@@ -87,54 +162,47 @@ func alertsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var alertas []database.Alert
-	if err := tx.Order("created_at desc, id desc").Limit(maxAlertLimit).Find(&alertas).Error; err != nil {
+	if err := tx.Order("created_at desc, id desc").Limit(limit).Find(&alertas).Error; err != nil {
 		log.Printf("[Alertas] erro ao listar: %v", err)
 		writeError(w, http.StatusInternalServerError, "falha ao listar os alertas")
 		return
 	}
 
-	out := make([]database.Alert, 0, len(alertas))
-	for _, a := range alertas {
-		if !alertVisible(sess, a) {
-			continue
-		}
-		out = append(out, a)
-		if len(out) == limit {
-			break
-		}
+	out, err := comOrigem(r, alertas)
+	if err != nil {
+		log.Printf("[Alertas] erro ao resolver a origem: %v", err)
+		writeError(w, http.StatusInternalServerError, "falha ao listar os alertas")
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func alertsSummaryHandler(w http.ResponseWriter, r *http.Request) {
-	sess := sessionFrom(r)
+	escopo, ok := escopoDosAlertas(w, r)
+	if !ok {
+		return
+	}
 
-	var alertas []database.Alert
-	err := database.From(r.Context()).Where("status <> ? OR delivery = ?",
-		database.AlertStatusResolved, database.AlertDeliveryFalhou).
-		Order("created_at desc").Limit(2000).Find(&alertas).Error
+	var contagem struct {
+		Open   int
+		Acked  int
+		Falhou int
+	}
+	err := escopo.apply(database.From(r.Context()).Model(&database.Alert{})).
+		Select(`count(*) FILTER (WHERE status = ?) AS open,
+			count(*) FILTER (WHERE status = ?) AS acked,
+			count(*) FILTER (WHERE delivery = ?) AS falhou`,
+			database.AlertStatusOpen, database.AlertStatusAcked, database.AlertDeliveryFalhou).
+		Where("status <> ?", database.AlertStatusResolved).
+		Scan(&contagem).Error
 	if err != nil {
 		log.Printf("[Alertas] erro ao resumir: %v", err)
 		writeError(w, http.StatusInternalServerError, "falha ao resumir os alertas")
 		return
 	}
-
-	resumo := map[string]int{"open": 0, "acked": 0, "falhou": 0}
-	for _, a := range alertas {
-		if !alertVisible(sess, a) {
-			continue
-		}
-		switch a.Status {
-		case database.AlertStatusOpen:
-			resumo["open"]++
-		case database.AlertStatusAcked:
-			resumo["acked"]++
-		}
-		if a.Delivery == database.AlertDeliveryFalhou && a.Status != database.AlertStatusResolved {
-			resumo["falhou"]++
-		}
-	}
-	writeJSON(w, http.StatusOK, resumo)
+	writeJSON(w, http.StatusOK, map[string]int{
+		"open": contagem.Open, "acked": contagem.Acked, "falhou": contagem.Falhou,
+	})
 }
 
 func alertDaRota(w http.ResponseWriter, r *http.Request, sess auth.Session) (database.Alert, bool) {
@@ -167,6 +235,10 @@ func alertAckHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	alerta, ok := alertDaRota(w, r, sess)
 	if !ok {
+		return
+	}
+	if !auth.Allows(auth.RoleForSite(sess.Accesses, alerta.SiteID), auth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "reconhecer alerta exige perfil de operador")
 		return
 	}
 

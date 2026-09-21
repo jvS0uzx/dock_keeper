@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import DegradacaoAviso from './DegradacaoAviso';
 
@@ -72,7 +72,7 @@ describe('faixa de degradação', () => {
     expect(faixa.textContent).toMatch(/alerta com entrega falhou/);
     expect(faixa.textContent).toMatch(/3/);
 
-    const usuario = userEvent.setup();
+    const usuario = semEspera();
     await usuario.click(screen.getByRole('button', { name: /ver alertas/i }));
     expect(irParaAlertas).toHaveBeenCalled();
   });
@@ -111,7 +111,7 @@ describe('faixa de degradação', () => {
     expect(faixa.textContent).toMatch(/alerta preso sem canal de entrega configurado/);
     expect(faixa.textContent).toMatch(/2 alerta\(s\) sem canal de entrega/);
 
-    const usuario = userEvent.setup();
+    const usuario = semEspera();
     await usuario.click(screen.getByRole('button', { name: /ver alertas/i }));
     expect(irParaAlertas).toHaveBeenCalled();
   });

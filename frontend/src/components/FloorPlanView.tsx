@@ -15,8 +15,8 @@ import { useRole } from './ui/session-context';
 import { useNavigation } from './ui/navigation-context';
 import { useSiteScope } from './ui/site-scope-context';
 import Select from './ui/Select';
+import { POLL } from '../lib/polling';
 
-const LIVE_POLL_MS = 20000;
 
 type Mode = 'view' | 'edit';
 
@@ -149,7 +149,7 @@ const FloorPlanView = () => {
 
     if (mode === 'edit') return () => controller.abort();
 
-    const interval = setInterval(() => refreshPins(controller.signal), LIVE_POLL_MS);
+    const interval = setInterval(() => refreshPins(controller.signal), POLL.planta);
     return () => {
       clearInterval(interval);
       controller.abort();

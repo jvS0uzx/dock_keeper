@@ -75,23 +75,14 @@ func Connect() error {
 		return err
 	}
 
-	if !autoMigrateLigado() {
-		return Migrate(DB)
+	return prepararEsquema(DB)
+}
+
+func prepararEsquema(db *gorm.DB) error {
+	if autoMigrateLigado() {
+		log.Println("[Banco] DB_AUTOMIGRATE foi removido: o AutoMigrate criava banco sem chaves estrangeiras, CHECKs e índices; o esquema sobe pelas migrações versionadas")
 	}
-
-	err = DB.AutoMigrate(&Server{}, &Container{}, &MetricServer{}, &MetricContainer{}, &MetricLoadBalancer{}, &Domain{}, &AlertRule{}, &LogEntry{}, &Site{}, &NetworkHost{}, &FloorPlan{}, &FloorPlanPin{}, &MetricServerTrend{}, &User{}, &UserSiteAccess{}, &AuditLog{},
-		&EnrollmentToken{}, &DeviceCredential{}, &UserSession{}, &AlertState{}, &Alert{},
-		&Dashboard{}, &DashboardPanel{}, &Annotation{}, &ServerAddress{})
-	if err != nil {
-		return fmt.Errorf("erro ao migrar as tabelas: %w", err)
-	}
-
-	log.Println("[RealTime] Schemas do Banco de Dados criados/atualizados com sucesso!")
-
-	migrateNetworkHostSiteIP()
-	migrateServerMachineID()
-
-	return nil
+	return Migrate(db)
 }
 
 func autoMigrateLigado() bool {
@@ -99,22 +90,8 @@ func autoMigrateLigado() bool {
 	if raw == "" {
 		return false
 	}
-	ligado, err := strconv.ParseBool(raw)
-	if err != nil {
-		log.Printf("[Banco] DB_AUTOMIGRATE=%q inválido; usando as migrações versionadas", raw)
-		return false
-	}
+	ligado, _ := strconv.ParseBool(raw)
 	return ligado
-}
-
-func migrateServerMachineID() {
-	const stmt = `CREATE UNIQUE INDEX IF NOT EXISTS idx_servers_site_machine
-		ON servers (COALESCE(site_id, 0), machine_id)
-		WHERE machine_id <> '' AND deleted_at IS NULL`
-
-	if err := DB.Exec(stmt).Error; err != nil {
-		log.Printf("[Migracao] AVISO: indice de machine_id nao criado: %v", err)
-	}
 }
 
 func configurePool(db *gorm.DB) error {
@@ -141,45 +118,4 @@ func configurePool(db *gorm.DB) error {
 	log.Printf("[Banco] pool: até %d conexões abertas, %d ociosas, vida útil de %s",
 		maxOpen, maxIdle, lifetime)
 	return nil
-}
-
-func migrateNetworkHostSiteIP() {
-	stmts := []string{
-		`DO $$
-		DECLARE idx text;
-		BEGIN
-			FOR idx IN
-				SELECT i.relname
-				FROM pg_index x
-				JOIN pg_class i ON i.oid = x.indexrelid
-				JOIN pg_class t ON t.oid = x.indrelid
-				JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = x.indkey[0]
-				WHERE t.relname = 'network_hosts'
-				  AND x.indisunique
-				  AND NOT x.indisprimary
-				  AND x.indnkeyatts = 1
-				  AND a.attname = 'ip'
-			LOOP
-				EXECUTE format('DROP INDEX IF EXISTS %I', idx);
-			END LOOP;
-		END $$`,
-
-		`DELETE FROM network_hosts a
-		 USING network_hosts b
-		 WHERE a.ip = b.ip
-		   AND ` + networkHostSiteExpr("a.") + ` = ` + networkHostSiteExpr("b.") + `
-		   AND (a.last_seen, a.id) < (b.last_seen, b.id)`,
-
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_network_hosts_site_ip
-		 ON network_hosts (` + networkHostSiteExpr("") + `, ip)`,
-
-		`CREATE INDEX IF NOT EXISTS idx_network_hosts_ip ON network_hosts (ip)`,
-	}
-
-	for _, s := range stmts {
-		if err := DB.Exec(s).Error; err != nil {
-			log.Printf("[Migração] erro ao ajustar a unicidade do inventário: %v", err)
-			return
-		}
-	}
 }

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import AlertsView from './AlertsView';
 import Sidebar from './Sidebar';
@@ -189,7 +189,7 @@ describe('AlertsView', () => {
   });
 
   it('filtra por estado e por severidade', async () => {
-    const usuario = userEvent.setup();
+    const usuario = semEspera();
     renderizar(<AlertsView />);
     await screen.findByText('CPU acima de 90% em vps-loja');
 
@@ -209,7 +209,7 @@ describe('AlertsView', () => {
   });
 
   it('reconhece com confirmação e recarrega', async () => {
-    const usuario = userEvent.setup();
+    const usuario = semEspera();
     renderizar(<AlertsView />);
 
     const linha = await linhaDe('CPU acima de 90% em vps-loja');
@@ -221,7 +221,7 @@ describe('AlertsView', () => {
 
   it('não reconhece quando a confirmação é negada', async () => {
     (dialogo.confirm as ReturnType<typeof vi.fn>).mockResolvedValue(false);
-    const usuario = userEvent.setup();
+    const usuario = semEspera();
     renderizar(<AlertsView />);
 
     const linha = await linhaDe('CPU acima de 90% em vps-loja');
@@ -271,7 +271,7 @@ describe('AlertsView — entrega sem canal', () => {
   });
 
   it('explica no detalhe o que acontece quando o canal for configurado', async () => {
-    const usuario = userEvent.setup();
+    const usuario = semEspera();
     renderizar(<AlertsView />);
 
     const sem = await linhaDe('Disco acima de 85% em vps-mail');
@@ -284,7 +284,7 @@ describe('AlertsView — entrega sem canal', () => {
   });
 
   it('não conta o sem canal como tentativa de entrega', async () => {
-    const usuario = userEvent.setup();
+    const usuario = semEspera();
     renderizar(<AlertsView />);
 
     const sem = await linhaDe('Disco acima de 85% em vps-mail');

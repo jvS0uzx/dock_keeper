@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { avancar, comRelogioFalso } from '../test/usuario';
+import { POLL } from '../lib/polling';
 
 import Dashboard from './Dashboard';
 import { DialogContext, type DialogApi } from './ui/dialog-context';
@@ -33,21 +34,21 @@ const base = {
   rtt_ms: null,
 };
 
-const lb = { ...base, id: 'lb', name: 'Load Balancer', host_ip: '198.51.100.38', addresses: ['198.51.100.38'], collect_nginx: true };
-const lb2 = { ...base, id: 'lb2', name: 'Load Balancer 2', host_ip: '198.51.100.37', addresses: ['198.51.100.37'], collect_nginx: true };
-const vps1 = { ...base, id: 'v1', name: 'VPS-1', host_ip: '198.51.100.25', addresses: ['198.51.100.25'], behind_lb: true };
-const vps2 = { ...base, id: 'v2', name: 'VPS-2', host_ip: '198.51.100.39', addresses: ['198.51.100.39'], behind_lb: true };
-const vps2ComOverlay = { ...vps2, addresses: ['198.51.100.39', '100.100.0.2'] };
+const lb = { ...base, id: 'lb', name: 'Load Balancer', host_ip: '203.0.113.38', addresses: ['203.0.113.38'], collect_nginx: true };
+const lb2 = { ...base, id: 'lb2', name: 'Load Balancer 2', host_ip: '203.0.113.37', addresses: ['203.0.113.37'], collect_nginx: true };
+const vps1 = { ...base, id: 'v1', name: 'VPS-1', host_ip: '203.0.113.25', addresses: ['203.0.113.25'], behind_lb: true };
+const vps2 = { ...base, id: 'v2', name: 'VPS-2', host_ip: '203.0.113.39', addresses: ['203.0.113.39'], behind_lb: true };
+const vps2ComOverlay = { ...vps2, addresses: ['203.0.113.39', '100.100.0.11'] };
 
 const trafego = [
-  { upstream_addr: '198.51.100.25:80', server_name: 'app.exemplo', status: '200', requests_count: 68, server_id: 'lb' },
-  { upstream_addr: '198.51.100.39:80', server_name: 'app.exemplo', status: '200', requests_count: 35, server_id: 'lb' },
-  { upstream_addr: '100.100.0.2:80', server_name: 'app.exemplo', status: '200', requests_count: 11, server_id: 'lb' },
+  { upstream_addr: '203.0.113.25:80', server_name: 'app.exemplo', status: '200', requests_count: 68, server_id: 'lb' },
+  { upstream_addr: '203.0.113.39:80', server_name: 'app.exemplo', status: '200', requests_count: 35, server_id: 'lb' },
+  { upstream_addr: '100.100.0.11:80', server_name: 'app.exemplo', status: '200', requests_count: 11, server_id: 'lb' },
 ];
 
 const doisBalanceadores = [
-  { upstream_addr: '198.51.100.39:80', server_name: 'app.exemplo', status: '200', requests_count: 20, server_id: 'lb' },
-  { upstream_addr: '100.100.0.2:80', server_name: 'app.exemplo', status: '200', requests_count: 6, server_id: 'lb2' },
+  { upstream_addr: '203.0.113.39:80', server_name: 'app.exemplo', status: '200', requests_count: 20, server_id: 'lb' },
+  { upstream_addr: '100.100.0.11:80', server_name: 'app.exemplo', status: '200', requests_count: 6, server_id: 'lb2' },
 ];
 
 const api = vi.hoisted(() => ({
@@ -111,16 +112,20 @@ beforeEach(() => {
   localStorage.clear();
   api.liveMetrics
     .mockReset()
-    .mockResolvedValue({ servers: [lb, vps1, vps2ComOverlay], containers: [], load_balancing: trafego });
+    .mockResolvedValue({ servers: [lb, vps1, vps2ComOverlay], containers: [], load_balancing: trafego, lb_window_sec: 5 });
   api.servers.mockReset().mockResolvedValue([
-    { id: 'lb', name: 'Load Balancer', host_ip: '198.51.100.38', user: 'root', port: 22, created_at: '', aliases: [] },
-    { id: 'v1', name: 'VPS-1', host_ip: '198.51.100.25', user: 'root', port: 22, created_at: '', aliases: [] },
-    { id: 'v2', name: 'VPS-2', host_ip: '198.51.100.39', user: 'root', port: 22, created_at: '', aliases: [] },
+    { id: 'lb', name: 'Load Balancer', host_ip: '203.0.113.38', user: 'root', port: 22, created_at: '', aliases: [] },
+    { id: 'v1', name: 'VPS-1', host_ip: '203.0.113.25', user: 'root', port: 22, created_at: '', aliases: [] },
+    { id: 'v2', name: 'VPS-2', host_ip: '203.0.113.39', user: 'root', port: 22, created_at: '', aliases: [] },
   ]);
   api.updateServerAliases.mockReset().mockResolvedValue({});
   api.history.mockReset().mockResolvedValue([]);
   api.annotations.mockReset().mockResolvedValue([]);
   (dialogo.notify as ReturnType<typeof vi.fn>).mockReset();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('um nó por máquina, não por endereço', () => {
@@ -132,32 +137,33 @@ describe('um nó por máquina, não por endereço', () => {
 
     const vps2 = await noChamado('VPS-2');
     expect(within(vps2).getByText('46 req / 5s')).toBeTruthy();
-    expect(vps2.textContent).toMatch(/198\.51\.100\.39:80/);
-    expect(vps2.textContent).toMatch(/100\.100\.0\.2:80/);
+    expect(vps2.textContent).toMatch(/203\.0\.113\.39:80/);
+    expect(vps2.textContent).toMatch(/100\.100\.0\.11:80/);
 
     const vps1 = await noChamado('VPS-1');
     expect(within(vps1).getByText('68 req / 5s')).toBeTruthy();
-  }, 15000);
+  });
 
   it('o cabeçalho conta máquinas, não endereços', async () => {
     renderizar(comoAdmin);
 
     expect(await screen.findByText(/2 atrás do balanceador/i)).toBeTruthy();
     expect(screen.queryByText(/3 atrás do balanceador/i)).toBeNull();
-  }, 15000);
+  });
 
   it('uma aresta por par balanceador e máquina, mesmo com dois endereços', async () => {
     renderizar(comoAdmin);
 
     await screen.findAllByTestId('malha-no');
     await vi.waitFor(() => expect(arestasDeMaquina()).toHaveLength(2));
-  }, 15000);
+  });
 
   it('dois balanceadores para a mesma máquina dão duas arestas e um nó', async () => {
     api.liveMetrics.mockReset().mockResolvedValue({
       servers: [lb, lb2, vps2ComOverlay],
       containers: [],
       load_balancing: doisBalanceadores,
+      lb_window_sec: 5,
     });
     renderizar(comoAdmin);
 
@@ -168,38 +174,67 @@ describe('um nó por máquina, não por endereço', () => {
 
     const vps2 = await noChamado('VPS-2');
     expect(within(vps2).getByText('26 req / 5s')).toBeTruthy();
-  }, 15000);
+  });
 
   it('associar um endereço solto funde o nó em vez de duplicar', async () => {
-    const usuario = userEvent.setup();
+    const usuario = comRelogioFalso();
     api.liveMetrics.mockReset().mockResolvedValue({
       servers: [lb, vps1, vps2],
       containers: [],
       load_balancing: trafego,
+      lb_window_sec: 5,
     });
     renderizar(comoAdmin);
 
     await vi.waitFor(() => expect(screen.getAllByTestId('malha-no')).toHaveLength(3));
 
-    const solto = await noChamado('100.100.0.2:80');
+    const solto = await noChamado('100.100.0.11:80');
     await usuario.click(within(solto).getByRole('button', { name: /associar/i }));
 
-    const seletor = screen.getByRole('combobox', { name: 'Associar 100.100.0.2:80 a um servidor' });
+    const seletor = screen.getByRole('combobox', { name: 'Associar 100.100.0.11:80 a um servidor' });
     await usuario.click(seletor);
     await usuario.click(await screen.findByRole('option', { name: 'VPS-2' }));
     await vi.waitFor(() => expect(seletor.textContent).toMatch('VPS-2'));
 
     await usuario.click(screen.getByRole('button', { name: 'Salvar' }));
 
-    await vi.waitFor(() => expect(api.updateServerAliases).toHaveBeenCalledWith('v2', ['100.100.0.2']));
+    await vi.waitFor(() => expect(api.updateServerAliases).toHaveBeenCalledWith('v2', ['100.100.0.11']));
 
     api.liveMetrics.mockResolvedValue({
       servers: [lb, vps1, vps2ComOverlay],
       containers: [],
       load_balancing: trafego,
+      lb_window_sec: 5,
     });
-    await vi.waitFor(() => expect(screen.getAllByTestId('malha-no')).toHaveLength(2), { timeout: 8000 });
+    await avancar(POLL.aoVivo);
+    expect(screen.getAllByTestId('malha-no')).toHaveLength(2);
     expect(screen.getAllByText('VPS-2')).toHaveLength(1);
     expect(within(await noChamado('VPS-2')).getByText('46 req / 5s')).toBeTruthy();
-  }, 20000);
+  });
+
+  it('a janela do balanceador vem da API, não de um 5s cravado', async () => {
+    api.liveMetrics.mockReset().mockResolvedValue({
+      servers: [lb, vps1, vps2ComOverlay],
+      containers: [],
+      load_balancing: trafego,
+      lb_window_sec: 10,
+    });
+    renderizar(comoAdmin);
+
+    expect(within(await noChamado('VPS-2')).getByText('46 req / 10s')).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/5s/);
+  });
+
+  it('sem lb_window_sec a tela diz que a janela não veio, sem inventar número', async () => {
+    api.liveMetrics.mockReset().mockResolvedValue({
+      servers: [lb, vps1, vps2ComOverlay],
+      containers: [],
+      load_balancing: trafego,
+      lb_window_sec: null,
+    });
+    renderizar(comoAdmin);
+
+    expect(within(await noChamado('VPS-2')).getByText('46 req / janela não informada')).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/req \/ \d/);
+  });
 });

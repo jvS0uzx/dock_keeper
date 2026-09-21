@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { compararNumeros, mediaDefinida } from './agregado';
+import { compararNumeros, mediaDefinida, percentualDeUso } from './agregado';
 
 describe('mediaDefinida', () => {
   it('ignora quem não tem medição e conta de quantos a média veio', () => {
@@ -31,5 +31,16 @@ describe('compararNumeros', () => {
   it('mantém o zero medido antes do nulo', () => {
     const ordenado = [null, 0].sort((a, b) => compararNumeros(a, b, 1));
     expect(ordenado).toEqual([0, null]);
+  });
+});
+
+describe('ocupação sem total não é zero', () => {
+  it('sem total medido devolve nulo, para a tela mostrar travessão', () => {
+    expect(percentualDeUso(0, 0)).toBeNull();
+  });
+
+  it('com total medido devolve a fração, inclusive zero de verdade', () => {
+    expect(percentualDeUso(0, 100)).toBe(0);
+    expect(percentualDeUso(25, 100)).toBe(25);
   });
 });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import DevicesView from './DevicesView';
 import { SessionContext, type SessionState } from './ui/session-context';
@@ -156,7 +156,7 @@ describe('DevicesView', () => {
   });
 
   it('emite convite com tipo e unidade e mostra o token uma vez', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     const escrever = vi.fn(async () => {});
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: escrever }, configurable: true });
     renderComPapel('admin', ADMIN_GLOBAL);
@@ -183,7 +183,7 @@ describe('DevicesView', () => {
   });
 
   it('revoga com confirmação e recarrega a lista', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     const dialogo = renderComPapel('admin', ADMIN_GLOBAL);
 
     const ativo = await linhaDe('pc-financeiro-01');
@@ -200,7 +200,7 @@ describe('DevicesView', () => {
   });
 
   it('não revoga quando a confirmação é negada', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     renderComPapel('admin', ADMIN_GLOBAL, { confirm: vi.fn(async () => false) });
 
     const ativo = await linhaDe('pc-financeiro-01');

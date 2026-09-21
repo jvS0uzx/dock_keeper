@@ -7,3 +7,6 @@ var StreamMetrics string
 
 //go:embed stream_nginx.sh
 var StreamNginx string
+
+//go:embed probe_nginx.sh
+var ProbeNginx string

@@ -7,6 +7,7 @@ import { api, type DiscoveredDomain, type DomainRecord as DomainItem } from '../
 import { relativeTime } from '../lib/format';
 import { useDialog } from './ui/dialog-context';
 import { useRole } from './ui/session-context';
+import { POLL } from '../lib/polling';
 
 type Status = 'valid' | 'warning' | 'expired' | 'pending';
 
@@ -75,7 +76,7 @@ const SslView = () => {
     const pending = timeouts.current;
     fetchDomains();
     loadDiscovered();
-    const interval = setInterval(fetchDomains, 10000);
+    const interval = setInterval(fetchDomains, POLL.certificados);
     return () => {
       clearInterval(interval);
       pending.forEach(clearTimeout);

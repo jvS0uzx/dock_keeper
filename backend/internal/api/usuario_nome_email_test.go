@@ -31,7 +31,7 @@ func TestCriarUsuarioComNomeEEmail(t *testing.T) {
 	limparUsuario(t, username)
 
 	corpo := `{"username":"` + username + `","password":"senha-de-teste-1234","role":"admin",` +
-		`"nome":"João Vitor Souza","email":"JoaoSouza@Exemplo.com.br"}`
+		`"nome":"João Vitor Souza","email":"JoaoVitor.Teste@Exemplo.Invalid"}`
 	rec := pedirComSessao(t, http.MethodPost, "/api/users", corpo, sess)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST /api/users: status %d, esperado 201 (%s)", rec.Code, rec.Body.String())
@@ -47,7 +47,7 @@ func TestCriarUsuarioComNomeEEmail(t *testing.T) {
 	if criado.Nome != "João Vitor Souza" {
 		t.Errorf("resposta trouxe nome=%q", criado.Nome)
 	}
-	if criado.Email != "joaosouza@example.com" {
+	if criado.Email != "joaovitor.teste@exemplo.invalid" {
 		t.Errorf("resposta trouxe email=%q, esperado em minúsculas", criado.Email)
 	}
 
@@ -55,7 +55,7 @@ func TestCriarUsuarioComNomeEEmail(t *testing.T) {
 	if err := database.DB.Where("username = ?", username).Take(&noBanco).Error; err != nil {
 		t.Fatalf("usuário não está no banco: %v", err)
 	}
-	if noBanco.Nome != "João Vitor Souza" || noBanco.Email != "joaosouza@example.com" {
+	if noBanco.Nome != "João Vitor Souza" || noBanco.Email != "joaovitor.teste@exemplo.invalid" {
 		t.Errorf("banco tem nome=%q email=%q", noBanco.Nome, noBanco.Email)
 	}
 }

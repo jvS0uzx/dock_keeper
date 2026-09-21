@@ -65,6 +65,7 @@ func scriptPrelude(t Target) string {
 	b.WriteString("DOCKKEEPER_NGINX_LOG=" + NginxLogPath() + "\n")
 	if useSudo(t) {
 		b.WriteString("DOCKKEEPER_TAIL=\"" + sudoPrefix + "/usr/bin/tail\"\n")
+		b.WriteString("DOCKKEEPER_NGINX_CMD=\"" + sudoPrefix + "nginx\"\n")
 	}
 	return b.String()
 }

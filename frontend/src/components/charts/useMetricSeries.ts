@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, apiErrorMessage, type Annotation, type HistoryMetric, type HistoryPoint, type HistoryWindow } from '../../lib/api';
+import { api, apiErrorMessage, type Annotation, type HistoryPoint, type HistoryWindow } from '../../lib/api';
 import { windowBounds } from '../../lib/metrics';
+import { POLL } from '../../lib/polling';
 
-const REFRESH_MS = 15000;
 
 const windowKey = (janela: HistoryWindow | null): string =>
   janela === null ? '' : typeof janela === 'string' ? janela : `${janela.from}|${janela.to ?? ''}`;
@@ -14,7 +14,7 @@ const parseKey = (key: string): HistoryWindow | null => {
   return to ? { from, to } : { from };
 };
 
-export const useMetricSeries = (serverId: string, metric: HistoryMetric, janela: HistoryWindow | null) => {
+export const useMetricSeries = (serverId: string, metric: string, janela: HistoryWindow | null) => {
   const [points, setPoints] = useState<HistoryPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +22,7 @@ export const useMetricSeries = (serverId: string, metric: HistoryMetric, janela:
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const current = parseKey(key);
-    if (!serverId || current === null) return;
+    if (!serverId || !metric || current === null) return;
     setLoading(true);
     try {
       setPoints(await api.history(serverId, metric, current, signal));
@@ -40,7 +40,7 @@ export const useMetricSeries = (serverId: string, metric: HistoryMetric, janela:
     const controller = new AbortController();
     load(controller.signal);
     if (!key.includes('|')) {
-      const interval = setInterval(() => load(controller.signal), REFRESH_MS);
+      const interval = setInterval(() => load(controller.signal), POLL.serieDoGrafico);
       return () => {
         clearInterval(interval);
         controller.abort();

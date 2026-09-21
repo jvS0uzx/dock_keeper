@@ -250,8 +250,8 @@ func TestStreamMetricsDeclaraEnderecosSemVirtuaisNemLoopback(t *testing.T) {
 	dir := t.TempDir()
 	falso := "#!/bin/sh\ncat <<'SAIDA'\n" +
 		"1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever preferred_lft forever\n" +
-		"2: eth0    inet 198.51.100.25/24 brd 198.51.100.255 scope global eth0\\       valid_lft forever\n" +
-		"3: tailscale0    inet 100.100.0.2/32 scope global tailscale0\\       valid_lft forever\n" +
+		"2: eth0    inet 203.0.113.25/24 brd 203.0.113.255 scope global eth0\\       valid_lft forever\n" +
+		"3: tailscale0    inet 100.100.0.11/32 scope global tailscale0\\       valid_lft forever\n" +
 		"4: docker0    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0\\       valid_lft forever\n" +
 		"5: br-1a2b    inet 172.18.0.1/16 scope global br-1a2b\\       valid_lft forever\n" +
 		"6: veth9f2    inet 169.254.1.1/32 scope global veth9f2\\       valid_lft forever\n" +
@@ -267,7 +267,7 @@ func TestStreamMetricsDeclaraEnderecosSemVirtuaisNemLoopback(t *testing.T) {
 	for _, a := range enderecos {
 		tem[a] = true
 	}
-	if !tem["198.51.100.25"] || !tem["100.100.0.2"] {
+	if !tem["203.0.113.25"] || !tem["100.100.0.11"] {
 		t.Errorf("addresses=%v, esperado o endereço público e o da overlay", enderecos)
 	}
 	for _, indesejado := range []string{"127.0.0.1", "172.17.0.1", "172.18.0.1", "169.254.1.1"} {

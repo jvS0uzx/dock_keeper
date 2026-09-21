@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, ArrowDown, ArrowUp, LayoutGrid, Pencil, Plus, Save, Trash2, X,
 } from 'lucide-react';
@@ -7,11 +7,11 @@ import {
   apiErrorMessage,
   type Dashboard,
   type DashboardInput,
-  type DashboardMetric,
   type DashboardPanel,
   type HistoryRange,
 } from '../lib/api';
-import { DASHBOARD_METRICS, HISTORY_RANGES, metricLabel } from '../lib/metrics';
+import { HISTORY_RANGES, metricasDePainelERegra } from '../lib/metrics';
+import { useCatalogo } from './ui/useCatalogo';
 import MetricChart from './charts/MetricChart';
 import { useAnnotations, useMetricSeries } from './charts/useMetricSeries';
 import { useDialog } from './ui/dialog-context';
@@ -29,7 +29,7 @@ interface DraftPanel {
   key: number;
   title: string;
   server_id: string;
-  metric: DashboardMetric;
+  metric: string;
   range: HistoryRange;
   width: 1 | 2;
 }
@@ -40,10 +40,9 @@ interface Draft {
   panels: DraftPanel[];
 }
 
-const METRIC_OPTIONS = DASHBOARD_METRICS.map((m) => ({ value: m.key, label: m.label }));
 const RANGE_OPTIONS = HISTORY_RANGES.map((r) => ({ value: r, label: r }));
 
-const PanelChart = ({ panel }: { panel: DashboardPanel }) => {
+const PanelChart = ({ panel, rotulo, unidade }: { panel: DashboardPanel; rotulo: string; unidade: string }) => {
   const series = useMetricSeries(panel.server_id, panel.metric, panel.range);
   const notes = useAnnotations(panel.server_id, panel.range);
   return (
@@ -51,8 +50,8 @@ const PanelChart = ({ panel }: { panel: DashboardPanel }) => {
       <div className="flex-1 min-h-0">
         <MetricChart
           points={series.points}
-          metric={panel.metric}
-          label={metricLabel(panel.metric)}
+          unidade={unidade}
+          label={rotulo}
           annotations={notes.annotations}
           loading={series.loading}
           error={series.error}
@@ -67,6 +66,12 @@ const PanelChart = ({ panel }: { panel: DashboardPanel }) => {
 
 const DashboardsView = () => {
   const dialog = useDialog();
+  const catalogo = useCatalogo();
+  const metricLabel = catalogo.rotulo;
+  const opcoesDeMetrica = useMemo(
+    () => metricasDePainelERegra(catalogo.metricas).map((m) => ({ value: m.nome, label: m.rotulo })),
+    [catalogo.metricas],
+  );
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [servers, setServers] = useState<ServerOption[]>([]);
   const [serversError, setServersError] = useState<string | null>(null);
@@ -106,7 +111,7 @@ const DashboardsView = () => {
   const selected = dashboards.find((d) => d.id === selectedId) ?? null;
   const serverName = (id: string) => servers.find((s) => s.id === id)?.name ?? id;
 
-  const toInput = (name: string, panels: { title: string; server_id: string; metric: DashboardMetric; range: HistoryRange; width: 1 | 2 }[]): DashboardInput => ({
+  const toInput = (name: string, panels: { title: string; server_id: string; metric: string; range: HistoryRange; width: 1 | 2 }[]): DashboardInput => ({
     name,
     panels: panels.map(({ title, server_id, metric, range, width }) => ({
       title: title.trim() || `${metricLabel(metric)} de ${serverName(server_id)}`,
@@ -121,7 +126,7 @@ const DashboardsView = () => {
     key: nextKey.current++,
     title: '',
     server_id: servers[0]?.id ?? '',
-    metric: 'cpu',
+    metric: opcoesDeMetrica[0]?.value ?? '',
     range: '24h',
     width: 1,
   });
@@ -300,8 +305,8 @@ const DashboardsView = () => {
                     <Select
                       ariaLabel={`Métrica do gráfico ${n}`}
                       value={p.metric}
-                      onChange={(v) => updatePanel(p.key, { metric: v as DashboardMetric })}
-                      options={METRIC_OPTIONS}
+                      onChange={(v) => updatePanel(p.key, { metric: v })}
+                      options={opcoesDeMetrica}
                     />
                   </div>
                   <div className="md:col-span-1">
@@ -365,12 +370,15 @@ const DashboardsView = () => {
             <button
               type="button"
               onClick={() => setDraft((d) => (d ? { ...d, panels: [...d.panels, newDraftPanel()] } : d))}
-              disabled={draft.panels.length >= MAX_PANELS || servers.length === 0}
+              disabled={draft.panels.length >= MAX_PANELS || servers.length === 0 || opcoesDeMetrica.length === 0}
               className="btn btn-ghost"
             >
               <Plus size={16} strokeWidth={1.75} />
               Adicionar gráfico
             </button>
+            {catalogo.erro && (
+              <span role="alert" className="text-xs text-crit">Métricas indisponíveis: {catalogo.erro}</span>
+            )}
             {serversError ? (
               <span role="alert" className="text-xs text-crit">Servidores indisponíveis: {serversError}</span>
             ) : servers.length === 0 && (
@@ -451,7 +459,7 @@ const DashboardsView = () => {
                     </span>
                   </div>
                   <div className="h-[240px] w-full">
-                    <PanelChart panel={p} />
+                    <PanelChart panel={p} rotulo={catalogo.rotulo(p.metric)} unidade={catalogo.unidade(p.metric)} />
                   </div>
                 </div>
               ))}

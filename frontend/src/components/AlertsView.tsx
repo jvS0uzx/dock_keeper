@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BellOff, BellRing, CheckCircle2, CircleDashed, Clock, Send, XCircle } from 'lucide-react';
 
-import { api, type AlertDelivery, type AlertItem, type AlertStatus } from '../lib/api';
+import { api, apiErrorMessage, type AlertDelivery, type AlertItem, type AlertStatus } from '../lib/api';
 import { formatDateTime, relativeTime } from '../lib/format';
+import { podeOperarNaUnidade } from '../lib/session';
 import { useDialog } from './ui/dialog-context';
+import { useSession } from './ui/session-context';
 import { useSiteScope } from './ui/site-scope-context';
 import LoadNotice from './ui/LoadNotice';
 import { useLoadStatus } from './ui/load-status';
 import Select from './ui/Select';
+import { POLL } from '../lib/polling';
 
-const INTERVALO_MS = 15000;
 
 const ESTADOS: { value: AlertStatus | 'all'; label: string }[] = [
   { value: 'open', label: 'Abertos' },
@@ -54,14 +56,23 @@ const ENTREGA: Record<AlertDelivery, Entrega> = {
   pendente: { rotulo: 'Pendente', classe: 'text-warn', Icon: Clock },
   falhou: { rotulo: 'Falhou', classe: 'text-crit', Icon: XCircle },
   sem_canal: { rotulo: 'Sem canal', classe: 'text-info', Icon: BellOff },
+  dispensado: { rotulo: 'Dispensado', classe: 'text-text-mut', Icon: CircleDashed },
 };
 
 const entregaDe = (valor: string): Entrega =>
   ENTREGA[valor as AlertDelivery] ?? { rotulo: valor, classe: 'text-text-faint', Icon: CircleDashed };
 
+const renotificacoes = (alerta: AlertItem): string | null => {
+  const vezes = alerta.renotify_count ?? 0;
+  if (vezes < 1) return null;
+  const quando = alerta.last_notified_at ? `, última ${relativeTime(alerta.last_notified_at)}` : '';
+  return `renotificado ${vezes} ${vezes === 1 ? 'vez' : 'vezes'}${quando}`;
+};
+
 const AlertsView = () => {
   const dialog = useDialog();
-  const { siteName } = useSiteScope();
+  const { accesses } = useSession();
+  const { siteName, numericSiteId } = useSiteScope();
   const [alertas, setAlertas] = useState<AlertItem[]>([]);
   const [estado, setEstado] = useState<AlertStatus | 'all'>('open');
   const [severidade, setSeveridade] = useState('all');
@@ -71,7 +82,10 @@ const AlertsView = () => {
   const carregar = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        const lista = await api.alerts({ status: estado }, signal);
+        const lista = await api.alerts(
+          numericSiteId === null ? { status: estado } : { status: estado, site_id: numericSiteId },
+          signal,
+        );
         setAlertas(lista);
         ok();
       } catch (err) {
@@ -81,14 +95,14 @@ const AlertsView = () => {
         setCarregando(false);
       }
     },
-    [estado, ok, fail],
+    [estado, numericSiteId, ok, fail],
   );
 
   useEffect(() => {
     const controle = new AbortController();
     setCarregando(true);
     carregar(controle.signal);
-    const timer = setInterval(() => carregar(), INTERVALO_MS);
+    const timer = setInterval(() => carregar(), POLL.alertas);
     return () => {
       controle.abort();
       clearInterval(timer);
@@ -96,7 +110,8 @@ const AlertsView = () => {
   }, [carregar]);
 
   const visiveis = useMemo(
-    () => (severidade === 'all' ? alertas : alertas.filter((a) => a.severity === severidade)),
+    () =>
+      alertas.filter((a) => severidade === 'all' || a.severity === severidade),
     [alertas, severidade],
   );
 
@@ -115,16 +130,14 @@ const AlertsView = () => {
       dialog.notify(`Alerta ${acao === 'ack' ? 'reconhecido' : 'resolvido'}.`, 'success');
       await carregar();
     } catch (err) {
-      dialog.notify(
-        err instanceof Error ? JSON.parse(err.message).error ?? `Falha ao ${rotulo.toLowerCase()}.` : `Falha ao ${rotulo.toLowerCase()}.`,
-        'error',
-      );
+      dialog.notify(apiErrorMessage(err, `Falha ao ${rotulo.toLowerCase()}.`), 'error');
     }
   };
 
   const origem = (alerta: AlertItem) => {
-    const partes = [alerta.server_id, alerta.site_id === null ? null : siteName(alerta.site_id)].filter(Boolean);
-    return partes.join(' · ');
+    const servidor = alerta.server_name || alerta.server_id;
+    const unidade = alerta.site_name || (alerta.site_id === null ? null : siteName(alerta.site_id));
+    return [servidor, unidade].filter(Boolean).join(' · ');
   };
 
   return (
@@ -168,6 +181,8 @@ const AlertsView = () => {
             const entrega = entregaDe(alerta.delivery);
             const EntregaIcon = entrega.Icon;
             const partesOrigem = origem(alerta);
+            const repeticao = renotificacoes(alerta);
+            const podeAgir = podeOperarNaUnidade(accesses, alerta.site_id);
             return (
               <li
                 key={alerta.id}
@@ -194,6 +209,7 @@ const AlertsView = () => {
                         <span className="mono-data">{partesOrigem}</span>
                       </>
                     )}
+                    {repeticao && <span className="text-text-faint"> · {repeticao}</span>}
                   </p>
 
                   <div className="mt-2.5">
@@ -208,6 +224,11 @@ const AlertsView = () => {
                           Detalhe da entrega
                         </summary>
                         <div className="mt-2 flex flex-col gap-1 rounded-ctrl border border-line bg-ink-850 p-3 text-xs text-text-mut">
+                          {alerta.delivery === 'dispensado' && (
+                            <span className="max-w-prose">
+                              O alerta foi resolvido antes da primeira entrega, então nenhum aviso foi enviado.
+                            </span>
+                          )}
                           {alerta.delivery === 'sem_canal' && (
                             <span className="max-w-prose">
                               Não há canal de Telegram configurado. Ao configurar, todo alerta aberto com menos de 24 h
@@ -241,12 +262,12 @@ const AlertsView = () => {
                 </div>
 
                 <div className="flex shrink-0 items-center gap-3 lg:pt-0.5">
-                  {alerta.status === 'open' && (
+                  {podeAgir && alerta.status === 'open' && (
                     <button className="btn btn-ghost btn-sm" onClick={() => agir(alerta, 'ack')}>
                       Reconhecer
                     </button>
                   )}
-                  {alerta.status !== 'resolved' && (
+                  {podeAgir && alerta.status !== 'resolved' && (
                     <button className="btn btn-primary btn-sm" onClick={() => agir(alerta, 'resolve')}>
                       Resolver
                     </button>

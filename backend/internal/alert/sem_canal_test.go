@@ -76,8 +76,7 @@ func TestRetomadaRespeitaAJanela(t *testing.T) {
 	Enqueue(Entrada{Key: chave, Text: "[CRITICO] incidente da semana passada"})
 	dispatchPending(time.Now().UTC())
 
-	velho := time.Now().UTC().Add(-72 * time.Hour)
-	database.DB.Model(&database.Alert{}).Where("key = ?", chave).Update("created_at", velho)
+	envelhecer(t, chave, 72*time.Hour)
 
 	enabled = true
 	marcarOK()

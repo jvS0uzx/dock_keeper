@@ -94,7 +94,7 @@ conta é feita sobre a última **entrega bem-sucedida** da chave, não sobre a �
 tentativa — um envio que falhou não consome o cooldown.
 
 **Fila de entrega (ADR 011).** Detectar e entregar deixaram de ser a mesma coisa.
-`Notify` grava o alerta na tabela `alerts` (`status=open`, `delivery=pendente`) e
+`Enqueue` grava o alerta na tabela `alerts` (`status=open`, `delivery=pendente`) e
 devolve na hora; um despachante de fundo faz o `POST` no Telegram. Consequências
 no dia a dia:
 
@@ -109,11 +109,24 @@ no dia a dia:
 Alerta pendente antigo é sinal de canal parado: olhe `alertas` no `/readyz` e o
 `last_error` da linha.
 
-**Notificação de recuperação.** Quando a condição deixa de ser violada e o alerta
-havia sido anunciado, sai um aviso de normalização — uma vez, não a cada ciclo.
+**Um incidente, um alerta.** Enquanto a condição continua, o painel reaproveita a mesma linha
+e só soma `renotify_count` a cada `ALERT_COOLDOWN`. Reconhecer (`ack`) para a renotificação.
+Alerta sem sinal de vida há mais de `ALERT_RESUME_HOURS` não cala a chave: a ocorrência seguinte
+abre alerta novo, mesmo que o antigo esteja preso em `sem_canal`.
 
-Alerta abaixo de `ALERT_MIN_SEVERITY` fica só no log e **nunca gera
-recuperação**: não se anuncia o fim de um problema que nunca foi comunicado.
+**Notificação de recuperação.** Regra do motor e gatilho direto fecham o próprio alerta quando
+a condição volta (a definição de "voltou" de cada gatilho está em `docs/metricas.md`). Se o
+incidente chegou a ser avisado no canal, sai um aviso de normalização, uma vez. A linha da
+recuperação nasce `resolved` e não aparece entre os abertos.
+
+Alerta abaixo de `ALERT_MIN_SEVERITY`, de regra ou de gatilho, fica só no log, uma vez por
+cooldown, e **nunca gera recuperação**: não se anuncia o fim de um problema que nunca foi
+comunicado. O mesmo vale para o alerta resolvido antes da primeira entrega, que fica com
+`delivery=dispensado`.
+
+**Entrega que falhou.** `falhou` dentro de `ALERT_RESUME_HOURS` ganha uma nova tentativa cada
+vez que o canal dá sinal de vida depois da última falha (verificação periódica ou outra entrega
+bem-sucedida). Não há martelada: sem sinal novo de canal de pé, não há tentativa nova.
 
 ### Telegram
 
@@ -380,8 +393,8 @@ adotada sem recriar nada, e só as seguintes rodam. Não é preciso recriar o ba
 **Duas instâncias subindo juntas:** um `pg_advisory_lock` serializa; a segunda
 espera e encontra tudo aplicado.
 
-`DB_AUTOMIGRATE=true` volta ao comportamento antigo (GORM criando o esquema). Serve
-para ambiente descartável; em uso normal, deixe desligado.
+`DB_AUTOMIGRATE` foi removido: o esquema sobe sempre pelas migrações versionadas. A variável
+ligada é ignorada, com aviso no log do boot (ADR 012).
 
 ## Comportamento com o banco indisponível
 
@@ -495,9 +508,90 @@ O que o operador vê:
 
 O que fazer: configurar `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`. Assim que o canal responde
 — no boot ou quando a revalidação em segundo plano o encontra de volta — o despachante
-**retoma** sozinho os alertas presos que ainda estão abertos e foram criados nas últimas
-`ALERT_RESUME_HOURS` (padrão 24). Incidente de ontem ainda vale a pena avisar; de semana
-passada é ruído, e o alerta continua visível na tela de qualquer jeito.
+**retoma** sozinho os alertas presos que ainda estão abertos e foram vistos (`last_seen_at`) nas
+últimas `ALERT_RESUME_HOURS` (padrão 24). Um incidente que começou há uma semana e continua
+acontecendo hoje é retomado; um que parou há uma semana é ruído, e o alerta continua visível na
+tela de qualquer jeito.
 
-Enquanto não há canal, a supressão por chave enxerga o alerta preso, então o mesmo incidente
-não vira uma linha nova a cada ciclo do motor de regras.
+Enquanto não há canal, o incidente vivo reaproveita a própria linha, então ele não vira uma linha
+nova a cada ciclo do motor de regras. O que mudou: alerta preso **sem sinal de vida** há mais de
+`ALERT_RESUME_HOURS`, ou já resolvido, não cala mais a chave. Antes, dois dias sem Telegram
+bastavam para aquele servidor nunca mais alertar.
+
+## Endereço recusado na auditoria
+
+A linha `server.address_refused` aparece quando um dispositivo declara um endereço que já é de
+outro servidor. O detalhe traz o endereço, o nome e a unidade do dono, e o campo `origem` diz se
+quem declarou é `ssh` ou `agent`.
+
+| O que aconteceu | Como reconhecer | O que fazer |
+|---|---|---|
+| Troca de IP por DHCP entre estações | Dono é outro `agent`, e a linha não se repete depois de 15 min | Nada: a janela passa e o endereço muda de dona sozinho |
+| A mesma máquina cadastrada duas vezes | Dono é um servidor SSH e quem declara é o agente instalado nela | Escolha um dos dois cadastros e remova o outro |
+| IP flutuante entre dois hosts (VIP de failover) | A linha aparece a cada virada | Associe o VIP como alias manual ao host que deve exibi-lo |
+| Dispositivo declarando o IP de uma VPS sem motivo | Dono é um servidor SSH que não tem relação com a estação | Trate como credencial comprometida: revogue o dispositivo em `/dispositivos` |
+
+A recusa não derruba a coleta: a métrica do envio é gravada e só o endereço alheio fica de
+fora. A mesma recusa entra na auditoria no máximo uma vez por hora por servidor e endereço, e
+o log do processo registra quando um envio passa de 32 endereços.
+
+## Compose: o uid do dono e os segredos
+
+A imagem cria o usuário `dockkeeper` (uid 10001), mas a chave SSH e o `known_hosts` no host são
+600 do seu usuário, normalmente uid 1000. Container com uid diferente não lê arquivo 600, e o
+boot morria em `Configuração SSH inválida: ... permission denied`, com o backend em restart
+loop. Afrouxar a permissão da chave privada para resolver isso seria trocar um problema de
+operação por um de segurança.
+
+Por isso o serviço `backend` roda com o **uid do host**:
+
+```yaml
+user: "${DOCKKEEPER_UID:-1000}:${DOCKKEEPER_GID:-1000}"
+```
+
+Se o seu usuário não for 1000, ponha `DOCKKEEPER_UID` e `DOCKKEEPER_GID` no `.env` com a saída
+de `id -u` e `id -g`. Os segredos continuam 600 no host e chegam somente leitura em
+`/run/secrets`.
+
+### As variáveis do `.env` dentro do container
+
+Até 19/09/2026 o compose repassava ao backend 11 variáveis escolhidas a dedo, e o container não
+tem `.env` para o `godotenv` carregar. As outras 65 morriam em silêncio: quem ligava
+`SSL_FORBID_PRIVATE_TARGETS`, `SSH_USE_SUDO`, `SESSION_TTL`, os limites de login, a descoberta de
+rede ou qualquer retenção no `.env` e subia por container não tinha ligado nada, sem aviso.
+
+O serviço passou a receber o `.env` inteiro por `env_file`. O compose ainda fixa as poucas que
+dentro do container precisam de outro valor (a lista está em `docs/configuracao.md`), e o que
+está em `environment:` vence o `env_file`. Para conferir o que o processo enxerga:
+
+```bash
+docker compose exec backend env | sort
+.github/scripts/confere-env-compose.sh
+```
+
+Duas ressalvas de container: `SSH_USE_AGENT` não funciona sem montar o socket do agente, e a
+descoberta de rede (`DISCOVERY_CIDRS`) varre a partir da rede do container, então a tabela ARP
+vem vazia e o MAC não aparece.
+
+### O painel só escuta na própria máquina
+
+O compose publica o painel em `127.0.0.1:8081`. O nginx do container fala HTTP puro, então
+publicar em `0.0.0.0` faria senha e token de sessão trafegarem em claro na rede. Para abrir o
+painel a outras máquinas, ponha um proxy com TLS na frente (Caddy, Traefik, nginx do host) e só
+então defina `PANEL_BIND` no `.env`. O nginx do painel aceita corpo de até 10 MB em `/api/`,
+acima dos 8 MB de planta e dos 4 MB de inventário que o backend admite; sem isso o proxy cortava
+em 1 MB com um 413 que não vinha do painel.
+
+### O diretório de dados
+
+O volume `floorplans` nasce `root:root` quando o Docker o cria, então o upload de planta baixa
+falharia por permissão mesmo com o boot correto. O serviço `prepara-dados` roda uma vez antes
+do backend, ajusta o dono de `/app/data` para o uid configurado e sai; o backend só sobe depois
+dele (`service_completed_successfully`).
+
+**Quem já tem o volume com dado não precisa migrar nada:** o `prepara-dados` faz `chown -R` no
+que já existe, preservando os arquivos. Conferir depois de subir:
+
+```bash
+docker compose exec backend ls -ln /app/data/floorplans
+```

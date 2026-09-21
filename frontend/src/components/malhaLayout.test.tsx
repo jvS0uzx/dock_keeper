@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 import Dashboard from './Dashboard';
@@ -13,6 +13,8 @@ import {
   PASSO_CARTAO,
   alturaDoConteudo,
 } from '../lib/malhaLayout';
+import { avancar, comRelogioFalso } from '../test/usuario';
+import { POLL } from '../lib/polling';
 
 const base = {
   uptime: 10,
@@ -126,6 +128,10 @@ beforeEach(() => {
   api.annotations.mockReset().mockResolvedValue([]);
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('malha que se adapta à arquitetura', () => {
   it('com um receptor mantém o piso da caixa', async () => {
     api.liveMetrics.mockReset().mockResolvedValue(cenario(1));
@@ -229,6 +235,7 @@ describe('malha sem tráfego na janela', () => {
   });
 
   it('quando a janela esvazia, o traço troca de ativo para ocioso e segue visível', async () => {
+    comRelogioFalso();
     api.liveMetrics.mockReset().mockResolvedValue(cenario(2, 1, 9));
     renderizar();
 
@@ -236,13 +243,10 @@ describe('malha sem tráfego na janela', () => {
     expect(tracos().some((l) => l.stroke === ACENTO_ATIVO)).toBe(true);
 
     api.liveMetrics.mockResolvedValue(cenario(2, 1, 0));
-    await vi.waitFor(
-      () => {
-        const linhas = tracos();
-        expect(linhas.every((l) => l.stroke !== ACENTO_ATIVO)).toBe(true);
-        expect(linhas.every((l) => l.stroke !== FUNDO_DO_PAINEL)).toBe(true);
-      },
-      { timeout: 10000 },
-    );
-  }, 15000);
+    await avancar(POLL.aoVivo);
+
+    const linhas = tracos();
+    expect(linhas.every((l) => l.stroke !== ACENTO_ATIVO)).toBe(true);
+    expect(linhas.every((l) => l.stroke !== FUNDO_DO_PAINEL)).toBe(true);
+  });
 });

@@ -11,8 +11,8 @@ import { useDialog } from './ui/dialog-context';
 import { useRole } from './ui/session-context';
 import { useSiteScope } from './ui/site-scope-context';
 import Select from './ui/Select';
+import { POLL } from '../lib/polling';
 
-const POLL_MS = 20000;
 
 const SCAN_SETTLE_MS = 8000;
 
@@ -250,7 +250,7 @@ const NetworkView = () => {
       .catch((err) => {
         if (!controller.signal.aborted) unidadesFail(err, 'Falha ao listar as unidades.');
       });
-    const interval = setInterval(() => fetchInventory(controller.signal), POLL_MS);
+    const interval = setInterval(() => fetchInventory(controller.signal), POLL.inventarioDeRede);
     return () => {
       clearInterval(interval);
       controller.abort();

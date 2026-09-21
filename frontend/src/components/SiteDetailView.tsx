@@ -15,8 +15,8 @@ import {
 import { formatPercent, relativeTime } from '../lib/format';
 import { NO_TEMPERATURE_HINT, formatTemperature, isAbove } from '../lib/metrics';
 import { useNavigation } from './ui/navigation-context';
+import { POLL } from '../lib/polling';
 
-const POLL_MS = 15000;
 
 const TEMP_WARN = 70;
 const USAGE_WARN = 75;
@@ -107,7 +107,7 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
   useEffect(() => {
     const controller = new AbortController();
     load(controller.signal);
-    const interval = setInterval(() => load(controller.signal), POLL_MS);
+    const interval = setInterval(() => load(controller.signal), POLL.unidade);
     return () => {
       clearInterval(interval);
       controller.abort();

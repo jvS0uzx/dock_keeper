@@ -7,8 +7,8 @@ import { formatGB, formatPercent } from '../lib/format';
 import { NO_TEMPERATURE, NO_TEMPERATURE_HINT, formatTemperature, isAbove } from '../lib/metrics';
 import { useSiteScope } from './ui/site-scope-context';
 import { useNavigation } from './ui/navigation-context';
+import { POLL } from '../lib/polling';
 
-const POLL_MS = 10000;
 
 const TEMP_WARN = 70;
 const TEMP_CRITICAL = 85;
@@ -70,7 +70,7 @@ const StationsView = () => {
     const controller = new AbortController();
     fetchData(controller.signal);
 
-    const interval = setInterval(() => fetchData(controller.signal), POLL_MS);
+    const interval = setInterval(() => fetchData(controller.signal), POLL.estacoes);
     return () => {
       clearInterval(interval);
       controller.abort();
@@ -228,7 +228,7 @@ const StationsView = () => {
         </div>
 
         <div className="px-4 py-2 border-t border-line text-[11px] text-text-faint flex items-center gap-4">
-          <span className="flex items-center gap-1.5"><RefreshCw size={11} strokeWidth={1.75} /> atualiza a cada {POLL_MS / 1000}s</span>
+          <span className="flex items-center gap-1.5"><RefreshCw size={11} strokeWidth={1.75} /> atualiza a cada {POLL.estacoes / 1000}s</span>
           <span className="flex items-center gap-1.5"><Cpu size={11} strokeWidth={1.75} /> alerta em {USAGE_WARN}%</span>
           <span className="flex items-center gap-1.5"><MemoryStick size={11} strokeWidth={1.75} /> crítico em {USAGE_CRITICAL}%</span>
           <span className="flex items-center gap-1.5"><Thermometer size={11} strokeWidth={1.75} /> quente acima de {TEMP_WARN}°C</span>

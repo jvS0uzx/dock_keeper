@@ -156,7 +156,14 @@ func claimSlot(key string) bool {
 
 var ErrSemCanal = errors.New("canal de alerta não configurado")
 
-func Deliver(msg string) error {
+type canalTelegram struct{}
+
+func (canalTelegram) Nome() string { return CanalTelegram }
+
+func (canalTelegram) Ativo() bool { return enabled }
+
+func (canalTelegram) Entregar(a database.Alert) error {
+	msg := textoDoAlerta(a)
 	if !enabled {
 		log.Printf("[Alert] (Telegram desligado) %s", msg)
 		return ErrSemCanal
@@ -173,10 +180,4 @@ func Deliver(msg string) error {
 
 	marcarOK()
 	return nil
-}
-
-func Send(msg string) {
-	if err := Deliver(msg); err != nil {
-		log.Printf("[Alert] falha ao enviar Telegram: %v", err)
-	}
 }

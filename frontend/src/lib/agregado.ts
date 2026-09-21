@@ -17,3 +17,6 @@ export const compararNumeros = (a: number | null, b: number | null, sinal: 1 | -
   if (b === null) return -1;
   return sinal * (a - b);
 };
+
+export const percentualDeUso = (usado: number, total: number): number | null =>
+  total > 0 ? (usado / total) * 100 : null;

@@ -8,7 +8,15 @@ import { SessionContext, type SessionState } from './components/ui/session-conte
 import { NavigationContext, type NavigationState } from './components/ui/navigation-context';
 import { ALL_SITES, SiteScopeContext, type SiteScopeState } from './components/ui/site-scope-context';
 import { api, apiErrorMessage, type Site } from './lib/api';
-import { ADMIN_TABS, PANELS, hasGlobalAdmin, loadPanel, savePanel, type PanelId } from './lib/panels';
+import {
+  ADMIN_TABS,
+  PANELS,
+  hasGlobalAdmin,
+  loadPanel,
+  savePanel,
+  unidadeEfetiva,
+  type PanelId,
+} from './lib/panels';
 import {
   SESSION_EXPIRED_EVENT,
   clearSession,
@@ -25,6 +33,7 @@ import {
   painelDaAba,
   useRota,
 } from './lib/rotas';
+import { esquecerCatalogo } from './lib/catalogo';
 
 const MetricsHistoryView = lazy(() => import('./components/MetricsHistoryView'));
 const ContainersView = lazy(() => import('./components/ContainersView'));
@@ -133,6 +142,7 @@ function App() {
   const handleLogout = useCallback(() => {
     api.logout().catch(() => {});
     clearSession();
+    esquecerCatalogo();
     setSession(null);
     setModoToken(false);
     setLoginNotice('');
@@ -188,13 +198,13 @@ function App() {
 
   const siteScope = useMemo<SiteScopeState>(() => ({
     siteId,
-    numericSiteId: siteId === ALL_SITES ? null : Number(siteId),
+    numericSiteId: unidadeEfetiva(panel, siteId),
     setSiteId: (value) => setSiteId(value),
     sites,
     siteName: (id) => (id === null ? 'Sem unidade' : sites.find(s => s.id === id)?.name ?? '—'),
     reloadSites,
     sitesError,
-  }), [siteId, sites, reloadSites, sitesError]);
+  }), [siteId, panel, sites, reloadSites, sitesError]);
 
   useEffect(() => {
     if (sessionState) reloadSites();

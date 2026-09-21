@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jvS0uzx/dock_keeper/internal/alert"
+	"github.com/jvS0uzx/dock_keeper/internal/auth"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"github.com/jvS0uzx/dock_keeper/internal/logstore"
 	"github.com/jvS0uzx/dock_keeper/internal/observabilidade"
@@ -14,20 +15,27 @@ import (
 
 const readyPingTimeout = 2 * time.Second
 
-func readyHandler(w http.ResponseWriter, r *http.Request) {
+func (c Config) readyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeError(w, http.StatusMethodNotAllowed, "método não permitido")
 		return
 	}
 	if err := pingDatabase(r.Context()); err != nil {
 		log.Printf("[API] /readyz: banco indisponível: %v", err)
-		writeJSON(w, http.StatusServiceUnavailable, corpoReadyz(r, "indisponivel", "banco indisponível"))
+		writeJSON(w, http.StatusServiceUnavailable, corpoReadyz(r, c.temCredencial(r), "indisponivel", "banco indisponível"))
 		return
 	}
-	writeJSON(w, http.StatusOK, corpoReadyz(r, "ok", ""))
+	writeJSON(w, http.StatusOK, corpoReadyz(r, c.temCredencial(r), "ok", ""))
 }
 
-func corpoReadyz(r *http.Request, status, db string) map[string]any {
+func (c Config) temCredencial(r *http.Request) bool {
+	if _, ok := auth.Lookup(bearerToken(r)); ok {
+		return true
+	}
+	return c.tokenMatches(r)
+}
+
+func corpoReadyz(r *http.Request, detalhado bool, status, db string) map[string]any {
 	corpo := map[string]any{"status": status}
 	if db != "" {
 		corpo["db"] = db
@@ -35,20 +43,29 @@ func corpoReadyz(r *http.Request, status, db string) map[string]any {
 
 	saude := alert.Status()
 	corpo["alertas"] = saude.Estado
-	if saude.Detalhe != "" {
+	if detalhado && saude.Detalhe != "" {
 		corpo["alertas_detalhe"] = saude.Detalhe
 	}
 
 	descartados := logstore.Descartadas()
 	corpo["logs_descartados"] = descartados
 
-	falhos := alertasFalhos(r)
-	corpo["alertas_falhos"] = falhos
-
-	presos := alertasSemCanal(r)
-	corpo["alertas_sem_canal"] = presos
-
 	motivos := []string{}
+
+	falhos, errFalhos := contarAlertas(r, database.AlertDeliveryFalhou)
+	presos, errPresos := contarAlertas(r, database.AlertDeliverySemCanal)
+	corpo["alertas_falhos"], corpo["alertas_sem_canal"] = falhos, presos
+	if errFalhos != nil {
+		corpo["alertas_falhos"] = nil
+	}
+	if errPresos != nil {
+		corpo["alertas_sem_canal"] = nil
+	}
+	if errFalhos != nil || errPresos != nil {
+		log.Printf("[API] /readyz: erro ao contar alertas: %v %v", errFalhos, errPresos)
+		motivos = append(motivos, "não foi possível ler os contadores de alerta no banco")
+	}
+
 	if saude.Estado == alert.EstadoDegradado {
 		motivos = append(motivos, "canal de alerta degradado")
 	}
@@ -61,42 +78,23 @@ func corpoReadyz(r *http.Request, status, db string) map[string]any {
 	if descartados > 0 {
 		motivos = append(motivos, "linha de log descartada pela fila")
 	}
-	if len(motivos) > 0 {
+	if detalhado && len(motivos) > 0 {
 		corpo["degradado"] = motivos
 	}
 	return corpo
 }
 
-func alertasSemCanal(r *http.Request) int64 {
+func contarAlertas(r *http.Request, entrega string) (int64, error) {
 	db := database.From(r.Context())
 	if db == nil {
-		return 0
+		return 0, errDatabaseNotConnected
 	}
 
 	var n int64
 	err := db.Model(&database.Alert{}).
-		Where("delivery = ? AND status <> ?", database.AlertDeliverySemCanal, database.AlertStatusResolved).
+		Where("delivery = ? AND status <> ?", entrega, database.AlertStatusResolved).
 		Count(&n).Error
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
-func alertasFalhos(r *http.Request) int64 {
-	db := database.From(r.Context())
-	if db == nil {
-		return 0
-	}
-
-	var n int64
-	err := db.Model(&database.Alert{}).
-		Where("delivery = ? AND status <> ?", database.AlertDeliveryFalhou, database.AlertStatusResolved).
-		Count(&n).Error
-	if err != nil {
-		return 0
-	}
-	return n
+	return n, err
 }
 
 func pingDatabase(ctx context.Context) error {

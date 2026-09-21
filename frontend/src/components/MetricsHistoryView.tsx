@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { RefreshCw, Trash2, MessageSquarePlus, Globe } from 'lucide-react';
 import {
   api,
   apiErrorMessage,
   type Annotation,
   type CustomWindow,
-  type HistoryMetric,
   type HistoryRange,
   type HistoryWindow,
 } from '../lib/api';
 import { formatDateTime } from '../lib/format';
-import { HISTORY_METRICS, HISTORY_RANGES, metricLabel } from '../lib/metrics';
+import { AVISO_SEM_TENDENCIA, HISTORY_RANGES, janelaIndisponivel, metricasDoHistorico } from '../lib/metrics';
+import { useCatalogo } from './ui/useCatalogo';
+import LoadNotice from './ui/LoadNotice';
 import MetricChart from './charts/MetricChart';
 import { useAnnotations, useMetricSeries } from './charts/useMetricSeries';
 import { useDialog } from './ui/dialog-context';
@@ -34,7 +35,11 @@ const MetricsHistoryView = () => {
   const [servers, setServers] = useState<ServerOption[]>([]);
   const [serverId, setServerId] = useState('');
   const [serversError, setServersError] = useState<string | null>(null);
-  const [metric, setMetric] = useState<HistoryMetric>('cpu');
+  const catalogo = useCatalogo();
+  const opcoesDeMetrica = useMemo(() => metricasDoHistorico(catalogo.metricas), [catalogo.metricas]);
+  const [escolhida, setMetric] = useState('');
+  const metric = escolhida || (opcoesDeMetrica[0]?.nome ?? '');
+  const metrica = catalogo.buscar(metric);
   const [range, setRange] = useState<HistoryRange | typeof CUSTOM>('1h');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
@@ -118,13 +123,20 @@ const MetricsHistoryView = () => {
     }
   };
 
+  const escolherMetrica = (nova: string) => {
+    setMetric(nova);
+    if (range !== CUSTOM && janelaIndisponivel(catalogo.buscar(nova), range)) setRange('7d');
+  };
+
   const rangeButton = (value: HistoryRange | typeof CUSTOM, label: string) => (
     <button
       key={value}
       type="button"
       aria-pressed={range === value}
+      disabled={value !== CUSTOM && janelaIndisponivel(metrica, value)}
+      title={value !== CUSTOM && janelaIndisponivel(metrica, value) ? AVISO_SEM_TENDENCIA : undefined}
       onClick={() => setRange(value)}
-      className={`btn text-xs ${
+      className={`btn text-xs disabled:opacity-40 ${
         range === value ? 'bg-accent/10 border border-accent/40 text-accent' : 'btn-ghost'
       }`}
     >
@@ -165,9 +177,9 @@ const MetricsHistoryView = () => {
             <Select
               id="history-metric"
               value={metric}
-              onChange={(v) => setMetric(v as HistoryMetric)}
+              onChange={escolherMetrica}
               className="min-w-[160px]"
-              options={HISTORY_METRICS.map((m) => ({ value: m.key, label: m.label }))}
+              options={opcoesDeMetrica.map((m) => ({ value: m.nome, label: m.rotulo }))}
             />
           </div>
 
@@ -177,6 +189,9 @@ const MetricsHistoryView = () => {
               {HISTORY_RANGES.map((r) => rangeButton(r, r))}
               {rangeButton(CUSTOM, 'Personalizado')}
             </div>
+            {metrica !== undefined && !metrica.tem_tendencia && (
+              <p className="max-w-prose text-[11px] text-text-faint">{AVISO_SEM_TENDENCIA}</p>
+            )}
           </div>
 
           <button
@@ -188,6 +203,8 @@ const MetricsHistoryView = () => {
             Atualizar
           </button>
         </div>
+
+        <LoadNotice error={catalogo.erro} className="mb-4" />
 
         {serversError && (
           <p role="alert" className="mb-4 text-xs text-crit">{serversError}</p>
@@ -229,8 +246,8 @@ const MetricsHistoryView = () => {
           ) : (
             <MetricChart
               points={series.points}
-              metric={metric}
-              label={metricLabel(metric)}
+              unidade={catalogo.unidade(metric)}
+              label={catalogo.rotulo(metric)}
               annotations={notes.annotations}
               loading={series.loading}
               error={series.error}

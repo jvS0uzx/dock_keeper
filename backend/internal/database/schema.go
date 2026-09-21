@@ -17,6 +17,12 @@ type Server struct {
 
 	CollectNginx bool `gorm:"default:false" json:"collect_nginx"`
 
+	NginxEstado     string     `gorm:"size:16;not null;default:'desconhecido';index" json:"nginx_estado"`
+	NginxMotivo     string     `gorm:"type:text;not null;default:''" json:"nginx_motivo"`
+	NginxChecadoEm  *time.Time `json:"nginx_checado_em"`
+	NginxPapel      string     `gorm:"size:16;not null;default:'nenhum';index" json:"nginx_papel"`
+	NginxPapelDesde *time.Time `json:"nginx_papel_desde"`
+
 	SiteID *uint `gorm:"index;index:idx_server_site_name,priority:1" json:"site_id"`
 
 	OS           string `gorm:"size:64" json:"os"`
@@ -30,6 +36,8 @@ type Server struct {
 	MachineID string `gorm:"size:128;index" json:"machine_id"`
 
 	BehindLB *bool `json:"behind_lb"`
+
+	AbsenceAlert bool `gorm:"not null" json:"absence_alert"`
 
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -100,7 +108,7 @@ type NetworkHost struct {
 	IP        string    `gorm:"size:45;index" json:"ip"`
 	Hostname  string    `gorm:"size:255" json:"hostname"`
 	MAC       string    `gorm:"size:32;index" json:"mac"`
-	OpenPorts string    `gorm:"size:255" json:"open_ports"`
+	OpenPorts string    `gorm:"type:text" json:"open_ports"`
 	FirstSeen time.Time `json:"first_seen"`
 	LastSeen  time.Time `gorm:"index" json:"last_seen"`
 
@@ -236,6 +244,23 @@ const (
 	AlertDeliveryEnviado  = "enviado"
 	AlertDeliveryFalhou   = "falhou"
 	AlertDeliverySemCanal = "sem_canal"
+
+	AlertDeliveryDispensado = "dispensado"
+
+	AlvoTipoHost      = "host"
+	AlvoTipoContainer = "container"
+	AlvoTipoServico   = "servico"
+	AlvoTipoInterface = "interface"
+
+	NginxDesconhecido = "desconhecido"
+	NginxAusente      = "ausente"
+	NginxInativo      = "inativo"
+	NginxSemUpstream  = "sem_upstream"
+	NginxCandidato    = "candidato"
+
+	NginxPapelNenhum    = "nenhum"
+	NginxPapelPrincipal = "principal"
+	NginxPapelReserva   = "reserva"
 )
 
 type Alert struct {
@@ -259,16 +284,58 @@ type Alert struct {
 	NextAttemptAt *time.Time `gorm:"index" json:"next_attempt_at"`
 	LastAttemptAt *time.Time `json:"last_attempt_at"`
 	LastError     string     `gorm:"type:text" json:"last_error"`
+
+	RenotifyCount  int        `gorm:"not null;default:0" json:"renotify_count"`
+	LastNotifiedAt *time.Time `json:"last_notified_at"`
+	LastSeenAt     *time.Time `json:"last_seen_at"`
+
+	AlvoTipo *string  `gorm:"size:16;index" json:"alvo_tipo"`
+	AlvoID   *string  `gorm:"size:128" json:"alvo_id"`
+	AlvoNome *string  `gorm:"size:255" json:"alvo_nome"`
+	Metrica  *string  `gorm:"size:64" json:"metrica"`
+	Valor    *float64 `json:"valor"`
+	Limiar   *float64 `json:"limiar"`
+	Unidade  *string  `gorm:"size:16" json:"unidade"`
+}
+
+type NginxUpstream struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	ServerID string `gorm:"type:uuid;not null;uniqueIndex:idx_upstream_dono_bloco_destino,priority:1;index" json:"server_id"`
+	Bloco    string `gorm:"size:128;not null;uniqueIndex:idx_upstream_dono_bloco_destino,priority:2" json:"bloco"`
+	Destino  string `gorm:"size:255;not null;uniqueIndex:idx_upstream_dono_bloco_destino,priority:3" json:"destino"`
+
+	ObservadoEm time.Time `gorm:"not null;index" json:"observado_em"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type AlertDelivery struct {
+	ID      uint   `gorm:"primaryKey" json:"id"`
+	AlertID uint   `gorm:"not null;uniqueIndex:idx_entrega_alerta_canal,priority:1" json:"alert_id"`
+	Canal   string `gorm:"size:32;not null;uniqueIndex:idx_entrega_alerta_canal,priority:2" json:"canal"`
+
+	Status        string     `gorm:"size:16;not null;index" json:"status"`
+	Attempts      int        `gorm:"not null;default:0" json:"attempts"`
+	NextAttemptAt *time.Time `gorm:"index" json:"next_attempt_at"`
+	LastAttemptAt *time.Time `json:"last_attempt_at"`
+	LastError     string     `gorm:"type:text" json:"last_error"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type MetricContainer struct {
-	ID              uint      `gorm:"primaryKey"`
-	ContainerID     string    `gorm:"type:uuid;not null;index:idx_metriccontainer_ct_ts,priority:1"`
-	CPUUsagePercent float64   `gorm:"not null"`
-	MemUsedBytes    int64     `gorm:"not null"`
-	MemLimitBytes   int64     `gorm:"not null"`
-	State           string    `gorm:"size:50;not null;default:'running'"`
-	Status          string    `gorm:"size:255;not null;default:''"`
+	ID              uint    `gorm:"primaryKey"`
+	ContainerID     string  `gorm:"type:uuid;not null;index:idx_metriccontainer_ct_ts,priority:1"`
+	CPUUsagePercent float64 `gorm:"not null"`
+	MemUsedBytes    int64   `gorm:"not null"`
+	MemLimitBytes   int64   `gorm:"not null"`
+	State           string  `gorm:"size:50;not null;default:'running'"`
+	Status          string  `gorm:"size:255;not null;default:''"`
+	Health          *string `gorm:"size:32"`
+	RestartCount    *int
+	OOMKilled       *bool
 	Timestamp       time.Time `gorm:"not null;index:idx_metriccontainer_ct_ts,priority:2,sort:desc"`
 }
 

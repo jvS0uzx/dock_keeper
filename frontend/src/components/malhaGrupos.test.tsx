@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import Dashboard from './Dashboard';
 import ServersView from './ServersView';
@@ -35,16 +35,16 @@ const base = {
 };
 
 const servidores = [
-  { ...base, id: 'lb', name: 'Load Balancer', host_ip: '198.51.100.38', collect_nginx: true, addresses: ['198.51.100.38'] },
-  { ...base, id: 'v1', name: 'VPS-1', host_ip: '198.51.100.25', addresses: ['198.51.100.25'], behind_lb: true, behind_lb_origem: 'trafego' },
-  { ...base, id: 'v2', name: 'VPS-2', host_ip: '198.51.100.39', addresses: ['198.51.100.39', '100.100.0.1'], behind_lb: true, behind_lb_origem: 'manual' },
-  { ...base, id: 'mail', name: 'VPS E-mail', host_ip: '198.51.100.50', addresses: ['198.51.100.50'], cpu: 7, behind_lb: false, behind_lb_origem: 'nenhum' },
+  { ...base, id: 'lb', name: 'Load Balancer', host_ip: '203.0.113.38', collect_nginx: true, addresses: ['203.0.113.38'] },
+  { ...base, id: 'v1', name: 'VPS-1', host_ip: '203.0.113.25', addresses: ['203.0.113.25'], behind_lb: true, behind_lb_origem: 'trafego' },
+  { ...base, id: 'v2', name: 'VPS-2', host_ip: '203.0.113.39', addresses: ['203.0.113.39', '100.100.0.10'], behind_lb: true, behind_lb_origem: 'manual' },
+  { ...base, id: 'mail', name: 'VPS E-mail', host_ip: '203.0.113.50', addresses: ['203.0.113.50'], cpu: 7, behind_lb: false, behind_lb_origem: 'nenhum' },
 ];
 
 const trafego = [
-  { upstream_addr: '198.51.100.25:80', server_name: 'app.exemplo', status: '200', requests_count: 12, server_id: 'lb' },
-  { upstream_addr: '100.100.0.1:80', server_name: 'app.exemplo', status: '200', requests_count: 7, server_id: 'lb' },
-  { upstream_addr: '100.100.0.2:80', server_name: 'app.exemplo', status: '200', requests_count: 3, server_id: 'lb' },
+  { upstream_addr: '203.0.113.25:80', server_name: 'app.exemplo', status: '200', requests_count: 12, server_id: 'lb' },
+  { upstream_addr: '100.100.0.10:80', server_name: 'app.exemplo', status: '200', requests_count: 7, server_id: 'lb' },
+  { upstream_addr: '100.100.0.11:80', server_name: 'app.exemplo', status: '200', requests_count: 3, server_id: 'lb' },
 ];
 
 const api = vi.hoisted(() => ({
@@ -132,15 +132,15 @@ describe('malha com máquina fora do balanceador', () => {
 
     await screen.findAllByText('VPS-1');
 
-    await userEvent.click(screen.getByLabelText('Filtrar a malha'));
-    await userEvent.click(await screen.findByRole('option', { name: /só atrás do balanceador/i }));
+    await semEspera().click(screen.getByLabelText('Filtrar a malha'));
+    await semEspera().click(await screen.findByRole('option', { name: /só atrás do balanceador/i }));
     expect(screen.queryByText('VPS E-mail')).toBeNull();
     expect(localStorage.getItem('dockkeeper.malha')).toBe('atras');
 
-    await userEvent.click(screen.getByLabelText('Filtrar a malha'));
-    await userEvent.click(await screen.findByRole('option', { name: /só fora do balanceador/i }));
+    await semEspera().click(screen.getByLabelText('Filtrar a malha'));
+    await semEspera().click(await screen.findByRole('option', { name: /só fora do balanceador/i }));
     expect(await screen.findByText('VPS E-mail')).toBeTruthy();
-    expect(screen.queryByText('100.100.0.2:80')).toBeNull();
+    expect(screen.queryByText('100.100.0.11:80')).toBeNull();
     expect(localStorage.getItem('dockkeeper.malha')).toBe('fora');
   });
 
@@ -149,7 +149,7 @@ describe('malha com máquina fora do balanceador', () => {
     renderizar(<Dashboard />);
 
     expect(await screen.findByText('VPS E-mail')).toBeTruthy();
-    expect(screen.queryByText('100.100.0.2:80')).toBeNull();
+    expect(screen.queryByText('100.100.0.11:80')).toBeNull();
   });
 });
 
@@ -191,13 +191,13 @@ describe('topologia sem tráfego na janela', () => {
 
 describe('nó da malha não esmaga o nome', () => {
   const longos = [
-    { ...base, id: 'lb', name: 'Load Balancer', host_ip: '198.51.100.38', collect_nginx: true },
+    { ...base, id: 'lb', name: 'Load Balancer', host_ip: '203.0.113.38', collect_nginx: true },
     {
       ...base,
       id: 'mail',
       name: 'VPS-Email-Corporativo',
-      host_ip: '100.100.0.2',
-      addresses: ['100.100.0.2'],
+      host_ip: '100.100.0.11',
+      addresses: ['100.100.0.11'],
       behind_lb: true,
       behind_lb_origem: 'manual',
     },
@@ -222,7 +222,7 @@ describe('nó da malha não esmaga o nome', () => {
     expect(rotulo.parentElement?.className).toMatch(/min-w-0/);
     expect(estado.className).toMatch(/text-\[10px\]/);
     expect(estado.className).not.toMatch(/shrink-0/);
-    expect(within(caixa).getByText('100.100.0.2:80')).toBeTruthy();
+    expect(within(caixa).getByText('100.100.0.11:80')).toBeTruthy();
   });
 
   it('com tráfego, o nó continua mostrando nome, IP e requisições', async () => {
@@ -230,14 +230,14 @@ describe('nó da malha não esmaga o nome', () => {
       servers: longos,
       containers: [],
       load_balancing: [
-        { upstream_addr: '100.100.0.2:80', server_name: 'app', status: '200', requests_count: 12, server_id: 'lb' },
+        { upstream_addr: '100.100.0.11:80', server_name: 'app', status: '200', requests_count: 12, server_id: 'lb' },
       ],
     });
     renderizar(<Dashboard />);
 
     const { rotulo, caixa } = await noDe('VPS-Email-Corporativo');
     expect(rotulo.textContent).toBe('VPS-Email-Corporativo');
-    expect(within(caixa).getByText('100.100.0.2:80')).toBeTruthy();
+    expect(within(caixa).getByText('100.100.0.11:80')).toBeTruthy();
     expect(within(caixa).getByText(/12 req/)).toBeTruthy();
   });
 });
@@ -247,7 +247,7 @@ describe('marcar máquina como atrás do balanceador', () => {
     renderizar(<ServersView />);
 
     const linha = (await screen.findByText('VPS E-mail')).closest('tr');
-    await userEvent.click(within(linha as HTMLElement).getByRole('button', { name: /atrás do balanceador/i }));
+    await semEspera().click(within(linha as HTMLElement).getByRole('button', { name: /atrás do balanceador/i }));
 
     expect(api.setServerBehindLb).toHaveBeenCalledWith('mail', true);
   });
@@ -263,16 +263,16 @@ describe('marcar máquina como atrás do balanceador', () => {
 describe('cadastro de servidor com endereço repetido', () => {
   it('mostra a mensagem do backend no 409', async () => {
     api.createServer.mockRejectedValue(
-      new Error(JSON.stringify({ error: 'o endereço 198.51.100.39 já pertence a VPS-2 na unidade Matriz' })),
+      new Error(JSON.stringify({ error: 'o endereço 203.0.113.39 já pertence a VPS-2 na unidade Matriz' })),
     );
     renderizar(<ServersView />);
 
-    await userEvent.type(await screen.findByLabelText(/nome de identificação/i), 'VPS nova');
-    await userEvent.type(screen.getByLabelText(/endereço ip/i), '198.51.100.39');
-    await userEvent.click(screen.getByRole('button', { name: /conectar vps/i }));
+    await semEspera().type(await screen.findByLabelText(/nome de identificação/i), 'VPS nova');
+    await semEspera().type(screen.getByLabelText(/endereço ip/i), '203.0.113.39');
+    await semEspera().click(screen.getByRole('button', { name: /conectar vps/i }));
 
     expect(dialogo.notify).toHaveBeenCalledWith(
-      'o endereço 198.51.100.39 já pertence a VPS-2 na unidade Matriz',
+      'o endereço 203.0.113.39 já pertence a VPS-2 na unidade Matriz',
       'error',
     );
   });

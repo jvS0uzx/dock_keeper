@@ -13,6 +13,7 @@ import (
 
 	"github.com/jvS0uzx/dock_keeper/internal/auth"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/metricas"
 )
 
 const (
@@ -21,11 +22,6 @@ const (
 	maxBoardNameRunes    = 80
 	maxPanelTitleRunes   = 80
 )
-
-var validPanelMetrics = map[string]bool{
-	"cpu": true, "mem": true, "disk": true, "load": true,
-	"temperature": true, "net_rx": true, "net_tx": true, "rtt": true,
-}
 
 var errServerOutOfReach = errors.New("servidor não encontrado")
 
@@ -200,7 +196,7 @@ func validateDashboard(in *dashboardInput) string {
 			return "server_id é obrigatório em cada painel"
 		case len([]rune(p.Title)) > maxPanelTitleRunes:
 			return "title passa de 80 caracteres"
-		case !validPanelMetrics[p.Metric]:
+		case !metricas.Avaliavel(p.Metric):
 			return "métrica inválida"
 		case historyRanges[p.Range] == 0:
 			return "range inválido"
@@ -254,8 +250,12 @@ func saveDashboard(w http.ResponseWriter, r *http.Request, sess auth.Session, ex
 		return
 	}
 	if existing == nil {
-		var total int64
-		database.DB.Model(&database.Dashboard{}).Where("owner_user_id = ?", sess.UserID).Count(&total)
+		total, err := dashboardsDoDono(sess.UserID)
+		if err != nil {
+			log.Printf("[API] erro ao contar os dashboards do usuário %d: %v", sess.UserID, err)
+			writeError(w, http.StatusInternalServerError, "falha ao conferir o limite de dashboards")
+			return
+		}
 		if total >= maxDashboardsPerUser {
 			writeError(w, http.StatusBadRequest, "limite de 20 dashboards por usuário atingido")
 			return
@@ -309,4 +309,10 @@ func saveDashboard(w http.ResponseWriter, r *http.Request, sess auth.Session, ex
 		status = http.StatusCreated
 	}
 	writeJSON(w, status, viewOf(board, func(database.DashboardPanel) bool { return true }))
+}
+
+func dashboardsDoDono(dono uint) (int64, error) {
+	var total int64
+	err := database.DB.Model(&database.Dashboard{}).Where("owner_user_id = ?", dono).Count(&total).Error
+	return total, err
 }

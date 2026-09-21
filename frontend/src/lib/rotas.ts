@@ -51,7 +51,11 @@ export const detalheDoCaminho = (caminho: string): Detalhe | null => {
     return /^\d+$/.test(id) ? { kind: 'site', id: Number(id) } : null;
   }
   if (raiz === 'maquinas' && id !== '') {
-    return { kind: 'machine', id: decodeURIComponent(id) };
+    try {
+      return { kind: 'machine', id: decodeURIComponent(id) };
+    } catch {
+      return null;
+    }
   }
   return null;
 };

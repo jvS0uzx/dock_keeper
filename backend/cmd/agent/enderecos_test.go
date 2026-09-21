@@ -42,11 +42,11 @@ func TestEnderecosDoHostComErroDevolveVazio(t *testing.T) {
 
 func TestIpDeEnderecoDescartaIPv6ELoopback(t *testing.T) {
 	casos := map[string]string{
-		"10.0.0.5/24":      "10.0.0.5",
-		"127.0.0.1/8":      "",
-		"169.254.1.1/16":   "",
-		"fe80::1/64":       "",
-		"100.100.0.2/32": "100.100.0.2",
+		"10.0.0.5/24":     "10.0.0.5",
+		"127.0.0.1/8":     "",
+		"169.254.1.1/16":  "",
+		"fe80::1/64":      "",
+		"100.100.0.11/32": "100.100.0.11",
 	}
 	for entrada, esperado := range casos {
 		ip, rede, err := net.ParseCIDR(entrada)

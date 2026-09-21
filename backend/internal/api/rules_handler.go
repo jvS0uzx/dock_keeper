@@ -11,6 +11,7 @@ import (
 
 	"github.com/jvS0uzx/dock_keeper/internal/auth"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/metricas"
 	"github.com/jvS0uzx/dock_keeper/internal/rules"
 )
 
@@ -30,10 +31,6 @@ type alertRuleRequest struct {
 
 const maxRuleDurationSec = 24 * 60 * 60
 
-var validRuleMetrics = map[string]bool{
-	"cpu": true, "mem": true, "disk": true, "load": true,
-	"temperature": true, "net_rx": true, "net_tx": true, "rtt": true,
-}
 var validRuleOperators = map[string]bool{">": true, "<": true}
 
 func ruleSiteID(rule database.AlertRule, siteByServer map[string]*uint) (*uint, bool) {
@@ -111,7 +108,7 @@ func AlertRulesHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "name é obrigatório")
 			return
 		}
-		if !validRuleMetrics[req.Metric] {
+		if !metricas.Avaliavel(req.Metric) {
 			writeError(w, http.StatusBadRequest, "métrica inválida")
 			return
 		}

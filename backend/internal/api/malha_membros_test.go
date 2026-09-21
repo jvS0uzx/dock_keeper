@@ -89,8 +89,8 @@ func TestMembroPorAliasTambemConta(t *testing.T) {
 	setupAuditAPI(t)
 	sess := sessaoReal(t, "admin-malha-alias", auth.RoleAdmin)
 	s := servidorDeRename(t, "vps-overlay-malha", "203.0.113.252", nil)
-	database.RegistrarAliases(s.ID, []string{"100.100.0.2"})
-	upstreamAntigo(t, "100.100.0.2", 2*time.Hour)
+	database.RegistrarAliases(s.ID, []string{"100.100.0.11"})
+	upstreamAntigo(t, "100.100.0.11", 2*time.Hour)
 
 	if behind, _ := membroNoLive(t, sess, s.ID); !behind {
 		t.Errorf("upstream que bate com alias do servidor não entrou na malha")
@@ -186,6 +186,7 @@ func TestReadyzContaAlertaPresoSemCanal(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	req.Header.Set("Authorization", "Bearer "+testConfig().Token)
 	rec := httptest.NewRecorder()
 	Routes(testConfig()).ServeHTTP(rec, req)
 

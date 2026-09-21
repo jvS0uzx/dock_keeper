@@ -166,10 +166,12 @@ func TestAmostraDentroDoLimiteZeraAContagemGravada(t *testing.T) {
 
 func TestRecuperacaoSaiUmaVezSo(t *testing.T) {
 	setupMotorDB(t)
-	criarRegra(t, "recupera", 0)
+	regra := criarRegra(t, "recupera", 0)
 
 	amostra(t, 90, time.Second)
 	evaluate()
+	database.DB.Model(&database.Alert{}).Where("key = ?", stateKey(regra.ID, srvDuracao)).
+		Updates(map[string]any{"delivery": database.AlertDeliveryEnviado, "last_notified_at": time.Now().UTC()})
 
 	amostra(t, 10, 0)
 	buf := capturarLog(t)

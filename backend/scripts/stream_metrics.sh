@@ -27,6 +27,12 @@ enderecos_json() {
     }'
 }
 
+inspecao_json() {
+  docker ps -aq 2>/dev/null | tr -d '\r' \
+    | xargs -r docker inspect --format '{"docker_id":{{json (printf "%.12s" .Id)}},"restart_count":{{json .RestartCount}},"oom_killed":{{json .State.OOMKilled}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}""{{end}}}' 2>/dev/null \
+    | tr -d '\r' | paste -sd, -
+}
+
 while true; do
   read -r _ u n s i rest < "$PROC_STAT"
   total=$((u+n+s+i)); idle=$i
@@ -71,9 +77,10 @@ while true; do
 
   DOCKER_PS=$(docker ps -a --format '{"docker_id":{{json .ID}},"name":{{json .Names}},"project":{{json (.Label "com.docker.compose.project")}},"state":{{json .State}},"status":{{json .Status}}}' | tr -d '\r' | paste -sd, -)
   DOCKER_STATS=$(docker stats --no-stream --format '{"docker_id":{{json .ID}},"cpu_percent":{{json .CPUPerc}},"mem_usage":{{json .MemUsage}}}' | tr -d '\r' | paste -sd, -)
+  DOCKER_INSPECT=$(inspecao_json)
 
   ADDR_JSON=",\"addresses\":[$(enderecos_json)]"
 
-  echo "{\"uptime\":$UPTIME,\"host_cpu\":$HOST_CPU,\"mem_used\":$MEM_USED,\"mem_total\":$MEM_TOTAL,\"load1\":$LOAD1,\"disk_root\":\"$DISK_ROOT\"$TEMP_JSON$NET_JSON$ADDR_JSON,\"ps\":[$DOCKER_PS],\"stats\":[$DOCKER_STATS]}"
+  echo "{\"uptime\":$UPTIME,\"host_cpu\":$HOST_CPU,\"mem_used\":$MEM_USED,\"mem_total\":$MEM_TOTAL,\"load1\":$LOAD1,\"disk_root\":\"$DISK_ROOT\"$TEMP_JSON$NET_JSON$ADDR_JSON,\"ps\":[$DOCKER_PS],\"stats\":[$DOCKER_STATS],\"inspect\":[$DOCKER_INSPECT]}"
   sleep "${DOCKKEEPER_INTERVAL:-2}"
 done

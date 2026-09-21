@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import AlertRulesView from './AlertRulesView';
 import { SessionContext, type SessionState } from './ui/session-context';
 import { SiteScopeContext, type SiteScopeState } from './ui/site-scope-context';
 import { DialogContext, type DialogApi } from './ui/dialog-context';
 
-vi.mock('../lib/api', () => ({
+vi.mock('../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/api')>()),
   api: {
     alertRules: vi.fn(async () => [
       {
@@ -23,6 +24,7 @@ vi.mock('../lib/api', () => ({
       },
     ]),
     liveMetrics: vi.fn(async () => ({ servers: [], containers: [], load_balancing: [] })),
+    metricsCatalog: vi.fn(async () => (await import('../test/catalogo')).CATALOGO),
   },
 }));
 
@@ -57,24 +59,26 @@ const renderizar = () => {
 
 describe('AlertRulesView — métricas novas', () => {
   it('oferece temperatura e taxa de rede além das métricas de uso', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     renderizar();
 
+    await screen.findByText(/Rede recebida/);
     await user.click(screen.getByRole('combobox', { name: 'Métrica' }));
     const opcoes = screen.getAllByRole('option').map((o) => o.textContent);
 
     expect(opcoes).toEqual(expect.arrayContaining([
       'CPU (%)',
       'Temperatura (°C)',
-      'Rede RX (bytes/s)',
-      'Rede TX (bytes/s)',
-      'Latência (ms)',
+      'Rede recebida (bytes/s)',
+      'Rede enviada (bytes/s)',
+      'RTT (ms)',
     ]));
+    expect(opcoes).not.toContain('Handshake SSH (ms)');
   });
 
   it('mostra o limiar de taxa em unidade legível', async () => {
     renderizar();
 
-    expect(await screen.findByText(/Rede RX \(bytes\/s\) > 10 MB\/s/)).toBeTruthy();
+    expect(await screen.findByText(/Rede recebida \(bytes\/s\) > 10 MB\/s/)).toBeTruthy();
   });
 });

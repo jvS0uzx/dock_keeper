@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -143,6 +144,23 @@ func HashPassword(plain string) (string, error) {
 	return string(hash), err
 }
 
+func ContaDoLogin(identificador string) string {
+	identificador = strings.ToLower(strings.TrimSpace(identificador))
+
+	if database.DB == nil {
+		return identificador
+	}
+
+	var ids []uint
+	err := database.DB.Model(&database.User{}).
+		Where("username = ? OR (email <> '' AND email = ?)", identificador, identificador).
+		Limit(1).Pluck("id", &ids).Error
+	if err != nil || len(ids) == 0 {
+		return identificador
+	}
+	return "#" + strconv.FormatUint(uint64(ids[0]), 10)
+}
+
 func Login(username, password string) (Session, error) {
 	identificador := strings.ToLower(strings.TrimSpace(username))
 
@@ -166,7 +184,9 @@ func Login(username, password string) (Session, error) {
 	}
 
 	now := time.Now()
-	database.DB.Model(&user).Update("last_login", &now)
+	if err := database.DB.Model(&user).Update("last_login", &now).Error; err != nil {
+		log.Printf("[Auth] erro ao gravar o último login de %q: %v", user.Username, err)
+	}
 
 	accesses, err := loadAccesses(user)
 	if err != nil {

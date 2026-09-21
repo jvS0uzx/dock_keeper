@@ -33,6 +33,11 @@ const roleRank: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 };
 export const hasGlobalAdmin = (accesses: SiteAccess[]): boolean =>
   accesses.some((a) => a.site_id === null && roleRank[a.role] >= roleRank.admin);
 
+export const TODAS_AS_UNIDADES = 'all';
+
+export const unidadeEfetiva = (panel: PanelId, siteId: string): number | null =>
+  panel === 'suporte' && siteId !== TODAS_AS_UNIDADES ? Number(siteId) : null;
+
 const STORAGE_KEY = 'dockkeeper.panel';
 
 export const loadPanel = (): PanelId => {

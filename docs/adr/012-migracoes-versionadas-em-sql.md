@@ -38,8 +38,12 @@ linhas e nenhuma dependência nova.
 - **Regra de hash do baseline:** como a 001 é convergente, o hash dela é
   **atualizado** quando muda, em vez de derrubar o boot. Da 002 em diante a regra
   continua estrita: arquivo aplicado que muda recusa subir.
-- `AutoMigrate` continua disponível atrás de `DB_AUTOMIGRATE=true`, para quem
-  quiser o caminho antigo num ambiente descartável. O padrão é migração.
+- `DB_AUTOMIGRATE=true` **foi removido em 2026-09-19**. O banco criado por ele saía sem
+  9 chaves estrangeiras, 11 CHECKs, o índice trigram e o índice único de e-mail: dois
+  caminhos para o mesmo esquema divergem em silêncio, e o mais fraco era justamente o
+  que ninguém testava. Rodar as migrações depois do `AutoMigrate` foi descartado porque
+  ainda deixaria colunas com nulabilidade diferente. A variável ligada hoje só gera um
+  aviso no boot, e um teste compara o esquema dos dois boots.
 
 ## Por que convergente, e não "adota e segue"
 

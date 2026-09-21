@@ -30,6 +30,7 @@ type Target struct {
 	User    string
 	Port    int
 	KeyPath string
+	SiteID  *uint
 
 	CollectNginx bool
 }

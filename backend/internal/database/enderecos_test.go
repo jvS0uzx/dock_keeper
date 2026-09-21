@@ -52,29 +52,29 @@ func TestRegistrarEnderecosGravaEAtualizaUltimoVisto(t *testing.T) {
 	setupEnderecoDB(t)
 	id := servidorParaEndereco(t, "vps-enderecos", "203.0.113.230")
 
-	RegistrarEnderecos(id, []string{"100.100.0.2", "10.0.0.5"})
+	RegistrarEnderecos(id, []string{"100.100.0.11", "10.0.0.5"})
 	depoisDoPrimeiro := enderecosDe(t, id)
 	if len(depoisDoPrimeiro) != 2 {
 		t.Fatalf("gravou %d endereços, esperado 2", len(depoisDoPrimeiro))
 	}
-	primeiro := depoisDoPrimeiro["100.100.0.2"]
+	primeiro := depoisDoPrimeiro["100.100.0.11"]
 	if primeiro.Origem != OrigemColetado {
 		t.Errorf("origem gravada = %q, esperado %q", primeiro.Origem, OrigemColetado)
 	}
 
 	antes := primeiro.UltimoVisto
 	time.Sleep(10 * time.Millisecond)
-	RegistrarEnderecos(id, []string{"100.100.0.2"})
+	RegistrarEnderecos(id, []string{"100.100.0.11"})
 
 	depois := enderecosDe(t, id)
 	if len(depois) != 2 {
 		t.Errorf("segunda coleta mudou a contagem para %d; endereço ausente não se apaga na hora", len(depois))
 	}
-	if !depois["100.100.0.2"].UltimoVisto.After(antes) {
-		t.Errorf("ultimo_visto não avançou: %v não é depois de %v", depois["100.100.0.2"].UltimoVisto, antes)
+	if !depois["100.100.0.11"].UltimoVisto.After(antes) {
+		t.Errorf("ultimo_visto não avançou: %v não é depois de %v", depois["100.100.0.11"].UltimoVisto, antes)
 	}
-	if !depois["100.100.0.2"].PrimeiroVisto.Equal(primeiro.PrimeiroVisto) {
-		t.Errorf("primeiro_visto mudou de %v para %v", primeiro.PrimeiroVisto, depois["100.100.0.2"].PrimeiroVisto)
+	if !depois["100.100.0.11"].PrimeiroVisto.Equal(primeiro.PrimeiroVisto) {
+		t.Errorf("primeiro_visto mudou de %v para %v", primeiro.PrimeiroVisto, depois["100.100.0.11"].PrimeiroVisto)
 	}
 }
 
@@ -98,11 +98,11 @@ func TestPodaTiraColetadoVelhoEMantemManual(t *testing.T) {
 	id := servidorParaEndereco(t, "vps-poda", "203.0.113.232")
 
 	RegistrarEnderecos(id, []string{"10.2.0.1", "10.2.0.2"})
-	RegistrarAliases(id, []string{"100.100.0.1"})
+	RegistrarAliases(id, []string{"100.100.0.10"})
 
 	velho := time.Now().UTC().Add(-40 * 24 * time.Hour)
 	if err := DB.Model(&ServerAddress{}).
-		Where("server_id = ? AND address IN ?", id, []string{"10.2.0.1", "100.100.0.1"}).
+		Where("server_id = ? AND address IN ?", id, []string{"10.2.0.1", "100.100.0.10"}).
 		Update("ultimo_visto", velho).Error; err != nil {
 		t.Fatalf("envelhecer endereços: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestPodaTiraColetadoVelhoEMantemManual(t *testing.T) {
 	if _, ok := restaram["10.2.0.2"]; !ok {
 		t.Errorf("endereço coletado recente foi podado")
 	}
-	if _, ok := restaram["100.100.0.1"]; !ok {
+	if _, ok := restaram["100.100.0.10"]; !ok {
 		t.Errorf("alias manual foi podado; manual nunca some por idade")
 	}
 }
@@ -125,15 +125,15 @@ func TestAliasManualNaoViraColetado(t *testing.T) {
 	setupEnderecoDB(t)
 	id := servidorParaEndereco(t, "vps-alias", "203.0.113.233")
 
-	RegistrarAliases(id, []string{"100.100.0.2"})
-	RegistrarEnderecos(id, []string{"100.100.0.2"})
+	RegistrarAliases(id, []string{"100.100.0.11"})
+	RegistrarEnderecos(id, []string{"100.100.0.11"})
 
 	gravados := enderecosDe(t, id)
-	if gravados["100.100.0.2"].Origem != OrigemManual {
+	if gravados["100.100.0.11"].Origem != OrigemManual {
 		t.Errorf("origem virou %q depois da coleta; alias manual não pode ser rebaixado",
-			gravados["100.100.0.2"].Origem)
+			gravados["100.100.0.11"].Origem)
 	}
-	if gravados["100.100.0.2"].UltimoVisto.IsZero() {
+	if gravados["100.100.0.11"].UltimoVisto.IsZero() {
 		t.Errorf("ultimo_visto do alias não foi atualizado pela coleta")
 	}
 }

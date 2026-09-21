@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import App from '../App';
 import { saveSession, clearSession, type SessionInfo } from '../lib/session';
@@ -34,7 +34,7 @@ vi.mock('../lib/api', async (importOriginal) => ({
 const sessaoAdmin: SessionInfo = {
   token: 'tok',
   user_id: 1,
-  username: 'joaosouza@example.com',
+  username: 'joaosouza@exemplo.com.br',
   role: 'admin',
   expires_at: new Date(Date.now() + 3600_000).toISOString(),
   accesses: [{ site_id: null, role: 'admin' }],
@@ -59,7 +59,7 @@ describe('rotas do painel', () => {
     saveSession(sessaoAdmin);
     render(<App />);
 
-    await userEvent.click(await screen.findByText('Servidores'));
+    await semEspera().click(await screen.findByText('Servidores'));
 
     expect(window.location.pathname).toBe('/servidores');
     expect(await screen.findByText('tela de servidores')).toBeTruthy();
@@ -87,7 +87,7 @@ describe('rotas do painel', () => {
     render(<App />);
     await screen.findByText('tela do dashboard');
 
-    await userEvent.click(screen.getByText('Servidores'));
+    await semEspera().click(screen.getByText('Servidores'));
     await screen.findByText('tela de servidores');
 
     window.history.back();
@@ -124,9 +124,9 @@ describe('rotas do painel', () => {
 
     await waitFor(() => expect(window.location.pathname).toBe('/login'));
 
-    await userEvent.type(screen.getByLabelText('Usuário ou e-mail'), 'joao');
-    await userEvent.type(screen.getByLabelText('Senha'), 'senha-de-teste-1234');
-    await userEvent.click(screen.getByRole('button', { name: 'Entrar' }));
+    await semEspera().type(screen.getByLabelText('Usuário ou e-mail'), 'joao');
+    await semEspera().type(screen.getByLabelText('Senha'), 'senha-de-teste-1234');
+    await semEspera().click(screen.getByRole('button', { name: 'Entrar' }));
 
     await waitFor(() => expect(window.location.pathname).toBe('/paineis'));
   });
@@ -156,7 +156,7 @@ describe('modo token', () => {
     irPara('/dashboard');
     render(<App />);
 
-    await userEvent.click(await screen.findByRole('button', { name: /token \(dev\)/i }));
+    await semEspera().click(await screen.findByRole('button', { name: /token \(dev\)/i }));
 
     expect(await screen.findByText('tela do dashboard')).toBeTruthy();
     expect(screen.getByText('api-token (dev)')).toBeTruthy();

@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jvS0uzx/dock_keeper/internal/alert"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"github.com/jvS0uzx/dock_keeper/internal/logstore"
 	"github.com/jvS0uzx/dock_keeper/scripts"
@@ -86,15 +85,23 @@ type DockerStatsPayload struct {
 	MemUsage   string `json:"mem_usage"`
 }
 
+type DockerInspectPayload struct {
+	DockerID     string `json:"docker_id"`
+	RestartCount *int   `json:"restart_count"`
+	OOMKilled    *bool  `json:"oom_killed"`
+	Health       string `json:"health"`
+}
+
 type SysPayload struct {
-	Uptime   float64              `json:"uptime"`
-	HostCPU  *float64             `json:"host_cpu"`
-	MemUsed  int64                `json:"mem_used"`
-	MemTotal int64                `json:"mem_total"`
-	Load1    *float64             `json:"load1"`
-	DiskRoot string               `json:"disk_root"`
-	PS       []DockerPSPayload    `json:"ps"`
-	Stats    []DockerStatsPayload `json:"stats"`
+	Uptime   float64                `json:"uptime"`
+	HostCPU  *float64               `json:"host_cpu"`
+	MemUsed  int64                  `json:"mem_used"`
+	MemTotal int64                  `json:"mem_total"`
+	Load1    *float64               `json:"load1"`
+	DiskRoot string                 `json:"disk_root"`
+	PS       []DockerPSPayload      `json:"ps"`
+	Stats    []DockerStatsPayload   `json:"stats"`
+	Inspect  []DockerInspectPayload `json:"inspect"`
 
 	TemperatureC *float64 `json:"temperature_c"`
 
@@ -151,6 +158,7 @@ func StartStream(ctx context.Context, t Target) error {
 	}
 
 	containerCache := make(map[string]string)
+	containers := newVigiaDeContainers(t)
 	cycles := 0
 
 	scanner := bufio.NewScanner(stdout)
@@ -162,7 +170,10 @@ func StartStream(ctx context.Context, t Target) error {
 		}
 
 		storeHostMetric(t, payload, handshakeMs)
-		notifyStoppedContainers(t, payload.PS)
+		if cycles == 0 {
+			hostDeVolta(t)
+		}
+		containers.observe(payload.PS, payload.Inspect)
 		storeContainerMetrics(t, payload, containerCache)
 
 		if cycles%metricsLogEvery == 0 {
@@ -206,19 +217,15 @@ func storeHostMetric(t Target, payload SysPayload, handshakeMs float64) {
 	database.RegistrarEnderecos(t.ID, append(payload.Addresses, t.Host))
 }
 
-func notifyStoppedContainers(t Target, ps []DockerPSPayload) {
-	for _, c := range ps {
-		if c.State != "running" && c.State != "" {
-			alert.Notify("container_down:"+t.ID+":"+c.Name,
-				fmt.Sprintf("[ALERTA] Container %s está %s em %s", c.Name, c.State, t.Host))
-		}
-	}
-}
-
 func storeContainerMetrics(t Target, payload SysPayload, cache map[string]string) {
 	statsByID := make(map[string]DockerStatsPayload, len(payload.Stats))
 	for _, s := range payload.Stats {
 		statsByID[s.DockerID] = s
+	}
+
+	inspectByID := make(map[string]DockerInspectPayload, len(payload.Inspect))
+	for _, in := range payload.Inspect {
+		inspectByID[in.DockerID] = in
 	}
 
 	metrics := make([]database.MetricContainer, 0, len(payload.PS))
@@ -234,7 +241,9 @@ func storeContainerMetrics(t Target, payload SysPayload, cache map[string]string
 				continue
 			}
 			if container.ProjectDir != ps.Project {
-				database.DB.Model(&container).Update("project_dir", ps.Project)
+				if err := database.DB.Model(&container).Update("project_dir", ps.Project).Error; err != nil {
+					log.Printf("[RealTime] erro ao gravar o projeto do container %s: %v", ps.Name, err)
+				}
 			}
 			containerID = container.ID
 			cache[ps.DockerID] = containerID
@@ -250,11 +259,18 @@ func storeContainerMetrics(t Target, payload SysPayload, cache map[string]string
 			cpuPercent = parsePercent(stat.CPUPercent)
 		}
 
-		metrics = append(metrics, database.MetricContainer{
+		metric := database.MetricContainer{
 			ContainerID: containerID, CPUUsagePercent: cpuPercent,
 			MemUsedBytes: memUsed, MemLimitBytes: memLimit,
 			State: ps.State, Status: ps.Status, Timestamp: time.Now().UTC(),
-		})
+		}
+		if insp, ok := inspectByID[ps.DockerID]; ok {
+			saude := insp.Health
+			metric.Health = &saude
+			metric.RestartCount = insp.RestartCount
+			metric.OOMKilled = insp.OOMKilled
+		}
+		metrics = append(metrics, metric)
 	}
 
 	if len(metrics) > 0 {
@@ -348,6 +364,7 @@ func StartNginxStream(ctx context.Context, t Target) error {
 	if err := runScript(session, t, scripts.StreamNginx); err != nil {
 		return err
 	}
+	defer aoFicarDePe(streamEstavelApos, func() { nginxDeVolta(t) })()
 
 	counter := newLBCounter(lbOrigin(t))
 	flushCtx, stopFlush := context.WithCancel(ctx)
@@ -382,14 +399,6 @@ func StartNginxStream(ctx context.Context, t Target) error {
 }
 
 var trackedStatuses = []string{"500", "502", "503", "504", "429", "404", "400"}
-
-func parseNginxLine(line string) (lbKey, bool) {
-	e, ok := parseNginxEntry(line)
-	if !ok {
-		return lbKey{}, false
-	}
-	return e.bucket(), true
-}
 
 func (e nginxEntry) bucket() lbKey {
 	status := "200"

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import ServersView from './ServersView';
 import { DialogContext, type DialogApi } from './ui/dialog-context';
@@ -63,7 +63,7 @@ describe('renomear servidor pela tela de Servidores', () => {
     (dialogo.prompt as ReturnType<typeof vi.fn>).mockResolvedValue('vps-producao');
 
     const linha = await linhaDe('vps-app');
-    await userEvent.click(linha.getByRole('button', { name: /renomear/i }));
+    await semEspera().click(linha.getByRole('button', { name: /renomear/i }));
 
     expect(api.renameServer).toHaveBeenCalledWith('a', 'vps-producao');
     expect(api.servers).toHaveBeenCalledTimes(2);
@@ -74,7 +74,7 @@ describe('renomear servidor pela tela de Servidores', () => {
     (dialogo.prompt as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
     const linha = await linhaDe('vps-app');
-    await userEvent.click(linha.getByRole('button', { name: /renomear/i }));
+    await semEspera().click(linha.getByRole('button', { name: /renomear/i }));
 
     expect(api.renameServer).not.toHaveBeenCalled();
   });
@@ -87,7 +87,7 @@ describe('renomear servidor pela tela de Servidores', () => {
     );
 
     const linha = await linhaDe('vps-app');
-    await userEvent.click(linha.getByRole('button', { name: /renomear/i }));
+    await semEspera().click(linha.getByRole('button', { name: /renomear/i }));
 
     expect(dialogo.notify).toHaveBeenCalledWith(
       'já existe um servidor com esse nome nesta unidade',

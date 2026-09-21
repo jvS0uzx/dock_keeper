@@ -71,12 +71,65 @@ func CheckAndStore(d database.Domain) database.Domain {
 		log.Printf("[SSL] erro ao persistir o estado de %s: %v", d.Name, err)
 	}
 
-	if !info.Valid {
-		alert.Notify("ssl_invalid:"+d.Name,
-			fmt.Sprintf("[CRITICO] Certificado de %s inválido: %s", d.Name, info.ErrorMsg))
-	} else if info.DaysLeft <= sslWarnDays {
-		alert.Notify("ssl_expiring:"+d.Name,
-			fmt.Sprintf("[ALERTA] Certificado de %s expira em %d dias", d.Name, info.DaysLeft))
-	}
+	avisarCertificado(d, info)
 	return d
+}
+
+var (
+	notifyAlert  = alert.Enqueue
+	resolveAlert = alert.Recovered
+)
+
+func avisarCertificado(d database.Domain, info SSLInfo) {
+	invalido := alertaDoDominio(d, "ssl_invalid:"+d.Name)
+	vencendo := alertaDoDominio(d, "ssl_expiring:"+d.Name)
+
+	invalido.Metrica = "estado"
+	vencendo.Metrica = "certificado_dias"
+	vencendo.Unidade = "dias"
+	limiar := float64(sslWarnDays)
+	vencendo.Limiar = &limiar
+
+	if !info.Valid {
+		invalido.Severity = "critical"
+		invalido.Text = fmt.Sprintf("[CRITICO] Certificado de %s inválido: %s", d.Name, info.ErrorMsg)
+		notifyAlert(invalido)
+		return
+	}
+
+	invalido.Text = fmt.Sprintf("[INFO] Recuperado - Certificado de %s voltou a ser válido", d.Name)
+	resolveAlert(invalido)
+
+	dias := float64(info.DaysLeft)
+	vencendo.Valor = &dias
+
+	if info.DaysLeft <= sslWarnDays {
+		vencendo.Severity = "high"
+		vencendo.Text = fmt.Sprintf("[ALERTA] Certificado de %s expira em %d dias", d.Name, info.DaysLeft)
+		notifyAlert(vencendo)
+		return
+	}
+	vencendo.Text = fmt.Sprintf("[INFO] Recuperado - Certificado de %s renovado: %d dias de validade", d.Name, info.DaysLeft)
+	resolveAlert(vencendo)
+}
+
+func alertaDoDominio(d database.Domain, chave string) alert.Entrada {
+	e := alert.Entrada{
+		Key: chave, ServerID: d.ServerID,
+		AlvoTipo: database.AlvoTipoServico, AlvoID: d.Name, AlvoNome: d.Name,
+	}
+	if d.ServerID == nil || database.DB == nil {
+		return e
+	}
+
+	var unidades []*uint
+	err := database.DB.Model(&database.Server{}).Where("id = ?", *d.ServerID).Limit(1).Pluck("site_id", &unidades).Error
+	if err != nil {
+		log.Printf("[SSL] erro ao buscar a unidade do servidor de %s: %v", d.Name, err)
+		return e
+	}
+	if len(unidades) == 1 {
+		e.SiteID = unidades[0]
+	}
+	return e
 }

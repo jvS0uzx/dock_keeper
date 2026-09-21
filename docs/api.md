@@ -24,8 +24,9 @@ rotas**.
 
 | Rota | Métodos | Exige | O que faz |
 |---|---|---|---|
-| `/api/metrics/live` | GET | `viewer` | Último estado conhecido de hosts, containers e balanceador. É o que o painel consulta em polling. Por servidor traz `cpu`, `load1`, `temperature_c`, `net_rx_bps`, `net_tx_bps` e `rtt_ms`, `null` quando não há medição |
-| `/api/metrics/history` | GET | `viewer` | Série temporal de uma métrica, com janela. Lê a tendência agregada nas janelas longas. `metric`: `cpu`, `mem`, `disk`, `load`, `temperature`, `latency` (handshake SSH), `rtt` (ms), `net_rx` e `net_tx` (bytes/s) |
+| `/api/metrics/catalogo` | GET | `viewer` | O registro único de métricas: `[{nome, rotulo, unidade, tem_tendencia, escopo, em_regra}]`. `escopo` é `servidor`, `container` ou `ambos`; `tem_tendencia=false` significa que períodos acima de 7 dias respondem 400 no histórico; `em_regra` diz se a métrica vale em regra de alerta e em painel de dashboard. A interface monta seus seletores a partir daqui |
+| `/api/metrics/live` | GET | `viewer` | Último estado conhecido de hosts, containers e balanceador. É o que o painel consulta em polling. `lb_window_sec` diz a janela, em segundos, em que `load_balancing[].requests_count` foi contado. Por servidor traz `cpu`, `load1`, `temperature_c`, `net_rx_bps`, `net_tx_bps` e `rtt_ms`, `null` quando não há medição |
+| `/api/metrics/history` | GET | `viewer` | Série temporal de uma métrica, com janela. Lê a tendência agregada nas janelas longas. `metric`: `cpu`, `mem`, `disk`, `load`, `temperature`, `latency` (handshake SSH), `rtt` (ms), `net_rx` e `net_tx` (bytes/s). `latency` e todo histórico de container (`container_id`) não têm tendência: período acima de `METRIC_RETENTION_DAYS` (7 dias) responde **400** em vez de devolver 7 dias como se fossem 30 |
 | `/api/logs/search` | GET | `viewer` | Busca no histórico de linhas de log, recortada por unidade |
 
 ### Janela do histórico
@@ -101,7 +102,7 @@ As escritas das duas rotas são auditadas pelo middleware: `dashboards.create`,
 
 | Rota | Métodos | Exige | O que faz |
 |---|---|---|---|
-| `/api/servers` | GET, POST, PATCH, DELETE | **admin global** | Cadastro dos hosts monitorados. Cadastrar entrega acesso SSH root, por isso é admin. O `PATCH` renomeia e ajusta `user` e `port`; `host_ip` não muda, porque é a identidade da coleta |
+| `/api/servers` | GET, POST, PATCH, DELETE | **admin global** | Cadastro dos hosts monitorados. Cadastrar entrega acesso SSH root, por isso é admin. O `PATCH` renomeia e ajusta `user` e `port`; `host_ip` não muda, porque é a identidade da coleta. `{"aliases":[...]}` **substitui** a lista manual inteira (lista vazia remove todos; endereço coletado não é tocado). `{"absence_alert":true\|false}` marca a estação para o alerta de ausência. O `GET` e o `/api/metrics/live` devolvem `absence_alert`, `aliases` (só os manuais) e `addresses` (todos, com o `host_ip`) |
 | `/api/containers/action` | POST | **operador global** | `start`, `stop` ou `restart` de container no host remoto |
 | `/api/containers/logs/stream` | GET | ticket | `docker logs -f` por SSE |
 
@@ -164,9 +165,9 @@ responde `GET` e `/pins` só `PUT`.
 
 | Rota | Métodos | Exige | O que faz |
 |---|---|---|---|
-| `/api/alerts` | GET | `viewer` | Alertas disparados, recortados por unidade (sem unidade só para acesso global). `status`: `open` (padrão), `acked`, `resolved` ou `all`; `limit` de 1 a 500 (padrão 100); `from` e `to` em RFC3339 sobre `created_at`. Cada linha traz chave, severidade, texto, origem (`server_id`, `site_id`, `rule_id`) e a entrega (`delivery`, `attempts`, `next_attempt_at`, `last_attempt_at`, `last_error`) |
-| `/api/alerts/summary` | GET | `viewer` | `{"open":n,"acked":n,"falhou":n}` no alcance de quem pergunta. `falhou` conta alerta aberto cuja entrega desistiu |
-| `/api/alerts/ack` | POST | `viewer` na unidade | Reconhece o alerta `?id=N`: grava `acked_at` e `acked_by`. Sessão de máquina recebe 403; fora do alcance, 404; já resolvido, 409. Auditado como `alert.ack` |
+| `/api/alerts` | GET | `viewer` | Alertas disparados, recortados por unidade **no SQL**, antes do `limit` (sem unidade só para acesso global). `status`: `open` (padrão), `acked`, `resolved` ou `all`; `limit` de 1 a 500 (padrão 100); `from` e `to` em RFC3339 sobre `created_at`; `site_id`: id da unidade, `none` (só os sem unidade, exige acesso global) ou `all`/ausente (tudo o que a pessoa pode ver). Unidade fora do alcance responde 403; valor inválido, 400. Cada linha traz chave, severidade, texto, origem (`server_id`, `site_id`, `rule_id`, mais `server_name` e `site_name` resolvidos, `null` quando não há), a entrega (`delivery`, `attempts`, `next_attempt_at`, `last_attempt_at`, `last_error`) e o ciclo de vida (`renotify_count`, `last_notified_at`, `last_seen_at`) |
+| `/api/alerts/summary` | GET | `viewer` | `{"open":n,"acked":n,"falhou":n}` no alcance de quem pergunta, contado no SQL e sem teto de linhas. Aceita o mesmo `site_id` da listagem. `falhou` conta alerta aberto cuja entrega desistiu |
+| `/api/alerts/ack` | POST | **operador** na unidade | Reconhece o alerta `?id=N`: grava `acked_at` e `acked_by`. Alerta sem unidade exige operador global. Viewer e sessão de máquina recebem 403; fora do alcance, 404; já resolvido, 409. Auditado como `alert.ack` |
 | `/api/alerts/resolve` | POST | **operador** na unidade | Resolve o alerta `?id=N`. Mesmos erros do `ack`, mais 403 para quem não é operador. Auditado como `alert.resolve` |
 | `/api/alerts/rules` | GET, POST, PUT, PATCH, DELETE | `viewer` / **operador global** | Regras de alerta. O `GET` é recortado por unidade. `metric`: `cpu`, `mem`, `disk`, `load`, `temperature`, `net_rx`, `net_tx` ou `rtt`. `"enabled"` omitido no `POST` vale `true`; `false` é gravado como `false` |
 
@@ -175,7 +176,7 @@ responde `GET` e `/pins` só `PUT`.
 | Rota | Métodos | Exige | O que faz |
 |---|---|---|---|
 | `/api/ingest/metrics` | POST | credencial `agent` | Push de métricas do agente. `cpu` e `load1` são **opcionais**: ausentes gravam `NULL` (a amostra ainda vale por memória, disco e rede) e nunca viram zero, então não disparam regra em falso; `0` explícito continua sendo medição. `net_rx_bps` e `net_tx_bps` (bytes/s) são opcionais; ausente ou negativo vira `NULL` |
-| `/api/ingest/inventory` | POST | credencial `collector` | Push de inventário do coletor remoto |
+| `/api/ingest/inventory` | POST | credencial `collector` | Push de inventário do coletor remoto. `report_interval_sec` (opcional) declara de quanto em quanto tempo o coletor envia; fica gravado na credencial e é a base do alerta de ausência. Sem ele o painel assume 900 s |
 
 Estas duas **não passam pelos wrappers comuns**: sem CORS de navegador, e a
 conferência de método acontece dentro do próprio handler, não em `allowMethods`.
@@ -191,7 +192,15 @@ Cada rota aceita um tipo de credencial. Credencial `agent` em
 antes de o corpo ser lido, e o handler grava uma única linha de auditoria de
 recusa, com o tipo apresentado e o exigido: `inventory.kind_mismatch` na rota de
 inventário e `ingest.kind_mismatch` na de métricas. O middleware não grava uma
-segunda linha para a mesma recusa.
+segunda linha para a mesma recusa. Credencial gravada **sem tipo** não passa em rota
+nenhuma: tipo vazio só vale para o token compartilhado legado.
+
+Recusa de autenticação tem teto por IP (`INGEST_RATE_MAX_UNAUTH`, 30 por janela), conferido
+**antes** da autenticação nas duas rotas de ingestão; o `POST /api/enroll` já tinha o seu
+(`INGEST_RATE_MAX_ENROLL`). Acima do teto a resposta é 429 e a auditoria grava uma linha do
+bloqueio por janela, não uma por requisição: requisição anônima não enche mais a tabela.
+O `host_ip` do agente e o IP de origem da auditoria saem do mesmo `clientIP` do limitador,
+então atrás do nginx do compose a estação aparece com o endereço dela, não com o do proxy.
 
 O token compartilhado (`X-Agent-Token`, valor de `AGENT_INGEST_TOKEN`) é legado e
 vem **desligado**. Apresentado com `ALLOW_LEGACY_INGEST_TOKEN` desligada, recebe
@@ -232,10 +241,10 @@ continuar apontando para um dispositivo que existiu.
 
 | Rota | Métodos | Exige | O que faz |
 |---|---|---|---|
-| `/api/auth/login` | POST | público | Identificador e senha, devolve token de sessão. O campo `username` aceita o nome de usuário **ou** o e-mail cadastrado |
+| `/api/auth/login` | POST | público | Identificador e senha, devolve token de sessão. O campo `username` aceita o nome de usuário **ou** o e-mail cadastrado. O limite de tentativas conta pela **conta** resolvida: errar pelo username e pelo e-mail soma no mesmo teto |
 | `/api/auth/logout` | POST | `viewer` | Invalida a sessão atual |
 | `/api/auth/me` | GET | `viewer` | Quem está autenticado, com papel e concessões |
-| `/api/users` | GET, POST, PATCH, DELETE | **admin global** | Gestão de usuários e concessões. O `POST` aceita `"active"`; omitido vale `true`. `POST` e `PATCH` aceitam `"nome"` e `"email"`, devolvidos no `GET` e no `/api/auth/me` |
+| `/api/users` | GET, POST, PATCH, DELETE | **admin global** | Gestão de usuários e concessões. O `POST` aceita `"active"`; omitido vale `true`. `POST` e `PATCH` aceitam `"nome"` e `"email"`, devolvidos no `GET` e no `/api/auth/me`. **409** quando o username é o e-mail de outro usuário, ou o e-mail é o username de outro. **409** também quando a mudança tiraria o último administrador **global efetivo** ativo: apagar, desativar, rebaixar o `role` ou trocar `accesses` por concessão só de unidade. Administrador só de filial não conta como outro administrador |
 | `/api/stream-ticket` | POST | `viewer` | Ticket de uso único para as rotas de SSE |
 
 ## Auditoria e saúde
@@ -244,7 +253,7 @@ continuar apontando para um dispositivo que existiu.
 |---|---|---|---|
 | `/api/audit` | GET | **admin global** | Log de auditoria, paginado e filtrável por ator, ação, resultado, unidade e intervalo |
 | `/healthz` | GET | — | Liveness para o orquestrador. Sem credencial e sem tocar no banco |
-| `/readyz` | GET | — | Prontidão: 200 `{"status":"ok"}` com o banco respondendo ao ping em até 2 s; 503 com o banco nulo ou fora do ar. O corpo também traz `alertas` (`ok`, `degradado` ou `desligado`), `alertas_detalhe` quando degradado, `logs_descartados` e `alertas_falhos` como **números**, e `degradado` com a lista de motivos (canal de alerta degradado, alerta com entrega falhou, log descartado). O status HTTP continua vindo só do banco |
+| `/readyz` | GET | — | Prontidão: 200 `{"status":"ok"}` com o banco respondendo ao ping em até 2 s; 503 com o banco nulo ou fora do ar. Sem credencial o corpo traz só `status`, `alertas` (`ok`, `degradado` ou `desligado`) e os contadores `logs_descartados`, `alertas_falhos` e `alertas_sem_canal`. Com sessão válida ou token de máquina (`Authorization: Bearer`), traz também `alertas_detalhe` e `degradado` com a lista de motivos: o erro cru do canal cita o `TELEGRAM_CHAT_ID` e não é público. O status HTTP é o mesmo nos dois casos e continua vindo só do banco |
 | `/metrics` | GET | `viewer` | Contadores do processo em texto (`dockkeeper_*`): alertas enfileirados, entregues e falhos, logs descartados, sessões SSH abertas, reconexões, pânicos recuperados e migrações aplicadas Canal de alerta degradado **não** derruba a prontidão: só o banco decide o status HTTP. Sem credencial |
 
 `/api/audit` é admin global porque a tabela mostra ação de **todas** as unidades.
@@ -303,7 +312,7 @@ De onde vêm:
 | Origem | Como chega | Poda |
 |---|---|---|
 | `coletado` | `stream_metrics.sh` lê `ip -o -4 addr` e o agente de estação lê as interfaces pela gopsutil; ambos mandam `addresses` no payload | Sai depois de `ADDRESS_RETENTION_DAYS` (padrão 30) sem ser visto |
-| `manual` | `PATCH /api/servers?id=` com `{"aliases":["100.100.0.2"]}` | Nunca é podado |
+| `manual` | `PATCH /api/servers?id=` com `{"aliases":["100.100.0.11"]}` | Nunca é podado |
 
 Loopback, link-local e IPv6 são descartados nas duas pontas. Interface virtual do Docker
 (`veth`, `docker`, `br-`, `virbr`) fica de fora, pela mesma razão do RX/TX: não é endereço por
@@ -327,6 +336,48 @@ O alcance do conflito depende da faixa:
 
 A recusa entra na auditoria como `server.create` com resultado `error`, que é como o painel já
 classifica todo 409.
+
+O cadastro é uma criação pura: depois de conferir o dono, o painel insere um servidor novo e
+nunca reaproveita uma linha existente. É o que permite `192.168.0.10` existir na matriz e na
+filial como dois servidores, sem um sobrescrever o nome e a unidade do outro.
+
+Se a conferência do dono falhar por erro de banco, a resposta é **500** e nada é criado nem
+gravado. Vale para o `POST`, para os `aliases` do `PATCH`, para a checagem de e-mail em uso de
+`/api/users` e para o teto de 20 dashboards: nenhuma dessas regras segue em frente quando não
+consegue consultar.
+
+### Servidor removido libera o endereço
+
+O `DELETE /api/servers?id=` apaga o servidor e os endereços dele (`server_addresses`) na mesma
+transação. Servidor removido não é mais dono de nada: o mesmo `host_ip`, ou um antigo alias
+dele, pode ser cadastrado de novo e responde 201. O recadastro cria um servidor novo, com id
+novo; o registro antigo não é revivido, e o histórico dele sai pela retenção normal.
+
+### O host também não toma endereço de ninguém
+
+A regra de dono vale para o que o dispositivo declara, na ingestão do agente e na coleta por
+SSH. Um endereço declarado que já pertence a outro servidor é **recusado**, não entra em
+`server_addresses` e gera uma linha de auditoria `server.address_refused` (resultado `denied`),
+com quem declarou, o endereço e o dono. O resto do envio é aceito normalmente: a amostra de
+métrica é gravada e os demais endereços entram.
+
+| Dono do endereço | Força | Quando deixa de segurar |
+|---|---|---|
+| `host_ip` de servidor SSH | Forte | Nunca: foi o administrador que cadastrou |
+| Alias manual | Forte | Nunca |
+| Endereço coletado de outro servidor | Fraca | Quando fica `15 min` sem ser reportado |
+| `host_ip` observado de um agente | Fraca | Quando o agente fica `15 min` sem reportar |
+
+A dona fraca existe por causa do DHCP: a estação que perdeu o IP para de reportá-lo, e a que
+recebeu o mesmo IP passa a ser a dona depois da janela, levando o endereço com ela. Sem isso,
+toda troca de lease viraria recusa por 30 dias.
+
+Outras duas proteções do mesmo caminho: no máximo **32 endereços por envio**, com o excedente
+descartado e registrado no log; e a mesma recusa gera auditoria **uma vez por hora** por par
+servidor e endereço, para um dispositivo insistente não encher a tabela. O IP de origem da
+conexão do agente, que o painel observa e não o dispositivo declara, é recusado em silêncio
+quando já tem dono, porque várias estações atrás do mesmo NAT compartilham esse IP
+legitimamente.
 
 ## Quem está atrás do balanceador
 
@@ -359,7 +410,33 @@ A consulta compara o endereço sem a porta (`split_part(upstream_addr, ':', 1)`)
 | `pendente` | Na fila, esperando o despachante |
 | `enviado` | Entregue no canal com sucesso |
 | `falhou` | Esgotou `ALERT_MAX_ATTEMPTS`; o alerta continua aberto e visível |
-| `sem_canal` | Não há canal configurado. Nada foi entregue, e o alerta continua aberto. Quando o canal passa a existir, o que ainda está aberto e foi criado nas últimas `ALERT_RESUME_HOURS` volta para `pendente` |
+| `falhou` (retomada) | Quando o canal volta a responder depois da última tentativa, o alerta aberto e visto nas últimas `ALERT_RESUME_HOURS` volta para `pendente` e ganha **uma** tentativa. Falhando de novo, espera o próximo sinal de canal de pé |
+| `sem_canal` | Não há canal configurado. Nada foi entregue, e o alerta continua aberto. Quando o canal passa a existir, o que ainda está aberto e foi visto (`last_seen_at`) nas últimas `ALERT_RESUME_HOURS` volta para `pendente` |
+| `dispensado` | O alerta foi resolvido antes de a primeira entrega acontecer. Nada foi enviado, e nada será: não se avisa de um problema que já acabou |
+
+### Ciclo de vida do alerta
+
+Um incidente é **um** registro. Enquanto a condição continua, a mesma linha é reaproveitada:
+
+| Campo | O que guarda |
+|---|---|
+| `created_at` | Quando o incidente começou |
+| `last_seen_at` | Última vez em que a condição foi observada (atualizado no máximo uma vez por minuto) |
+| `last_notified_at` | Última entrega bem-sucedida no canal |
+| `renotify_count` | Quantas vezes o mesmo incidente foi avisado de novo, uma a cada `ALERT_COOLDOWN` |
+
+- A renotificação devolve a linha para `pendente`, atualiza o texto com o valor corrente e soma
+  `renotify_count`. Oito horas de CPU alta são uma linha com `renotify_count` 15, não 16 linhas.
+- Alerta reconhecido (`acked`) continua sendo o mesmo incidente e **para de renotificar**. Reconhecer
+  é dizer "já vi".
+- Incidente sem sinal de vida há mais de `ALERT_RESUME_HOURS` não segura a chave: a próxima
+  ocorrência abre um alerta novo. O antigo fica aberto até alguém resolver.
+- Incidente novo dentro do `ALERT_COOLDOWN` do último aviso da chave é gravado na hora, para o
+  painel mostrar, e o aviso no canal espera o cooldown vencer. Resolvido antes disso, vira `dispensado`.
+- A mensagem de recuperação é uma linha própria, de chave `<chave>:recuperacao`, que **nasce
+  `resolved`**: ela é um aviso, não um problema aberto. Só existe quando o incidente chegou a ser
+  avisado no canal, e herda `server_id`, `site_id` e `rule_id` do incidente.
+- O despachante não entrega alerta já resolvido, com exceção da mensagem de recuperação.
 
 ## Prontidão em dois caminhos
 

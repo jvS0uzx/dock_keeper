@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"gorm.io/gorm"
+
 	"github.com/jvS0uzx/dock_keeper/internal/auth"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"github.com/jvS0uzx/dock_keeper/internal/ssh"
@@ -18,6 +20,41 @@ type ServerPatchRequest struct {
 	Port     *int            `json:"port"`
 	Aliases  *[]string       `json:"aliases"`
 	BehindLB json.RawMessage `json:"behind_lb"`
+
+	AbsenceAlert *bool `json:"absence_alert"`
+
+	CollectNginx *bool `json:"collect_nginx"`
+}
+
+type servidorComEnderecos struct {
+	database.Server
+	Aliases   []string `json:"aliases"`
+	Addresses []string `json:"addresses"`
+}
+
+func comEnderecos(servers []database.Server) ([]servidorComEnderecos, error) {
+	ids := make([]string, 0, len(servers))
+	for _, s := range servers {
+		ids = append(ids, s.ID)
+	}
+	todos, err := database.EnderecosPorServidor(ids)
+	if err != nil {
+		return nil, err
+	}
+	manuais, err := database.AliasesPorServidor(ids)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]servidorComEnderecos, 0, len(servers))
+	for _, s := range servers {
+		linha := servidorComEnderecos{Server: s, Aliases: manuais[s.ID], Addresses: unirEnderecos(s.HostIP, todos[s.ID])}
+		if linha.Aliases == nil {
+			linha.Aliases = []string{}
+		}
+		out = append(out, linha)
+	}
+	return out, nil
 }
 
 type ServerCreateRequest struct {
@@ -38,10 +75,13 @@ func (c Config) serversHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "falha ao listar servidores")
 			return
 		}
-		if servers == nil {
-			servers = []database.Server{}
+		out, err := comEnderecos(servers)
+		if err != nil {
+			log.Printf("[API] erro ao ler os endereços dos servidores: %v", err)
+			writeError(w, http.StatusInternalServerError, "falha ao listar servidores")
+			return
 		}
-		writeJSON(w, http.StatusOK, servers)
+		writeJSON(w, http.StatusOK, out)
 
 	case http.MethodPost:
 		var req ServerCreateRequest
@@ -62,20 +102,24 @@ func (c Config) serversHandler(w http.ResponseWriter, r *http.Request) {
 			req.Port = ssh.DefaultPort
 		}
 
-		if dono, existe := database.DonoDoEndereco(req.HostIP, req.SiteID, ""); existe {
+		dono, existe, err := database.DonoDoEndereco(req.HostIP, req.SiteID, "")
+		if err != nil {
+			log.Printf("[API] erro ao conferir o dono de %s: %v", req.HostIP, err)
+			writeError(w, http.StatusInternalServerError, "falha ao conferir se o endereço já está em uso")
+			return
+		}
+		if existe {
 			writeError(w, http.StatusConflict,
 				"o endereço "+req.HostIP+" já pertence ao servidor "+dono.Descricao()+
 					"; renomeie o servidor existente em vez de cadastrar outro")
 			return
 		}
 
-		var server database.Server
-		if err := database.DB.Where("host_ip = ?", req.HostIP).
-			Assign(database.Server{
-				Name: req.Name, User: req.User, Port: req.Port,
-				CollectNginx: req.CollectNginx, SiteID: req.SiteID,
-			}).
-			FirstOrCreate(&server, database.Server{HostIP: req.HostIP}).Error; err != nil {
+		server := database.Server{
+			HostIP: req.HostIP, Name: req.Name, User: req.User, Port: req.Port,
+			CollectNginx: req.CollectNginx, SiteID: req.SiteID,
+		}
+		if err := database.DB.Create(&server).Error; err != nil {
 			log.Printf("[API] erro ao cadastrar servidor %s: %v", req.HostIP, err)
 			writeError(w, http.StatusInternalServerError, "falha ao cadastrar servidor")
 			return
@@ -98,7 +142,13 @@ func (c Config) serversHandler(w http.ResponseWriter, r *http.Request) {
 		found := database.DB.Where("id = ?", id).First(&doomed).Error == nil
 
 		ssh.Manager.Stop(id)
-		if err := database.DB.Where("id = ?", id).Delete(&database.Server{}).Error; err != nil {
+		err := database.DB.Transaction(func(tx *gorm.DB) error {
+			if err := database.LimparEnderecosDoServidor(tx, id); err != nil {
+				return err
+			}
+			return tx.Where("id = ?", id).Delete(&database.Server{}).Error
+		})
+		if err != nil {
 			log.Printf("[API] erro ao remover servidor %s: %v", id, err)
 			writeError(w, http.StatusInternalServerError, "falha ao remover servidor")
 			return
@@ -122,7 +172,7 @@ func (c Config) patchServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "corpo inválido")
 		return
 	}
-	if req.Name == nil && req.User == nil && req.Port == nil && req.Aliases == nil && req.BehindLB == nil {
+	if req.Name == nil && req.User == nil && req.Port == nil && req.Aliases == nil && req.BehindLB == nil && req.AbsenceAlert == nil && req.CollectNginx == nil {
 		writeError(w, http.StatusBadRequest, "nenhum campo para atualizar")
 		return
 	}
@@ -152,7 +202,13 @@ func (c Config) patchServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, alias := range aliases {
-		if dono, existe := database.DonoDoEndereco(alias, server.SiteID, server.ID); existe {
+		dono, existe, err := database.DonoDoEndereco(alias, server.SiteID, server.ID)
+		if err != nil {
+			log.Printf("[API] erro ao conferir o dono de %s: %v", alias, err)
+			writeError(w, http.StatusInternalServerError, "falha ao conferir se o endereço já está em uso")
+			return
+		}
+		if existe {
 			writeError(w, http.StatusConflict,
 				"o endereço "+alias+" já pertence ao servidor "+dono.Descricao())
 			return
@@ -192,6 +248,15 @@ func (c Config) patchServer(w http.ResponseWriter, r *http.Request) {
 		updates["port"] = *req.Port
 	}
 
+	if req.AbsenceAlert != nil {
+		updates["absence_alert"] = *req.AbsenceAlert
+	}
+
+	reiniciarColeta := req.CollectNginx != nil && *req.CollectNginx != server.CollectNginx
+	if reiniciarColeta {
+		updates["collect_nginx"] = *req.CollectNginx
+	}
+
 	if limparBehindLB {
 		updates["behind_lb"] = nil
 	} else if behindLB != nil {
@@ -205,14 +270,23 @@ func (c Config) patchServer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if len(aliases) > 0 {
-		database.RegistrarAliases(server.ID, aliases)
+	if req.Aliases != nil {
+		if err := database.SubstituirAliases(server.ID, aliases); err != nil {
+			log.Printf("[API] erro ao substituir os aliases do servidor %s: %v", id, err)
+			writeError(w, http.StatusInternalServerError, "falha ao gravar os endereços do servidor")
+			return
+		}
 	}
 
 	if err := database.DB.Where("id = ?", id).First(&server).Error; err != nil {
 		log.Printf("[API] erro ao reler servidor %s: %v", id, err)
 		writeError(w, http.StatusInternalServerError, "falha ao atualizar servidor")
 		return
+	}
+
+	if reiniciarColeta {
+		ssh.Manager.Stop(server.ID)
+		ssh.Manager.Start(c.sshTarget(server))
 	}
 
 	auditTarget(r, "server", server.ID, server.Name, server.SiteID)
@@ -270,6 +344,7 @@ func (c Config) sshTarget(s database.Server) ssh.Target {
 		User:         s.User,
 		Port:         s.Port,
 		KeyPath:      c.SSHKeyPath,
+		SiteID:       s.SiteID,
 		CollectNginx: s.CollectNginx,
 	}
 }

@@ -8,13 +8,6 @@ import (
 	"time"
 )
 
-func Texto(chave, padrao string) string {
-	if v := strings.TrimSpace(os.Getenv(chave)); v != "" {
-		return v
-	}
-	return padrao
-}
-
 func Inteiro(chave string, padrao int) int {
 	raw := strings.TrimSpace(os.Getenv(chave))
 	if raw == "" {

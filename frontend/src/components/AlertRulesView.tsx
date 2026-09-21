@@ -1,10 +1,11 @@
 import LoadNotice from './ui/LoadNotice';
 import { useLoadStatus } from './ui/load-status';
-import { useState, useEffect, useCallback, type FormEvent } from 'react';
+import { useState, useEffect, useCallback, useMemo, type FormEvent } from 'react';
 import { Trash2, Plus } from 'lucide-react';
 import { api, type AlertRuleRecord as AlertRule } from '../lib/api';
 import { relativeTime } from '../lib/format';
-import { RULE_METRIC_LABELS, formatRuleThreshold, isRateMetric } from '../lib/metrics';
+import { ehTaxa, formatarLimiar, metricasDePainelERegra, rotuloComUnidade } from '../lib/metrics';
+import { useCatalogo } from './ui/useCatalogo';
 import Select, { type SelectOption } from './ui/Select';
 import { useDialog } from './ui/dialog-context';
 import { useRole } from './ui/session-context';
@@ -44,7 +45,7 @@ const SITE_PREFIX = 'site:';
 const emptyForm = {
   name: '',
   target: '*',
-  metric: 'cpu',
+  metric: '',
   operator: '>',
   threshold: 80,
   for_duration_sec: 0,
@@ -63,6 +64,13 @@ const AlertRulesView = () => {
   const alvos = useLoadStatus();
   const { ok: alvosOk, fail: alvosFail } = alvos;
   const [form, setForm] = useState({ ...emptyForm });
+  const catalogo = useCatalogo();
+  const opcoesDeMetrica = useMemo(() => metricasDePainelERegra(catalogo.metricas), [catalogo.metricas]);
+  const rotuloDaRegra = (nome: string) => {
+    const metrica = catalogo.buscar(nome);
+    return metrica ? rotuloComUnidade(metrica) : nome;
+  };
+  const metricaDoForm = form.metric || (opcoesDeMetrica[0]?.nome ?? '');
 
   const fetchRules = useCallback(async () => {
     try {
@@ -94,11 +102,12 @@ const AlertRulesView = () => {
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
-    if (!form.name) return;
+    if (!form.name || !metricaDoForm) return;
     try {
       const isSite = form.target.startsWith(SITE_PREFIX);
       await api.createAlertRule({
         ...form,
+        metric: metricaDoForm,
         target: isSite ? '*' : form.target,
         target_site_id: isSite ? Number(form.target.slice(SITE_PREFIX.length)) : null,
         threshold: Number(form.threshold),
@@ -150,6 +159,7 @@ const AlertRulesView = () => {
     <div className="p-4 md:p-8 anim-rise">
       <LoadNotice error={carga.error} lastOk={carga.lastOk} className="mb-4" />
       <LoadNotice error={alvos.error} lastOk={alvos.lastOk} className="mb-4" />
+      <LoadNotice error={catalogo.erro} className="mb-4" />
       <div className="page-header">
         <div>
           <h1 className="page-title">Regras de Alerta</h1>
@@ -196,9 +206,9 @@ const AlertRulesView = () => {
               <label htmlFor="rule-metric" className="eyebrow block mb-1.5">Métrica</label>
               <Select
                 id="rule-metric"
-                value={form.metric}
+                value={metricaDoForm}
                 onChange={(v) => setForm({ ...form, metric: v })}
-                options={Object.entries(RULE_METRIC_LABELS).map(([key, label]) => ({ value: key, label }))}
+                options={opcoesDeMetrica.map((m) => ({ value: m.nome, label: rotuloComUnidade(m) }))}
               />
             </div>
             <div className="flex gap-3">
@@ -224,9 +234,9 @@ const AlertRulesView = () => {
                 />
               </div>
             </div>
-            {isRateMetric(form.metric) && (
+            {ehTaxa(catalogo.unidade(metricaDoForm)) && (
               <p className="-mt-2 text-[10px] text-text-faint">
-                Limiar em bytes por segundo: {formatRuleThreshold(form.metric, Number(form.threshold))}.
+                Limiar em bytes por segundo: {formatarLimiar(catalogo.unidade(metricaDoForm), Number(form.threshold))}.
               </p>
             )}
             <div>
@@ -297,7 +307,7 @@ const AlertRulesView = () => {
                       <td className={rule.enabled ? 'font-medium text-text-hi' : 'font-medium text-text-faint'}>{rule.name}</td>
                       <td className="text-text-mut">{targetName(rule)}</td>
                       <td className={`mono-data text-xs ${rule.enabled ? 'text-text-hi' : 'text-text-faint'}`}>
-                        {RULE_METRIC_LABELS[rule.metric] ?? rule.metric} {rule.operator} {formatRuleThreshold(rule.metric, rule.threshold)}
+                        {rotuloDaRegra(rule.metric)} {rule.operator} {formatarLimiar(catalogo.unidade(rule.metric), rule.threshold)}
                         <span className="text-text-faint">{durationLabel(durationOf(rule))}</span>
                       </td>
                       <td className="text-text-faint text-xs">{relativeTime(rule.last_fired)}</td>

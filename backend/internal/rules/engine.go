@@ -4,48 +4,22 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
-	"strings"
 	"time"
 
 	"gorm.io/gorm/clause"
 
 	"github.com/jvS0uzx/dock_keeper/internal/alert"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/metricas"
 	"github.com/jvS0uzx/dock_keeper/internal/safego"
 )
 
 func metricValue(m database.MetricServer, metric string) (float64, bool) {
-	switch metric {
-	case "cpu":
-		return measured(m.CPUUsagePercent)
-	case "load":
-		return measured(m.LoadAvg1)
-	case "mem":
-		if m.MemTotalBytes > 0 {
-			return float64(m.MemUsedBytes) / float64(m.MemTotalBytes) * 100, true
-		}
-	case "disk":
-		if m.DiskTotalBytes > 0 {
-			return float64(m.DiskUsedBytes) / float64(m.DiskTotalBytes) * 100, true
-		}
-	case "temperature":
-		return measured(m.TemperatureC)
-	case "net_rx":
-		return measured(m.NetRxBps)
-	case "net_tx":
-		return measured(m.NetTxBps)
-	case "rtt":
-		return measured(m.RTTMs)
-	}
-	return 0, false
-}
-
-func measured(v *float64) (float64, bool) {
-	if v == nil {
+	definicao, ok := metricas.Buscar(metric)
+	if !ok || !definicao.Avaliavel() {
 		return 0, false
 	}
-	return *v, true
+	return definicao.Valor(m)
 }
 
 func resolveTargets(rule database.AlertRule, servers []database.Server) []string {
@@ -80,15 +54,6 @@ func violates(value float64, operator string, threshold float64) bool {
 	return false
 }
 
-func minNotifySeverity() string {
-	if s := strings.ToLower(strings.TrimSpace(os.Getenv("ALERT_MIN_SEVERITY"))); ValidSeverity(s) {
-		return s
-	}
-	return SeverityWarning
-}
-
-const metricLookback = "10 minutes"
-
 func recentMetrics(latest []database.MetricServer, servers []database.Server, now time.Time) map[string]database.MetricServer {
 	byServer := make(map[string]database.MetricServer, len(latest))
 	for _, m := range latest {
@@ -117,10 +82,19 @@ func breachGap() time.Duration {
 	return 90 * time.Second
 }
 
-func entradaDoAlerta(rule database.AlertRule, serverID string, siteID *uint, key, texto, severidade string) alert.Entrada {
+func entradaDoAlerta(rule database.AlertRule, serverID string, siteID *uint, key, texto, severidade, alvoNome string, valor float64) alert.Entrada {
 	entrada := alert.Entrada{
 		Key: key, Text: texto, Severity: severidade,
 		SiteID: siteID, RuleID: &rule.ID,
+		AlvoTipo: database.AlvoTipoHost,
+		AlvoID:   serverID,
+		AlvoNome: alvoNome,
+		Metrica:  rule.Metric,
+		Valor:    &valor,
+		Limiar:   &rule.Threshold,
+	}
+	if definicao, ok := metricas.Buscar(rule.Metric); ok {
+		entrada.Unidade = definicao.Unidade
 	}
 	if serverID != "" {
 		entrada.ServerID = &serverID
@@ -243,20 +217,13 @@ func evaluate() {
 	}
 
 	var latest []database.MetricServer
-	if err := database.DB.Raw(`
-		SELECT DISTINCT ON (server_id) *
-		FROM metric_servers
-		WHERE timestamp >= NOW() - INTERVAL '` + metricLookback + `'
-		ORDER BY server_id, timestamp DESC
-	`).Scan(&latest).Error; err != nil {
+	if err := database.DB.Raw(database.ConsultaUltimasMetricas).Scan(&latest).Error; err != nil {
 		log.Printf("[rules] erro ao carregar métricas recentes: %v", err)
 		return
 	}
 
 	now := time.Now()
 	metricByServer := recentMetrics(latest, servers, now)
-
-	minSeverity := Rank(minNotifySeverity())
 
 	for _, rule := range rules {
 		if rule.DependsOnServerID != nil {
@@ -293,7 +260,7 @@ func evaluate() {
 						"%s Recuperado - Regra %s: %s=%.2f voltou ao limite (%s %.2f) em %s",
 						Prefix(SeverityInfo), rule.Name, rule.Metric, value,
 						rule.Operator, rule.Threshold, serverName,
-					), SeverityInfo))
+					), SeverityInfo, serverName, value))
 				}
 				if hasState && (state.Active || !state.FirstBreachAt.IsZero()) {
 					settled = append(settled, key)
@@ -309,12 +276,8 @@ func evaluate() {
 					"%s Regra %s: %s=%.2f %s %.2f em %s",
 					Prefix(rule.Severity), rule.Name, rule.Metric, value, rule.Operator, rule.Threshold, serverName,
 				)
-				if Rank(rule.Severity) >= minSeverity {
-					if alert.Enqueue(entradaDoAlerta(rule, serverID, siteByID[serverID], key, msg, rule.Severity)) {
-						active = true
-					}
-				} else {
-					log.Printf("[rules] (abaixo do mínimo notificável) %s", msg)
+				if alert.Enqueue(entradaDoAlerta(rule, serverID, siteByID[serverID], key, msg, rule.Severity, serverName, value)) {
+					active = true
 				}
 				fired = true
 			}

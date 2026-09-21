@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { avancar, comRelogioFalso, semEspera } from '../test/usuario';
+import { POLL } from '../lib/polling';
 
 import Dashboard from './Dashboard';
 import { DialogContext, type DialogApi } from './ui/dialog-context';
@@ -33,15 +34,15 @@ const base = {
   rtt_ms: null,
 };
 
-const lb = { ...base, id: 'lb', name: 'Load Balancer', host_ip: '198.51.100.38', addresses: ['198.51.100.38'], collect_nginx: true };
-const vps1 = { ...base, id: 'v1', name: 'VPS-1', host_ip: '198.51.100.25', addresses: ['198.51.100.25'], behind_lb: true };
+const lb = { ...base, id: 'lb', name: 'Load Balancer', host_ip: '203.0.113.38', addresses: ['203.0.113.38'], collect_nginx: true };
+const vps1 = { ...base, id: 'v1', name: 'VPS-1', host_ip: '203.0.113.25', addresses: ['203.0.113.25'], behind_lb: true };
 
 const antes = [lb, vps1];
-const depois = [lb, { ...vps1, addresses: ['198.51.100.25', '100.100.0.2'] }];
+const depois = [lb, { ...vps1, addresses: ['203.0.113.25', '100.100.0.11'] }];
 
 const trafego = [
-  { upstream_addr: '198.51.100.25:80', server_name: 'app.exemplo', status: '200', requests_count: 12, server_id: 'lb' },
-  { upstream_addr: '100.100.0.2:80', server_name: 'app.exemplo', status: '200', requests_count: 3, server_id: 'lb' },
+  { upstream_addr: '203.0.113.25:80', server_name: 'app.exemplo', status: '200', requests_count: 12, server_id: 'lb' },
+  { upstream_addr: '100.100.0.11:80', server_name: 'app.exemplo', status: '200', requests_count: 3, server_id: 'lb' },
 ];
 
 const api = vi.hoisted(() => ({
@@ -104,8 +105,8 @@ beforeEach(() => {
   localStorage.clear();
   api.liveMetrics.mockReset().mockResolvedValue({ servers: antes, containers: [], load_balancing: trafego });
   api.servers.mockReset().mockResolvedValue([
-    { id: 'lb', name: 'Load Balancer', host_ip: '198.51.100.38', user: 'root', port: 22, created_at: '', aliases: [] },
-    { id: 'v1', name: 'VPS-1', host_ip: '198.51.100.25', user: 'root', port: 22, created_at: '', aliases: ['10.0.0.9'] },
+    { id: 'lb', name: 'Load Balancer', host_ip: '203.0.113.38', user: 'root', port: 22, created_at: '', aliases: [] },
+    { id: 'v1', name: 'VPS-1', host_ip: '203.0.113.25', user: 'root', port: 22, created_at: '', aliases: ['10.0.0.9'] },
   ]);
   api.updateServerAliases.mockReset().mockResolvedValue({});
   api.history.mockReset().mockResolvedValue([]);
@@ -113,64 +114,69 @@ beforeEach(() => {
   (dialogo.notify as ReturnType<typeof vi.fn>).mockReset();
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('nomear o endereço solto pelo próprio nó da malha', () => {
   it('associa preservando os aliases que o servidor já tinha', async () => {
-    const usuario = userEvent.setup();
+    const usuario = semEspera();
     renderizar(comoAdmin);
 
-    const no = await noDe('100.100.0.2:80');
+    const no = await noDe('100.100.0.11:80');
     await usuario.click(within(no).getByRole('button', { name: /associar/i }));
 
-    await usuario.click(await screen.findByRole('combobox', { name: 'Associar 100.100.0.2:80 a um servidor' }));
+    await usuario.click(await screen.findByRole('combobox', { name: 'Associar 100.100.0.11:80 a um servidor' }));
     await usuario.click(await screen.findByRole('option', { name: 'VPS-1' }));
     await usuario.click(screen.getByRole('button', { name: 'Salvar' }));
 
     await vi.waitFor(() =>
-      expect(api.updateServerAliases).toHaveBeenCalledWith('v1', ['10.0.0.9', '100.100.0.2']),
+      expect(api.updateServerAliases).toHaveBeenCalledWith('v1', ['10.0.0.9', '100.100.0.11']),
     );
-  }, 15000);
+  });
 
   it('depois de associar, o nó mostra o nome e o contador de endereço sem cadastro some', async () => {
-    const usuario = userEvent.setup();
+    const usuario = comRelogioFalso();
     renderizar(comoAdmin);
 
     expect(await screen.findByText(/1 endereço sem cadastro/i)).toBeTruthy();
 
-    const solto = await noDe('100.100.0.2:80');
+    const solto = await noDe('100.100.0.11:80');
     await usuario.click(within(solto).getByRole('button', { name: /associar/i }));
-    await usuario.click(await screen.findByRole('combobox', { name: 'Associar 100.100.0.2:80 a um servidor' }));
+    await usuario.click(await screen.findByRole('combobox', { name: 'Associar 100.100.0.11:80 a um servidor' }));
     await usuario.click(await screen.findByRole('option', { name: 'VPS-1' }));
 
     await usuario.click(screen.getByRole('button', { name: 'Salvar' }));
     await vi.waitFor(() => expect(api.updateServerAliases).toHaveBeenCalled());
 
     api.liveMetrics.mockResolvedValue({ servers: depois, containers: [], load_balancing: trafego });
-    await vi.waitFor(() => expect(screen.queryByText(/endereço sem cadastro/i)).toBeNull(), { timeout: 8000 });
+    await avancar(POLL.aoVivo);
+    expect(screen.queryByText(/endereço sem cadastro/i)).toBeNull();
 
     const rotulo = await screen.findByText('VPS-1');
     const no = rotulo.closest('[data-testid="malha-no"]');
     if (!(no instanceof HTMLElement)) throw new Error('nó da VPS-1 não encontrado');
-    expect(no.textContent).toMatch(/198\.51\.100\.25:80/);
-    expect(no.textContent).toMatch(/100\.100\.0\.2:80/);
+    expect(no.textContent).toMatch(/203\.0\.113\.25:80/);
+    expect(no.textContent).toMatch(/100\.100\.0\.11:80/);
     expect(within(no).queryByText(/não cadastrado/i)).toBeNull();
-  }, 15000);
+  });
 
   it('avisa quando o servidor não foi escolhido', async () => {
-    const usuario = userEvent.setup();
+    const usuario = semEspera();
     renderizar(comoAdmin);
 
-    const no = await noDe('100.100.0.2:80');
+    const no = await noDe('100.100.0.11:80');
     await usuario.click(within(no).getByRole('button', { name: /associar/i }));
     await usuario.click(screen.getByRole('button', { name: 'Salvar' }));
 
     expect(api.updateServerAliases).not.toHaveBeenCalled();
     expect(dialogo.notify).toHaveBeenCalled();
-  }, 15000);
+  });
 
   it('quem não é admin global lê que precisa de um administrador', async () => {
     renderizar(comoSuporte);
 
-    const no = await noDe('100.100.0.2:80');
+    const no = await noDe('100.100.0.11:80');
     expect(within(no).queryByRole('button', { name: /associar/i })).toBeNull();
     expect(no.textContent).toMatch(/administrador/i);
   });

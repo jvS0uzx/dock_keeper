@@ -3,7 +3,7 @@ module github.com/jvS0uzx/dock_keeper
 go 1.26.5
 
 require (
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.57.0
 	gorm.io/driver/postgres v1.6.2
 	gorm.io/gorm v1.31.2
 )
@@ -12,7 +12,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/jvS0uzx/dockkeeper_collector v0.0.0-20260919131718-a9ef4d8b7109
 	github.com/shirou/gopsutil/v3 v3.24.5
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.48.0
 )
 
 require (
@@ -29,6 +29,6 @@ require (
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 )

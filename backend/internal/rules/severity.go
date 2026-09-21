@@ -19,13 +19,6 @@ func ValidSeverity(s string) bool {
 	return ok
 }
 
-func Rank(s string) int {
-	if r, ok := severityRank[s]; ok {
-		return r
-	}
-	return severityRank[SeverityWarning]
-}
-
 func Prefix(s string) string {
 	switch s {
 	case SeverityCritical:

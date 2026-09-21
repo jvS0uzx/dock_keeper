@@ -9,6 +9,7 @@ import (
 
 	"github.com/jvS0uzx/dock_keeper/internal/auth"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+	"github.com/jvS0uzx/dock_keeper/internal/metricas"
 )
 
 type historyPoint struct {
@@ -66,37 +67,13 @@ func historyWindow(q url.Values, now time.Time) (time.Time, time.Time, string) {
 }
 
 func serverMetricExpr(metric string) (string, bool) {
-	switch metric {
-	case "cpu":
-		return "cpu_usage_percent", true
-	case "mem":
-		return "mem_used_bytes::float8 / NULLIF(mem_total_bytes, 0) * 100", true
-	case "disk":
-		return "disk_used_bytes::float8 / NULLIF(disk_total_bytes, 0) * 100", true
-	case "load":
-		return "load_avg1", true
-	case "temperature":
-		return "temperature_c", true
-	case "latency":
-		return "ping_latency_ms", true
-	case "net_rx":
-		return "net_rx_bps", true
-	case "net_tx":
-		return "net_tx_bps", true
-	case "rtt":
-		return "rtt_ms", true
-	}
-	return "", false
+	m, ok := metricas.Buscar(metric)
+	return m.SerieDoServidor, ok && m.SerieDoServidor != ""
 }
 
 func containerMetricExpr(metric string) (string, bool) {
-	switch metric {
-	case "cpu":
-		return "cpu_usage_percent", true
-	case "mem":
-		return "mem_used_bytes::float8 / NULLIF(mem_limit_bytes, 0) * 100", true
-	}
-	return "", false
+	m, ok := metricas.Buscar(metric)
+	return m.SerieDoContainer, ok && m.SerieDoContainer != ""
 }
 
 func bucketExpr(d time.Duration) string {
@@ -158,6 +135,15 @@ func HistoryHandler(w http.ResponseWriter, r *http.Request) {
 		table, valueExpr, filterCol, filterVal = "metric_servers", expr, "server_id", serverID
 	}
 
+	_, temTendencia := trendMetricExpr(metric)
+	bruta := database.RetentionDays("METRIC_RETENTION_DAYS", database.DefaultMetricRetentionDays)
+	if bruta > 0 && dur > bruta && (containerID != "" || !temTendencia) {
+		dias := int(bruta / (24 * time.Hour))
+		writeError(w, http.StatusBadRequest, fmt.Sprintf(
+			"esta métrica só tem %d dias de histórico: não existe tendência de longo prazo para ela; escolha um período de até %d dias", dias, dias))
+		return
+	}
+
 	if containerID == "" && dur > trendThreshold {
 		if expr, ok := trendMetricExpr(metric); ok {
 			serveFromTrend(w, r, serverID, expr, start, end)
@@ -189,25 +175,8 @@ func HistoryHandler(w http.ResponseWriter, r *http.Request) {
 const trendThreshold = 24 * time.Hour
 
 func trendMetricExpr(metric string) (string, bool) {
-	switch metric {
-	case "cpu":
-		return "cpu_avg", true
-	case "mem":
-		return "mem_percent_avg", true
-	case "disk":
-		return "disk_percent_avg", true
-	case "load":
-		return "load_avg1_avg", true
-	case "temperature":
-		return "temperature_avg", true
-	case "net_rx":
-		return "net_rx_avg", true
-	case "net_tx":
-		return "net_tx_avg", true
-	case "rtt":
-		return "rtt_avg", true
-	}
-	return "", false
+	m, ok := metricas.Buscar(metric)
+	return m.TendenciaMedia, ok && m.TemTendencia()
 }
 
 func trendBucketExpr(d time.Duration) string {

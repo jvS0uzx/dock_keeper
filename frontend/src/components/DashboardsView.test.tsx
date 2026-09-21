@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { semEspera } from '../test/usuario';
 
 import DashboardsView from './DashboardsView';
 import { DialogContext, type DialogApi } from './ui/dialog-context';
 import { responder } from '../test/recharts';
+import { CATALOGO } from '../test/catalogo';
 
 vi.mock('recharts', async (importOriginal) => {
   const { comLarguraFixa } = await import('../test/recharts');
@@ -42,6 +44,7 @@ beforeEach(() => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     chamadas.push({ method, url, body });
 
+    if (url.pathname === '/api/metrics/catalogo') return responder(200, CATALOGO);
     if (url.pathname === '/api/metrics/live') {
       if (erroDosServidores) return responder(500, { error: erroDosServidores });
       return responder(200, {
@@ -98,7 +101,7 @@ describe('DashboardsView', () => {
   });
 
   it('cria um painel com dois gráficos no formato do contrato', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     renderizar({ prompt: vi.fn(async () => 'Rede') });
     await screen.findByTestId('grafico-1');
 
@@ -107,7 +110,7 @@ describe('DashboardsView', () => {
     await user.click(screen.getByRole('button', { name: 'Adicionar gráfico' }));
 
     await user.type(screen.getByLabelText('Título do gráfico 1'), 'Entrada');
-    await escolher(user, 'Métrica do gráfico 1', 'Rede RX');
+    await escolher(user, 'Métrica do gráfico 1', 'Rede recebida');
 
     await user.type(screen.getByLabelText('Título do gráfico 2'), 'CPU banco');
     await escolher(user, 'Servidor do gráfico 2', 'db-01');
@@ -126,10 +129,10 @@ describe('DashboardsView', () => {
         { title: 'CPU banco', server_id: 'srv-2', metric: 'cpu', range: '7d', width: 2 },
       ],
     });
-  }, 15000);
+  });
 
   it('renomeia mantendo os gráficos', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     renderizar({ prompt: vi.fn(async () => 'Operação diária') });
     await screen.findByTestId('grafico-1');
 
@@ -145,7 +148,7 @@ describe('DashboardsView', () => {
   });
 
   it('apaga com confirmação', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     const dialogo = renderizar();
     await screen.findByTestId('grafico-1');
 
@@ -157,7 +160,7 @@ describe('DashboardsView', () => {
   });
 
   it('não apaga quando a confirmação é negada', async () => {
-    const user = userEvent.setup();
+    const user = semEspera();
     renderizar({ confirm: vi.fn(async () => false) });
     await screen.findByTestId('grafico-1');
 
@@ -186,7 +189,7 @@ describe('DashboardsView — falha não vira vazio', () => {
 
   it('falha ao listar servidores não vira "cadastre um servidor"', async () => {
     erroDosServidores = 'banco indisponível';
-    const user = userEvent.setup();
+    const user = semEspera();
     renderizar({ prompt: vi.fn(async () => 'Rede') });
     await screen.findByTestId('grafico-1');
 

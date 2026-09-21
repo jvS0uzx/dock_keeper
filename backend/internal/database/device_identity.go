@@ -31,5 +31,7 @@ type DeviceCredential struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	LastSeenAt *time.Time `json:"last_seen_at"`
 
+	ReportIntervalSec int `gorm:"not null;default:0" json:"report_interval_sec"`
+
 	RevokedAt *time.Time `gorm:"index" json:"revoked_at"`
 }

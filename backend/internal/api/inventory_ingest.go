@@ -7,7 +7,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,7 +17,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const maxInventoryHosts = 5000
+const (
+	maxInventoryHosts = 5000
+	maxPortasPorHost  = 4096
+)
 
 type inventoryHost struct {
 	IP        string `json:"ip"`
@@ -31,6 +33,8 @@ type inventoryPayload struct {
 	SiteCode         string          `json:"site_code"`
 	CollectorVersion string          `json:"collector_version"`
 	Hosts            []inventoryHost `json:"hosts"`
+
+	ReportIntervalSec int `json:"report_interval_sec"`
 }
 
 var errTooManyHosts = errors.New("inventário grande demais")
@@ -67,6 +71,10 @@ func decodeInventoryPayload(r io.Reader) (inventoryPayload, error) {
 			}
 		case "collector_version":
 			if err := dec.Decode(&p.CollectorVersion); err != nil {
+				return p, err
+			}
+		case "report_interval_sec":
+			if err := dec.Decode(&p.ReportIntervalSec); err != nil {
 				return p, err
 			}
 		case "hosts":
@@ -115,8 +123,12 @@ func InventoryIngestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if recusasAnonimasNoTeto(w, r) {
+		return
+	}
 	cred, err := authenticateDevice(r)
 	if err != nil {
+		contarRecusaAnonima(r)
 		refuseDeviceAuth(w, r, err, "inventory.legacy_token_disabled")
 		return
 	}
@@ -124,7 +136,7 @@ func InventoryIngestHandler(w http.ResponseWriter, r *http.Request) {
 		refuseDeviceKind(w, r, cred, "inventory.kind_mismatch", kindCollector, "inventário")
 		return
 	}
-	if !limitarTaxa(w, chaveDeIngestao(r, cred), tetoDeIngestao()) {
+	if !limitarTaxa(w, r, chaveDeIngestao(r, cred), tetoDeIngestao()) {
 		return
 	}
 
@@ -154,6 +166,14 @@ func InventoryIngestHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[Inventory] erro ao gravar o envio da unidade %q: %v", p.SiteCode, err)
 		writeError(w, http.StatusInternalServerError, "falha ao gravar o inventário")
 		return
+	}
+
+	if cred.DeviceID != "" && p.ReportIntervalSec > 0 {
+		err := database.DB.Model(&database.DeviceCredential{}).Where("device_id = ?", cred.DeviceID).
+			Update("report_interval_sec", p.ReportIntervalSec).Error
+		if err != nil {
+			log.Printf("[Inventory] erro ao gravar o intervalo declarado pelo coletor %s: %v", cred.DeviceID, err)
+		}
 	}
 
 	log.Printf("[Inventory] unidade %q (coletor %s) enviou %d hosts, %d gravados",
@@ -188,6 +208,10 @@ func storeInventory(hosts []inventoryHost, siteID *uint) (int, error) {
 	for _, h := range hosts {
 		ip := strings.TrimSpace(h.IP)
 		if net.ParseIP(ip) == nil {
+			continue
+		}
+		if len(h.OpenPorts) > maxPortasPorHost {
+			log.Printf("[Inventory] host %s descartado: %d portas no envio, teto é %d", ip, len(h.OpenPorts), maxPortasPorHost)
 			continue
 		}
 		records = append(records, database.NetworkHost{
@@ -233,13 +257,7 @@ func storeInventory(hosts []inventoryHost, siteID *uint) (int, error) {
 }
 
 func joinPorts(ports []int) string {
-	parts := make([]string, 0, len(ports))
-	for _, p := range ports {
-		if p > 0 && p < 65536 {
-			parts = append(parts, strconv.Itoa(p))
-		}
-	}
-	return strings.Join(parts, ",")
+	return discovery.JoinPorts(ports)
 }
 
 var errSiteMismatch = errors.New("unidade declarada diverge da credencial")

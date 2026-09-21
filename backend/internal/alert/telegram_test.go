@@ -219,10 +219,10 @@ func TestSendEntregaNomeComAsterisco(t *testing.T) {
 	log.SetOutput(&registro)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 
-	Send("[CRITICO] Certificado de *.example.com inválido")
+	Send("[CRITICO] Certificado de *.exemplo.com.br inválido")
 
 	last := (*calls)[len(*calls)-1]
-	if got := last.PostForm.Get("text"); !strings.Contains(got, "*.example.com") {
+	if got := last.PostForm.Get("text"); !strings.Contains(got, "*.exemplo.com.br") {
 		t.Errorf("text = %q", got)
 	}
 	if saida := registro.String(); strings.Contains(saida, "falha ao enviar") {
@@ -274,7 +274,7 @@ func TestErroDeRedeNaoVazaToken(t *testing.T) {
 	apiBase = "https://127.0.0.1:1"
 	t.Cleanup(func() { apiBase = base })
 
-	token = "8804077626:SEGREDO-DO-BOT"
+	token = "1234567890:SEGREDO-DO-BOT"
 	t.Cleanup(func() { token = "" })
 
 	err := call("getMe", nil, nil)

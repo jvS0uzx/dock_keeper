@@ -1,0 +1,74 @@
+[
+  {
+    "nome": "cpu",
+    "rotulo": "CPU",
+    "unidade": "%",
+    "tem_tendencia": true,
+    "escopo": "ambos",
+    "em_regra": true
+  },
+  {
+    "nome": "mem",
+    "rotulo": "Memória",
+    "unidade": "%",
+    "tem_tendencia": true,
+    "escopo": "ambos",
+    "em_regra": true
+  },
+  {
+    "nome": "disk",
+    "rotulo": "Disco",
+    "unidade": "%",
+    "tem_tendencia": true,
+    "escopo": "servidor",
+    "em_regra": true
+  },
+  {
+    "nome": "load",
+    "rotulo": "Carga (1 min)",
+    "unidade": "",
+    "tem_tendencia": true,
+    "escopo": "servidor",
+    "em_regra": true
+  },
+  {
+    "nome": "temperature",
+    "rotulo": "Temperatura",
+    "unidade": "°C",
+    "tem_tendencia": true,
+    "escopo": "servidor",
+    "em_regra": true
+  },
+  {
+    "nome": "net_rx",
+    "rotulo": "Rede recebida",
+    "unidade": "bytes/s",
+    "tem_tendencia": true,
+    "escopo": "servidor",
+    "em_regra": true
+  },
+  {
+    "nome": "net_tx",
+    "rotulo": "Rede enviada",
+    "unidade": "bytes/s",
+    "tem_tendencia": true,
+    "escopo": "servidor",
+    "em_regra": true
+  },
+  {
+    "nome": "rtt",
+    "rotulo": "RTT",
+    "unidade": "ms",
+    "tem_tendencia": true,
+    "escopo": "servidor",
+    "em_regra": true
+  },
+  {
+    "nome": "latency",
+    "rotulo": "Handshake SSH",
+    "unidade": "ms",
+    "tem_tendencia": false,
+    "escopo": "servidor",
+    "em_regra": false
+  }
+]

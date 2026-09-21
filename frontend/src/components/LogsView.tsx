@@ -5,6 +5,7 @@ import { Search, Server as ServerIcon, ShieldAlert, Box, Loader2 } from 'lucide-
 import { api, type LogEntryRecord as LogEntry } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import Select, { type SelectOption } from './ui/Select';
+import { useSiteScope } from './ui/site-scope-context';
 
 interface ServerOption {
   id: string;
@@ -20,6 +21,7 @@ const LOG_SOURCES: SelectOption[] = [
 ];
 
 const LogsView = () => {
+  const { numericSiteId } = useSiteScope();
   const [servers, setServers] = useState<ServerOption[]>([]);
   const carga = useLoadStatus();
   const { ok: cargaOk, fail: cargaFail } = carga;
@@ -54,6 +56,7 @@ const LogsView = () => {
     setSearched(true);
     try {
       const params: Record<string, string> = { limit: String(RESULT_LIMIT) };
+      if (numericSiteId !== null) params.site_id = String(numericSiteId);
       if (serverId) params.server_id = serverId;
       if (source) params.source = source;
       if (q) params.q = q;
