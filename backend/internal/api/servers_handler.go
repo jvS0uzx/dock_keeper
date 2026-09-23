@@ -338,13 +338,14 @@ func lookupServer(w http.ResponseWriter, sess auth.Session, id string) (database
 
 func (c Config) sshTarget(s database.Server) ssh.Target {
 	return ssh.Target{
-		ID:           s.ID,
-		Name:         s.Name,
-		Host:         s.HostIP,
-		User:         s.User,
-		Port:         s.Port,
-		KeyPath:      c.SSHKeyPath,
-		SiteID:       s.SiteID,
-		CollectNginx: s.CollectNginx,
+		ID:              s.ID,
+		Name:            s.Name,
+		Host:            s.HostIP,
+		User:            s.User,
+		Port:            s.Port,
+		KeyPath:         c.SSHKeyPath,
+		SiteID:          s.SiteID,
+		CollectNginx:    s.CollectNginx,
+		CollectPostgres: s.CollectPostgres,
 	}
 }

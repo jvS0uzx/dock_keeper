@@ -37,6 +37,7 @@ import { esquecerCatalogo } from './lib/catalogo';
 
 const MetricsHistoryView = lazy(() => import('./components/MetricsHistoryView'));
 const ContainersView = lazy(() => import('./components/ContainersView'));
+const BancosView = lazy(() => import('./components/BancosView'));
 const NginxView = lazy(() => import('./components/NginxView'));
 const SslView = lazy(() => import('./components/SslView'));
 const AlertRulesView = lazy(() => import('./components/AlertRulesView'));
@@ -59,6 +60,7 @@ const VIEWS: Record<string, ComponentType> = {
   dashboard: Dashboard,
   history: MetricsHistoryView,
   containers: ContainersView,
+  bancos: BancosView,
   nginx: NginxView,
   ssl: SslView,
   alertas: AlertsView,

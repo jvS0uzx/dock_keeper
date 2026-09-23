@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, LayoutGrid, Box, Globe, Lock, ShieldAlert, Server, LineChart, BellRing,
   ScrollText, Network, Map, MonitorSmartphone, Building2, Users, LogOut, KeyRound,
-  FileClock, FingerprintPattern,
+  FileClock, FingerprintPattern, Database,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -26,6 +26,7 @@ const TABS: Record<string, { label: string; icon: LucideIcon }> = {
   history: { label: 'Histórico de Métricas', icon: LineChart },
   dashboards: { label: 'Painéis', icon: LayoutGrid },
   containers: { label: 'Containers', icon: Box },
+  bancos: { label: 'Bancos de Dados', icon: Database },
   nginx: { label: 'Nginx & Tráfego', icon: Globe },
   ssl: { label: 'SSL & Domínios', icon: Lock },
   security: { label: 'Segurança & Auditoria', icon: ShieldAlert },

@@ -7,13 +7,20 @@
 # mínimo". Em Debian/Ubuntu este arquivo costuma ser DESNECESSÁRIO: os grupos
 # `adm` (leitura de /var/log) e `docker` cobrem tudo que o painel executa.
 #
-# Limitação honesta: o código atual envia os comandos por SSH SEM prefixo
-# `sudo`. Estas linhas valem para (a) a família RHEL, onde /var/log/secure é
-# 600 root:root e não há grupo adm de logs; (b) validar à mão, como dockkeeper-monitor,
-# os mesmos comandos que o painel roda; (c) a evolução futura em que o painel
-# prefixa `sudo` quando o usuário cadastrado não é root. Enquanto o prefixo não
-# existe, conceder aqui não muda o que o painel consegue fazer — muda o que o
-# operador consegue validar.
+# Com SSH_USE_SUDO=true e usuário cadastrado diferente de root, o painel passou
+# a prefixar `sudo -n` em parte dos comandos: o tail do auth.log, o tail do
+# nginx, o `nginx -T` e o `ss -tulnp` usado pelo radar e pela sonda de bancos.
+# Para esses, conceder aqui muda de fato o que o painel enxerga.
+#
+# O resto continua sendo enviado sem prefixo, então estas linhas seguem valendo
+# também para (a) a família RHEL, onde /var/log/secure é 600 root:root e não há
+# grupo adm de logs; e (b) validar à mão, como dockkeeper-monitor, os mesmos
+# comandos que o painel roda.
+#
+# A sonda de bancos depende da linha do `ss -tulnp` abaixo para enxergar
+# PostgreSQL rodando no host sob outro usuário. Sem ela, a descoberta do lado do
+# host se declara cega: a sonda não inventa ausência, mas também não encontra
+# nada fora de container.
 #
 # Regra: argumento exato, caminho absoluto, nenhum wildcard. Wildcard em
 # sudoers vira injeção de argumento com um `-f` a mais.

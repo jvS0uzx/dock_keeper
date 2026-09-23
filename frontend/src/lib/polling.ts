@@ -15,4 +15,5 @@ export const POLL = {
   saudeDoPainel: 30000,
   historicoDoPainel: 30000,
   historicoDaMaquina: 30000,
+  bancos: 30000,
 } as const;

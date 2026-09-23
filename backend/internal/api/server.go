@@ -88,6 +88,9 @@ func Routes(cfg Config) http.Handler {
 	mux.HandleFunc("/api/network/scan", globalWrite(networkScanHandler, http.MethodPost))
 	mux.HandleFunc("/api/network/host", api(networkHostUpdateHandler, http.MethodPatch))
 
+	mux.HandleFunc("/api/bancos", api(bancosHandler, http.MethodGet))
+	mux.HandleFunc("/api/bancos/", api(cfg.esquemaDaBaseHandler, http.MethodGet))
+
 	mux.HandleFunc("/api/sites", readViewerWriteOperator(sitesHandler, http.MethodGet, http.MethodPost, http.MethodDelete))
 
 	mux.HandleFunc("/api/floorplans", upload(floorPlansHandler, http.MethodGet, http.MethodPost))

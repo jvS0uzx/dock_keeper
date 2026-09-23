@@ -14,13 +14,13 @@ export const PANELS: Record<PanelId, PanelDefinition> = {
     id: 'dev',
     label: 'Infra / Dev',
     description: 'VPS, containers e serviços',
-    tabs: ['dashboard', 'history', 'dashboards', 'containers', 'nginx', 'ssl', 'security', 'logs', 'alertas', 'alerts', 'servers', 'users', 'audit'],
+    tabs: ['dashboard', 'history', 'dashboards', 'containers', 'bancos', 'nginx', 'ssl', 'security', 'logs', 'alertas', 'alerts', 'servers', 'users', 'audit'],
   },
   suporte: {
     id: 'suporte',
     label: 'Suporte TI',
     description: 'Unidades, estações e inventário',
-    tabs: ['stations', 'network', 'floorplan', 'sites', 'devices', 'alertas', 'alerts', 'logs', 'users'],
+    tabs: ['stations', 'network', 'floorplan', 'sites', 'devices', 'bancos', 'alertas', 'alerts', 'logs', 'users'],
   },
 };
 

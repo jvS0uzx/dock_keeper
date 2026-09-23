@@ -42,6 +42,9 @@ func (m *ServerManager) Start(t Target) bool {
 	safego.Run(ctx, "ssh:nginx:sonda:"+t.Host, func(ctx context.Context) {
 		SondarNginxPeriodicamente(ctx, t)
 	})
+	safego.Run(ctx, "ssh:postgres:sonda:"+t.Host, func(ctx context.Context) {
+		SondarPostgresPeriodicamente(ctx, t)
+	})
 	safego.Run(ctx, "ssh:nginx:"+t.Host, func(ctx context.Context) {
 		superviseNginx(ctx, t)
 	})

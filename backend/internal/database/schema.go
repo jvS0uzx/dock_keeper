@@ -15,7 +15,8 @@ type Server struct {
 	Port   int    `gorm:"default:22" json:"port"`
 	Kind   string `gorm:"size:20;default:'ssh'" json:"kind"`
 
-	CollectNginx bool `gorm:"default:false" json:"collect_nginx"`
+	CollectNginx    bool `gorm:"default:false" json:"collect_nginx"`
+	CollectPostgres bool `gorm:"default:false" json:"collect_postgres"`
 
 	NginxEstado     string     `gorm:"size:16;not null;default:'desconhecido';index" json:"nginx_estado"`
 	NginxMotivo     string     `gorm:"type:text;not null;default:''" json:"nginx_motivo"`
@@ -309,6 +310,44 @@ type NginxUpstream struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+type PostgresInstancia struct {
+	ID            uint   `gorm:"primaryKey" json:"id"`
+	ServerID      string `gorm:"type:uuid;not null;uniqueIndex:idx_instancia_dono_porta,priority:1;index" json:"server_id"`
+	Porta         int    `gorm:"not null;uniqueIndex:idx_instancia_dono_porta,priority:2" json:"porta"`
+	EmContainer   bool   `gorm:"not null;default:false" json:"em_container"`
+	ContainerNome string `gorm:"size:128;not null;default:''" json:"container_nome"`
+	Motor         string `gorm:"size:24;not null;default:'postgres';index" json:"motor"`
+	Versao        string `gorm:"size:32;not null;default:''" json:"versao"`
+	Papel         string `gorm:"size:16;not null;default:'desconhecido';index" json:"papel"`
+	WalLevel      string `gorm:"size:16;not null;default:''" json:"wal_level"`
+	MaxWalSenders *int   `json:"max_wal_senders"`
+	ArchiveMode   string `gorm:"size:16;not null;default:''" json:"archive_mode"`
+	Estado        string `gorm:"size:16;not null;default:'desconhecido'" json:"estado"`
+	Motivo        string `gorm:"type:text;not null;default:''" json:"motivo"`
+
+	ObservadoEm time.Time `gorm:"not null" json:"observado_em"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (PostgresInstancia) TableName() string { return "postgres_instancias" }
+
+type PostgresBase struct {
+	ID           uint   `gorm:"primaryKey" json:"id"`
+	InstanciaID  uint   `gorm:"not null;uniqueIndex:idx_base_dona_nome,priority:1;index" json:"instancia_id"`
+	Nome         string `gorm:"size:128;not null;uniqueIndex:idx_base_dona_nome,priority:2" json:"nome"`
+	Dono         string `gorm:"size:128;not null;default:''" json:"dono"`
+	Encoding     string `gorm:"size:32;not null;default:''" json:"encoding"`
+	TamanhoBytes *int64 `json:"tamanho_bytes"`
+	Conexoes     *int   `json:"conexoes"`
+
+	ObservadoEm time.Time `gorm:"not null" json:"observado_em"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (PostgresBase) TableName() string { return "postgres_bases" }
 
 type AlertDelivery struct {
 	ID      uint   `gorm:"primaryKey" json:"id"`

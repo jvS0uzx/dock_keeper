@@ -63,9 +63,32 @@ func scriptPrelude(t Target) string {
 	var b strings.Builder
 	b.WriteString("DOCKKEEPER_INTERVAL=" + strconv.Itoa(CollectIntervalSec()) + "\n")
 	b.WriteString("DOCKKEEPER_NGINX_LOG=" + NginxLogPath() + "\n")
+	b.WriteString("DOCKKEEPER_PSQL_CMD=\"" + PsqlCmd(t) + "\"\n")
 	if useSudo(t) {
 		b.WriteString("DOCKKEEPER_TAIL=\"" + sudoPrefix + "/usr/bin/tail\"\n")
 		b.WriteString("DOCKKEEPER_NGINX_CMD=\"" + sudoPrefix + "nginx\"\n")
+		b.WriteString("DOCKKEEPER_SS_CMD=\"" + sudoPrefix + "/usr/bin/ss\"\n")
 	}
 	return b.String()
+}
+
+const (
+	psqlComoRoot = "psql -U postgres"
+	psqlComSudo  = sudoPrefix + "-u postgres psql"
+)
+
+var safePsqlCmd = regexp.MustCompile(`^[A-Za-z0-9._/ -]+$`)
+
+func PsqlCmd(t Target) string {
+	raw := strings.TrimSpace(os.Getenv("SSH_PSQL_CMD"))
+	if raw != "" {
+		if safePsqlCmd.MatchString(raw) {
+			return raw
+		}
+		log.Printf("[SSH] SSH_PSQL_CMD=%q recusado: use nome ou caminho sem metacaractere", raw)
+	}
+	if useSudo(t) {
+		return psqlComSudo
+	}
+	return psqlComoRoot
 }

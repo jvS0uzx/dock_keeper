@@ -1,7 +1,12 @@
 # Configuração
 
-Todas as variáveis abaixo foram extraídas do código, não do `.env.example`. O
-painel lê **36 variáveis**; o agente lê outras **8**; o frontend, **4**.
+Todas as variáveis abaixo foram extraídas do código, não do `.env.example`.
+
+Esta página já cravou uma contagem ("o painel lê 36 variáveis"), e ela
+envelheceu em silêncio: a leitura acontece por vários caminhos
+(`os.Getenv`, os helpers de `internal/config` e `database.EnvDuration`), então
+varrer por um só deles subconta. Se precisar do número de hoje, varra os três
+caminhos em vez de confiar em número escrito aqui.
 
 O `.env` é carregado de `../.env` e depois `.env`, relativo ao diretório de
 trabalho — por isso `go run ./cmd/dockkeeper` de dentro de `backend/` acha o `.env`
@@ -95,12 +100,75 @@ nessa ordem, quem está bloqueado continua bloqueado.
 | `SSH_COLLECT_INTERVAL` | `2` | Segundos entre amostras do script de coleta |
 | `SSH_KEY_PASSPHRASE` | — | Passphrase da chave de `SSH_KEY_PATH`, quando ela é protegida. Sem ela, chave protegida recusa com "chave protegida por passphrase" |
 | `SSH_USE_AGENT` | `false` | Autentica também pelas chaves do `ssh-agent` em `SSH_AUTH_SOCK`. Ligado, o `SSH_KEY_PATH` passa a ser opcional |
-| `SSH_USE_SUDO` | `false` | Com usuário diferente de `root`, prefixa `sudo -n` e caminho absoluto no `tail` do `auth.log`, no `tail` do nginx e no `ss -tulnp`. Ver `docs/operacao.md` |
+| `SSH_USE_SUDO` | `false` | Com usuário diferente de `root`, prefixa `sudo -n` e caminho absoluto no `tail` do `auth.log`, no `tail` do nginx, no `nginx -T` e no `ss -tulnp` — este último usado pelo radar **e** pela sonda de bancos, que sem ele não enxerga PostgreSQL rodando no host sob outro usuário. `sudo -n` que exija senha falha e a descoberta do lado do host se declara cega. Ver `docs/operacao.md` e `deploy/sudoers-dockkeeper-monitor.exemplo` |
 | `SSH_RECONNECT_MAX` | `5m` | Teto da espera entre reconexões. A espera começa em 5 s, dobra a cada queda e volta a 5 s depois de uma sessão que ficou de pé por 60 s ou mais, com variação de ±20 % |
 | `RTT_PROBE` | `true` | Grava o RTT medido pelo keepalive SSH (`rtt_ms`). Desligado, o keepalive continua detectando conexão morta, só não grava. Ver `docs/metricas.md` |
 | `RTT_PROBE_INTERVAL` | `30s` | Intervalo entre dois keepalives na conexão de coleta, formato `time.ParseDuration` |
 | `SSH_KEEPALIVE_MAX_MISSES` | `3` | Keepalives seguidos sem resposta (timeout de 3 s cada) que fazem o painel fechar a conexão e reconectar |
 | `SSH_MAX_SESSIONS_PER_HOST` | `6` | Sessões SSH sob demanda simultâneas por servidor (logs, `auth.log`, radar, ações). A excedente recebe 503 sem abrir conexão. Os streams de fundo (métricas e nginx) não contam |
+| `SSH_PSQL_CMD` | ver abaixo | Como a sonda de banco invoca o `psql` na máquina remota. Vazio, o padrão depende de `SSH_USE_SUDO`: ligado usa `sudo -n -u postgres psql`, desligado usa `psql -U postgres`. Valor com metacaractere é recusado com log, porque é interpolado num comando remoto |
+
+O padrão sem sudo é `psql -U postgres` e não `psql` puro: conectado como `root`,
+o `psql` sem `-U` tentaria autenticar como o usuário `root` do banco, que em
+geral não existe. Onde o `pg_hba.conf` usa `peer`, nem um nem outro funciona — é
+o caso de definir `SSH_PSQL_CMD` explicitamente. A sonda trata a recusa como
+`sem_acesso` com o motivo em português, e não apaga o que já sabia da instância.
+
+## Sondas periódicas
+
+Sonda é diferente de stream: não mantém conexão aberta nem tem backoff. Roda em
+ciclo fixo, é idempotente, e uma execução que falha é simplesmente repetida no
+ciclo seguinte.
+
+| Variável | Padrão | Efeito |
+|---|---|---|
+| `NGINX_PROBE_INTERVAL` | `15m` | Intervalo entre sondagens do Nginx em cada VPS, que classificam `nginx_estado` e reconciliam os upstreams. Formato `time.ParseDuration` |
+| `POSTGRES_PROBE_INTERVAL` | `15m` | Intervalo entre sondagens de PostgreSQL em cada servidor alcançado por SSH: descobre instâncias no host e em container, papel via `pg_is_in_recovery()`, e a lista de bases com tamanho. Formato `time.ParseDuration` |
+| `MALHA_ELEICAO_INTERVAL` | `5m` | Intervalo entre eleições do balanceador principal por tráfego somado |
+| `MALHA_MARGEM_TROCA_PCT` | `20` | Margem percentual que o candidato precisa ter sobre o atual para a troca ser considerada |
+| `MALHA_CICLOS_TROCA` | `3` | Ciclos seguidos com a margem satisfeita antes de a troca acontecer. É a histerese que evita o papel oscilar a cada pico |
+
+A sonda de PostgreSQL roda em **todo servidor alcançado por SSH**, e é somente
+leitura: descobre porta por `ss` ou `netstat` e container por `docker ps`, e só
+então consulta `pg_database`, `pg_stat_activity` e `SHOW`. Em host sem PostgreSQL
+a descoberta não encontra nada e nenhuma consulta é feita.
+
+Ela **não** é opt-in de propósito. A coluna `servers.collect_postgres` existe no
+esquema desde a migração 016, mas hoje não controla nada: nenhuma rota da API a
+escreve e nenhuma tela a liga. Um interruptor que ninguém alcança não protege,
+só esconde a funcionalidade — foi o que aconteceu com `collect_nginx`, que
+manteve o parser desligado e a malha vazia até setembro de 2026 (ADR 014). A
+coluna fica reservada para quando existir a tela que a ligue, e neste momento
+ligá-la ou não muda coisa nenhuma.
+
+Instância detectada mas sem credencial de consulta é gravada com estado
+`sem_acesso` e o motivo em português — nunca como `inativo`, porque sonda cega
+não sabe diagnosticar, e afirmar o contrário apagaria inventário verdadeiro.
+
+### Por que a sonda pode deixar de apagar o que não vê
+
+Uma coleta que não encontra nada é ambígua: pode significar "não há PostgreSQL
+aqui" ou "não consegui procurar". Tratar as duas como a mesma coisa apagaria
+inventário verdadeiro no dia em que a ferramenta de descoberta falhasse — o
+mesmo modo de falha do caminho cravado do `auth.log`, em que a tela ficava vazia
+sem erro nenhum.
+
+Por isso a sonda informa separadamente se cada mecanismo de descoberta funcionou,
+e a limpeza do que sumiu acontece por escopo:
+
+| Mecanismo | Quando conta como bem-sucedido | O que a sua falha preserva |
+|---|---|---|
+| `ss`, ou `netstat` como reserva | rodou **e** a saída traz dono de socket | instâncias fora de container |
+| `docker ps` | saiu com código 0 | instâncias em container |
+
+O critério do dono de socket importa: sem privilégio, o `ss` lista a porta mas
+omite a coluna `users:((`, e é justamente por esse nome que a sonda reconhece um
+PostgreSQL. Uma listagem sem dono parece "não há nada" e não pode autorizar
+limpeza. O `netstat` segue a mesma prova, pela coluna de programa.
+
+As bases de uma instância só são reconciliadas quando aquela instância respondeu
+(`estado` igual a `ativo`). Instância que virou `sem_acesso` mantém as bases da
+última coleta em que foi possível lê-las.
 
 Os dois caminhos são de Debian e Ubuntu. Em RHEL o `auth.log` se chama
 `/var/log/secure`, e o caminho cravado deixava a tela de Segurança **vazia sem

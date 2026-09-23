@@ -10,3 +10,9 @@ var StreamNginx string
 
 //go:embed probe_nginx.sh
 var ProbeNginx string
+
+//go:embed probe_postgres.sh
+var ProbePostgres string
+
+//go:embed probe_schema.sh
+var ProbeSchema string

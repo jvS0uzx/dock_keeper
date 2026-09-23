@@ -11,6 +11,7 @@ export const CAMINHOS: Record<string, string> = {
   history: '/historico',
   dashboards: '/paineis',
   containers: '/containers',
+  bancos: '/bancos',
   nginx: '/nginx',
   ssl: '/ssl',
   security: '/seguranca',

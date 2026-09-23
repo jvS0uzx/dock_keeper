@@ -492,6 +492,81 @@ export interface AuditQuery {
   offset?: number;
 }
 
+export type PostgresPapel = 'desconhecido' | 'primario' | 'replica';
+
+export type PostgresEstado = 'desconhecido' | 'ativo' | 'inativo' | 'sem_acesso';
+
+export interface PostgresBaseRecord {
+  nome: string;
+  dono: string;
+  encoding: string;
+  tamanho_bytes: number | null;
+  conexoes: number | null;
+  observado_em: string;
+}
+
+export interface PostgresInstanciaRecord {
+  id: number;
+  server_id: string;
+  servidor_nome: string;
+  site_id: number | null;
+  porta: number;
+  em_container: boolean;
+  container_nome: string;
+  motor: string;
+  versao: string;
+  papel: PostgresPapel;
+  wal_level: string;
+  max_wal_senders: number | null;
+  archive_mode: string;
+  estado: PostgresEstado;
+  motivo: string;
+  observado_em: string;
+  total_bases: number;
+  tamanho_total_bytes: number | null;
+  bases: PostgresBaseRecord[] | null;
+}
+
+export interface EsquemaColunaRecord {
+  nome: string;
+  tipo: string;
+  nulo: boolean;
+  chave_primaria: boolean;
+}
+
+export interface EsquemaTabelaRecord {
+  schema: string;
+  nome: string;
+  linhas_estimadas: number | null;
+  tamanho_bytes: number | null;
+  colunas_chave: string[];
+  colunas: EsquemaColunaRecord[];
+}
+
+export interface EsquemaRelacaoRecord {
+  nome: string;
+  de_schema: string;
+  de_tabela: string;
+  de_colunas: string[];
+  para_schema: string;
+  para_tabela: string;
+  para_colunas: string[];
+  ao_apagar: string;
+}
+
+export interface EsquemaDaBaseRecord {
+  instancia_id: number;
+  base: string;
+  motor: string;
+  coletado_em: string;
+  suporta_diagrama: boolean;
+  schemas: string[];
+  tabelas: EsquemaTabelaRecord[];
+  relacoes: EsquemaRelacaoRecord[];
+  truncado: boolean;
+  total_tabelas: number;
+}
+
 export const api = {
   async audit(query: AuditQuery, signal?: AbortSignal): Promise<AuditPage> {
     const params = new URLSearchParams();
@@ -771,6 +846,37 @@ export const api = {
       throw new Error(`HTTP ${res.status}`);
     }
     return URL.createObjectURL(await res.blob());
+  },
+
+  async bancos(siteId: number | null = null, signal?: AbortSignal): Promise<PostgresInstanciaRecord[]> {
+    const qs = siteId === null ? '' : `?site_id=${siteId}`;
+    return asArray<PostgresInstanciaRecord>(await request(`/api/bancos${qs}`, { signal }));
+  },
+
+  async esquemaDaBase(
+    instanciaId: number,
+    base: string,
+    signal?: AbortSignal,
+  ): Promise<EsquemaDaBaseRecord> {
+    const params = new URLSearchParams({ base });
+    const dados = await request<EsquemaDaBaseRecord>(
+      `/api/bancos/${instanciaId}/esquema?${params}`,
+      { signal },
+    );
+    return {
+      ...dados,
+      schemas: asArray<string>(dados.schemas),
+      tabelas: asArray<EsquemaTabelaRecord>(dados.tabelas).map((tabela) => ({
+        ...tabela,
+        colunas_chave: asArray<string>(tabela.colunas_chave),
+        colunas: asArray<EsquemaColunaRecord>(tabela.colunas),
+      })),
+      relacoes: asArray<EsquemaRelacaoRecord>(dados.relacoes).map((relacao) => ({
+        ...relacao,
+        de_colunas: asArray<string>(relacao.de_colunas),
+        para_colunas: asArray<string>(relacao.para_colunas),
+      })),
+    };
   },
 
   async securityRadar(serverId: string, signal?: AbortSignal): Promise<PortInfo[]> {
