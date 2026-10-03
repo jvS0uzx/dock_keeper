@@ -6,10 +6,20 @@ import (
 	"testing"
 )
 
-type enderecoFalso struct{ ip string }
-
-func (e enderecoFalso) Network() string { return "ip+net" }
-func (e enderecoFalso) String() string  { return e.ip }
+func enderecosFalsos(porNome map[string]string) func(*net.Interface) ([]net.Addr, error) {
+	return func(iface *net.Interface) ([]net.Addr, error) {
+		cidr, ok := porNome[iface.Name]
+		if !ok {
+			return nil, nil
+		}
+		ip, rede, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, err
+		}
+		rede.IP = ip
+		return []net.Addr{rede}, nil
+	}
+}
 
 func TestEnderecosDoHostIgnoraLoopbackEVirtuais(t *testing.T) {
 	interfaces := func() ([]net.Interface, error) {
@@ -21,7 +31,15 @@ func TestEnderecosDoHostIgnoraLoopbackEVirtuais(t *testing.T) {
 		}, nil
 	}
 
-	lista := enderecosDoHost(interfaces)
+	lista := enderecosDoHost(interfaces, enderecosFalsos(map[string]string{
+		"lo":         "127.0.0.1/8",
+		"eth0":       "10.1.0.65/24",
+		"docker0":    "172.17.0.1/16",
+		"tailscale0": "100.100.0.11/32",
+	}))
+	if len(lista) != 2 || lista[0] != "10.1.0.65" || lista[1] != "100.100.0.11" {
+		t.Errorf("esperado eth0 e tailscale0, veio %v", lista)
+	}
 	for _, indesejado := range []string{"127.0.0.1", "172.17.0.1"} {
 		for _, achado := range lista {
 			if achado == indesejado {
@@ -34,7 +52,7 @@ func TestEnderecosDoHostIgnoraLoopbackEVirtuais(t *testing.T) {
 func TestEnderecosDoHostComErroDevolveVazio(t *testing.T) {
 	lista := enderecosDoHost(func() ([]net.Interface, error) {
 		return nil, errors.New("sem permissão")
-	})
+	}, (*net.Interface).Addrs)
 	if len(lista) != 0 {
 		t.Errorf("com erro na leitura a lista deve ficar vazia, veio %v", lista)
 	}
@@ -61,7 +79,7 @@ func TestIpDeEnderecoDescartaIPv6ELoopback(t *testing.T) {
 }
 
 func TestEnderecosDoHostLeOSistemaDeVerdade(t *testing.T) {
-	lista := enderecosDoHost(net.Interfaces)
+	lista := enderecosDoHost(net.Interfaces, (*net.Interface).Addrs)
 	for _, ip := range lista {
 		if net.ParseIP(ip) == nil {
 			t.Errorf("leitura real devolveu %q, que não é IP", ip)

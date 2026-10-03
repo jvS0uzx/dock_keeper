@@ -164,7 +164,7 @@ func iniciar(ctx context.Context) {
 			p := collect(cfg.hostname, cfg.siteCode, intervalSec)
 			p.MachineID = maquina
 			p.NetRxBps, p.NetTxBps = rede.taxas()
-			p.Addresses = enderecosDoHost(net.Interfaces)
+			p.Addresses = enderecosDoHost(net.Interfaces, (*net.Interface).Addrs)
 			return p
 		},
 	}

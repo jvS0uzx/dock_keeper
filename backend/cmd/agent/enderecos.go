@@ -5,7 +5,7 @@ import (
 	"sort"
 )
 
-func enderecosDoHost(interfaces func() ([]net.Interface, error)) []string {
+func enderecosDoHost(interfaces func() ([]net.Interface, error), enderecos func(*net.Interface) ([]net.Addr, error)) []string {
 	lista, err := interfaces()
 	if err != nil {
 		return nil
@@ -16,7 +16,7 @@ func enderecosDoHost(interfaces func() ([]net.Interface, error)) []string {
 		if iface.Flags&net.FlagUp == 0 || ehInterfaceVirtual(iface.Name) {
 			continue
 		}
-		addrs, err := iface.Addrs()
+		addrs, err := enderecos(&iface)
 		if err != nil {
 			continue
 		}
