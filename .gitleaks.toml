@@ -16,4 +16,6 @@ regexes = [
   '''postgres://postgres:ci@127\.0\.0\.1''',
   '''POSTGRES_PASSWORD: secretpassword''',
   '''canario-do-ci-nao-pode-aparecer-no-bundle''',
+  '''senha-do-r1-12345''',
+  '''convite-secreto-123''',
 ]

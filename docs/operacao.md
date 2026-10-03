@@ -268,6 +268,71 @@ e depois as do agente.
   `System/Unknown` para processo de outro dono. Porta e protocolo continuam
   corretos.
 
+## Formato do access log do Nginx
+
+O painel não lê o formato `combined`, que é o padrão do Nginx. O parser
+(`parseNginxEntry`, em `backend/internal/ssh/gatilhos.go`) procura o marcador ` to: `
+e descarta em silêncio toda linha que não o tenha. Com o formato padrão, a coleta sobe,
+o `tail` funciona e nenhuma requisição é contada: a malha fica sem tráfego, a eleição do
+balanceador não tem o que comparar e a descoberta de SSL fica vazia.
+
+O formato exigido é este, no bloco `http` do host monitorado:
+
+```nginx
+log_format dockkeeper '$remote_addr - $host to: $upstream_addr: $request $status $body_bytes_sent';
+access_log /var/log/nginx/access.log dockkeeper;
+```
+
+O que o parser tira de cada parte:
+
+| Trecho | Vira | Regra |
+|---|---|---|
+| `$host`, entre o último ` - ` e ` to: ` | domínio da requisição, usado na descoberta de SSL e no recorte por site | Precisa ser uma palavra só. `$server_name $host` juntos viram um nome com espaço |
+| `$upstream_addr`, entre ` to: ` e o primeiro `: ` | upstream da aresta na malha | `-` (resposta do próprio Nginx, sem proxy) vira `Local (Nginx/Cache)` |
+| `$request $status ...` | código HTTP | O primeiro número de três dígitos entre 100 e 599, a partir do terceiro campo. 5xx conta para `LB_ERROR_RATIO` |
+
+Uma linha válida:
+
+```
+203.0.113.7 - app.exemplo.com.br to: 192.0.2.10:8080: GET /api/pedidos HTTP/1.1 200 512
+```
+
+Campos depois de `$body_bytes_sent` são ignorados, então dá para acrescentar
+`$request_time` ou `$upstream_response_time` no fim sem quebrar nada. Antes de ` to: `,
+o que vale é o último ` - `: um prefixo como `[$time_local] $remote_addr - $remote_user - $host`
+também funciona.
+
+Para não mexer no log que outras ferramentas leem (fail2ban, GoAccess, logrotate com
+filtros), mantenha o `combined` e grave um segundo arquivo, só para o painel. O Nginx aceita
+mais de um `access_log` no mesmo contexto:
+
+```nginx
+access_log /var/log/nginx/access.log combined;
+access_log /var/log/nginx/dockkeeper.log dockkeeper;
+```
+
+E aponte `SSH_NGINX_LOG_PATH=/var/log/nginx/dockkeeper.log` no `.env` do painel. A variável
+é global e vale para todos os servidores, então o caminho precisa ser o mesmo em todas as
+VPS.
+
+Dois limites conhecidos do parser:
+
+- Quando o Nginx tenta mais de um upstream na mesma requisição, `$upstream_addr` vem como
+  `192.0.2.10:8080, 192.0.2.11:8080`, e a linha é contada para esse texto inteiro, como se
+  fosse um upstream só.
+- Quando um redirecionamento interno troca de grupo, o Nginx separa os grupos com ` : `.
+  O parser corta no primeiro `: `, então a requisição é contada para o upstream do primeiro
+  grupo, não para o que de fato respondeu.
+
+Para conferir no host, depois de `nginx -t && systemctl reload nginx`:
+
+```bash
+tail -n 3 /var/log/nginx/access.log | grep ' to: '
+```
+
+Sem saída, o formato ainda não está valendo para esse `server`. Um `access_log` declarado
+dentro de um bloco `server` ou `location` sobrepõe o do bloco `http`.
+
 ## O que olhar quando quebra
 
 ### O painel não sobe
@@ -287,6 +352,7 @@ Esta é a classe de falha mais traiçoeira do sistema, e quase sempre é uma des
 |---|---|
 | Segurança (auth.log) | Caminho de log errado para a distribuição. Ver `SSH_AUTH_LOG_PATH` |
 | Descoberta de SSL | Nenhum host com `collect_nginx` ligado — não há access log para observar |
+| Malha sem tráfego, ou Descoberta de SSL vazia com o Nginx coletado | Access log no formato `combined`. Ver [Formato do access log do Nginx](#formato-do-access-log-do-nginx) |
 | Inventário de rede | `DISCOVERY_CIDRS` vazio, ou painel em container sem `network_mode: host` |
 | Inventário, numa unidade só | A varredura local se desligou porque a unidade tem coletor registrado. O log diz |
 

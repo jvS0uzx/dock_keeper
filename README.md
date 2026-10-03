@@ -156,6 +156,9 @@ por SSH — veja [Fontes de dado](docs/arquitetura.md).
   host. Quem depende dela precisa de `network_mode: host` ou do coletor remoto.
 - **A tela de descoberta de SSL depende do access log do Nginx.** Sem um host com
   `collect_nginx` ligado, ela fica vazia — não há erro, não há o que descobrir.
+- **O access log do Nginx precisa de um `log_format` próprio.** No `combined`
+  padrão, nenhuma linha é contada e a malha fica sem tráfego. O formato está em
+  [`docs/operacao.md`](docs/operacao.md#formato-do-access-log-do-nginx).
 - **RTT só onde há conexão SSH.** A latência (`rtt_ms`) é o tempo de ida e volta
   de um keepalive na sessão de coleta já aberta, até o sshd. Host que só reporta
   por agente de push fica sem RTT, e não há medida por ICMP. O handshake SSH

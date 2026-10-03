@@ -106,7 +106,7 @@ func rodarSonda(t *testing.T, c cenarioDaSonda) sondaNginx {
 
 	cmd := exec.Command(bash, "-s")
 	cmd.Env = append(os.Environ(),
-		"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"PATH="+dir+string(os.PathListSeparator)+caminhoSemNginx(os.Getenv("PATH")),
 		"DOCKKEEPER_NGINX_LOG="+log,
 	)
 	cmd.Stdin = strings.NewReader(ProbeNginx)
@@ -120,6 +120,20 @@ func rodarSonda(t *testing.T, c cenarioDaSonda) sondaNginx {
 		t.Fatalf("JSON inválido da sonda (%q): %v", string(saida), err)
 	}
 	return payload
+}
+
+func caminhoSemNginx(path string) string {
+	var mantidos []string
+	for _, d := range filepath.SplitList(path) {
+		if d == "" {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(d, "nginx")); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			continue
+		}
+		mantidos = append(mantidos, d)
+	}
+	return strings.Join(mantidos, string(os.PathListSeparator))
 }
 
 func TestSondaSemNginxInstalado(t *testing.T) {

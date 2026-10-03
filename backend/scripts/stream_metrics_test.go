@@ -131,7 +131,7 @@ func iniciarScript(t *testing.T, prelude string) saidaDoScript {
 
 func primeiraLinhaDoScript(t *testing.T) string {
 	t.Helper()
-	return iniciarScript(t, "DOCKKEEPER_INTERVAL=60\n").proxima()
+	return iniciarScript(t, "DOCKKEEPER_INTERVAL=1\n").proxima()
 }
 
 func TestStreamMetricsEscapaAspasDoContainer(t *testing.T) {
@@ -260,7 +260,7 @@ func TestStreamMetricsDeclaraEnderecosSemVirtuaisNemLoopback(t *testing.T) {
 		t.Fatalf("criar ip falso: %v", err)
 	}
 
-	linha := iniciarScript(t, "DOCKKEEPER_INTERVAL=60\nPATH="+dir+":$PATH\n").proxima()
+	linha := iniciarScript(t, "DOCKKEEPER_INTERVAL=1\nPATH="+dir+":$PATH\n").proxima()
 	enderecos := enderecosDaLinha(t, linha)
 
 	tem := map[string]bool{}
@@ -283,7 +283,7 @@ func TestStreamMetricsSemIpNaoQuebraNemEmiteEnderecos(t *testing.T) {
 		t.Fatalf("criar ip quebrado: %v", err)
 	}
 
-	linha := iniciarScript(t, "DOCKKEEPER_INTERVAL=60\nPATH="+dir+":$PATH\n").proxima()
+	linha := iniciarScript(t, "DOCKKEEPER_INTERVAL=1\nPATH="+dir+":$PATH\n").proxima()
 	if enderecos := enderecosDaLinha(t, linha); len(enderecos) != 0 {
 		t.Errorf("sem o comando ip a lista deveria sair vazia, veio %v", enderecos)
 	}
