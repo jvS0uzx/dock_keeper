@@ -48,7 +48,7 @@ func TestMotorForaDoConjuntoNaoEntra(t *testing.T) {
 	db := bancoComInventario(t)
 	servidor := servidorDoInventario(t, db, "vps-motor", "203.0.113.247")
 
-	for _, motor := range []string{"mysql", "mariadb", "POSTGRES", ""} {
+	for _, motor := range []string{"oracle", "MySQL", "POSTGRES", ""} {
 		t.Run("motor="+motor, func(t *testing.T) {
 			err := db.Exec(
 				"INSERT INTO postgres_instancias (server_id, porta, motor) VALUES (?, ?, ?)",
@@ -62,11 +62,35 @@ func TestMotorForaDoConjuntoNaoEntra(t *testing.T) {
 		})
 	}
 
-	err := db.Exec(
-		"INSERT INTO postgres_instancias (server_id, porta, motor) VALUES (?, ?, ?)",
-		servidor, 5432, "postgres").Error
+	for i, motor := range []string{"postgres", "mysql", "mariadb"} {
+		err := db.Exec(
+			"INSERT INTO postgres_instancias (server_id, porta, motor) VALUES (?, ?, ?)",
+			servidor, 5432+i, motor).Error
+		if err != nil {
+			t.Errorf("motor %q do conjunto foi recusado: %v", motor, err)
+		}
+	}
+}
+
+func TestMotoresMySQLEMariaDBSobemNaVersao019(t *testing.T) {
+	db := bancoComInventario(t)
+
+	if v := versaoAplicada(t, db); v < 19 {
+		t.Fatalf("versão aplicada = %d, esperado ao menos 19", v)
+	}
+
+	var definicao string
+	err := db.Raw(`
+		SELECT pg_get_constraintdef(oid)
+		  FROM pg_constraint
+		 WHERE conname = 'chk_instancia_motor'`).Scan(&definicao).Error
 	if err != nil {
-		t.Errorf("motor do conjunto foi recusado: %v", err)
+		t.Fatalf("ler chk_instancia_motor: %v", err)
+	}
+	for _, motor := range []string{"postgres", "mysql", "mariadb"} {
+		if !strings.Contains(definicao, "'"+motor+"'") {
+			t.Errorf("chk_instancia_motor = %s, sem %q", definicao, motor)
+		}
 	}
 }
 

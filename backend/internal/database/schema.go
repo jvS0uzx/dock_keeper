@@ -15,8 +15,8 @@ type Server struct {
 	Port   int    `gorm:"default:22" json:"port"`
 	Kind   string `gorm:"size:20;default:'ssh'" json:"kind"`
 
-	CollectNginx    bool `gorm:"default:false" json:"collect_nginx"`
-	CollectPostgres bool `gorm:"default:false" json:"collect_postgres"`
+	CollectNginx  bool `gorm:"default:false" json:"collect_nginx"`
+	CollectBancos bool `gorm:"default:true" json:"collect_bancos"`
 
 	NginxEstado     string     `gorm:"size:16;not null;default:'desconhecido';index" json:"nginx_estado"`
 	NginxMotivo     string     `gorm:"type:text;not null;default:''" json:"nginx_motivo"`

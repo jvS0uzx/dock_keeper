@@ -241,11 +241,11 @@ describe('BancosView — filtros', () => {
     renderizar();
     await screen.findAllByTestId('instancia');
 
-    await filtrar(user, 'Motor', 'mysql');
+    await filtrar(user, 'Motor', 'MySQL');
 
     const linhas = screen.getAllByTestId('instancia');
     expect(linhas).toHaveLength(1);
-    expect(within(linhas[0]).getByTestId('instancia-motor').textContent).toBe('mysql 8.4');
+    expect(within(linhas[0]).getByTestId('instancia-motor').textContent).toBe('MySQL 8.4');
     expect(screen.getByTestId('resumo-instancias').textContent).toBe('1');
   });
 
@@ -342,7 +342,7 @@ describe('BancosView — painel lateral', () => {
     await abrirDetalhe(user, 'VPS-2:3306');
 
     expect(screen.queryByTestId('configuracao')).toBeNull();
-    expect(screen.getByTestId('configuracao-vazia').textContent).toContain('mysql');
+    expect(screen.getByTestId('configuracao-vazia').textContent).toContain('MySQL');
   });
 
   it('base sem medida aparece como travessão, nunca como 0 B', async () => {
@@ -417,8 +417,86 @@ describe('BancosView — esquema da base', () => {
 
     expect(screen.getByTestId('base-nome').textContent).toBe('loja');
     expect(screen.queryByRole('button', { name: 'Ver o esquema da base loja' })).toBeNull();
-    expect(screen.getByTestId('base-sem-diagrama').textContent).toContain('mysql');
+    expect(screen.getByTestId('base-sem-diagrama').textContent).toContain(
+      'O diagrama ainda não está disponível para MySQL',
+    );
     expect(esquemaDaBase).not.toHaveBeenCalled();
+  });
+});
+
+describe('BancosView — MySQL e MariaDB', () => {
+  const mariadb = () =>
+    outroMotor({
+      id: 4,
+      server_id: 's4',
+      servidor_nome: 'VPS-4',
+      motor: 'mariadb',
+      versao: '10.11.6',
+      porta: 3307,
+      em_container: true,
+      container_nome: 'loja-mariadb',
+      estado: 'ativo',
+      motivo: '',
+      tamanho_total_bytes: 2048,
+      bases: [base({ nome: 'loja', dono: '', encoding: 'utf8mb4', tamanho_bytes: 2048, conexoes: 2 })],
+    });
+
+  const tresMotores = () => [instancia({}), outroMotor(), mariadb()];
+
+  it('rotula MySQL e MariaDB junto da versão', async () => {
+    bancos.mockResolvedValue(tresMotores());
+    renderizar();
+
+    const motores = (await screen.findAllByTestId('instancia-motor')).map((celula) => celula.textContent);
+    expect(motores).toEqual(['PostgreSQL 18.0', 'MySQL 8.4', 'MariaDB 10.11.6']);
+    expect(screen.getByTestId('resumo-motores').textContent).toBe('3');
+  });
+
+  it('o filtro de motor oferece os três motores e isola o MariaDB', async () => {
+    const user = semEspera();
+    bancos.mockResolvedValue(tresMotores());
+    renderizar();
+    await screen.findAllByTestId('instancia');
+
+    await user.click(screen.getByRole('combobox', { name: 'Motor' }));
+    const opcoes = (await screen.findAllByRole('option')).map((opcao) => opcao.textContent);
+    expect(opcoes).toEqual(expect.arrayContaining(['Todos', 'PostgreSQL', 'MySQL', 'MariaDB']));
+    await user.click(screen.getByRole('option', { name: 'MariaDB' }));
+
+    const linhas = screen.getAllByTestId('instancia');
+    expect(linhas).toHaveLength(1);
+    expect(within(linhas[0]).getByTestId('instancia-motor').textContent).toBe('MariaDB 10.11.6');
+  });
+
+  it('os filtros de servidor e estado combinam com o motor novo', async () => {
+    const user = semEspera();
+    bancos.mockResolvedValue(tresMotores());
+    renderizar();
+    await screen.findAllByTestId('instancia');
+
+    await filtrar(user, 'Estado', 'Ativo');
+    expect(screen.getAllByTestId('instancia')).toHaveLength(2);
+
+    await filtrar(user, 'Servidor', 'VPS-4');
+    const linhas = screen.getAllByTestId('instancia');
+    expect(linhas).toHaveLength(1);
+    expect(within(linhas[0]).getByTestId('instancia-motor').textContent).toBe('MariaDB 10.11.6');
+  });
+
+  it('o painel lateral do MariaDB não mostra linha de WAL vazia', async () => {
+    const user = semEspera();
+    bancos.mockResolvedValue([mariadb()]);
+    renderizar();
+    await abrirDetalhe(user, 'VPS-4:3307');
+
+    expect(screen.queryByTestId('configuracao')).toBeNull();
+    expect(screen.queryByText('wal_level')).toBeNull();
+    expect(screen.queryByText('max_wal_senders')).toBeNull();
+    expect(screen.queryByText('archive_mode')).toBeNull();
+    expect(screen.getByTestId('configuracao-vazia').textContent).toContain('MariaDB');
+    expect(screen.getByTestId('base-encoding').textContent).toBe('utf8mb4');
+    expect(screen.getByTestId('base-dono').textContent).toBe('—');
+    expect(screen.queryByRole('button', { name: 'Ver o esquema da base loja' })).toBeNull();
   });
 });
 

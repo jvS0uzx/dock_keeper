@@ -470,9 +470,9 @@ func soltarCheckDoMotor(t *testing.T) {
 		t.Fatalf("soltar chk_instancia_motor: %v", err)
 	}
 	t.Cleanup(func() {
-		database.DB.Exec("UPDATE postgres_instancias SET motor = ? WHERE motor <> ?", motorPostgres, motorPostgres)
+		database.DB.Exec("UPDATE postgres_instancias SET motor = ? WHERE motor NOT IN ?", motorPostgres, todosOsMotores)
 		err := database.DB.Exec(
-			"ALTER TABLE postgres_instancias ADD CONSTRAINT chk_instancia_motor CHECK (motor IN ('postgres'))").Error
+			"ALTER TABLE postgres_instancias ADD CONSTRAINT chk_instancia_motor CHECK (motor IN ('postgres', 'mysql', 'mariadb'))").Error
 		if err != nil {
 			t.Errorf("devolver chk_instancia_motor ao banco de teste: %v", err)
 		}

@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"slices"
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"github.com/jvS0uzx/dock_keeper/internal/config"
@@ -21,6 +23,8 @@ const (
 	intervaloPadraoDaSondaPostgres = 15 * time.Minute
 
 	motorPostgres = "postgres"
+	motorMySQL    = "mysql"
+	motorMariaDB  = "mariadb"
 
 	papelDesconhecido = "desconhecido"
 	papelPrimario     = "primario"
@@ -44,6 +48,7 @@ type PostgresInstanciaPayload struct {
 	Porta         int                   `json:"porta"`
 	EmContainer   bool                  `json:"em_container"`
 	ContainerNome string                `json:"container_nome"`
+	Motor         string                `json:"motor"`
 	Versao        string                `json:"versao"`
 	Papel         string                `json:"papel"`
 	WalLevel      string                `json:"wal_level"`
@@ -59,6 +64,11 @@ type PostgresProbePayload struct {
 	DescobertaContainerOk bool                       `json:"descoberta_container_ok"`
 	Instancias            []PostgresInstanciaPayload `json:"instancias"`
 }
+
+var (
+	motoresDoPostgres = []string{motorPostgres}
+	todosOsMotores    = []string{motorPostgres, motorMySQL, motorMariaDB}
+)
 
 func intervaloDaSondaPostgres() time.Duration {
 	return config.Duracao("POSTGRES_PROBE_INTERVAL", intervaloPadraoDaSondaPostgres)
@@ -121,6 +131,7 @@ func normalizarInstancia(inst PostgresInstanciaPayload) PostgresInstanciaPayload
 		Porta:         inst.Porta,
 		EmContainer:   inst.EmContainer,
 		ContainerNome: truncarTexto(strings.TrimSpace(inst.ContainerNome), 128),
+		Motor:         strings.ToLower(strings.TrimSpace(inst.Motor)),
 		Versao:        truncarTexto(strings.TrimSpace(inst.Versao), 32),
 		Papel:         normalizarPapel(inst.Papel),
 		WalLevel:      truncarTexto(strings.TrimSpace(inst.WalLevel), 16),
@@ -136,7 +147,28 @@ func normalizarInstancia(inst PostgresInstanciaPayload) PostgresInstanciaPayload
 	return limpa
 }
 
+func motorAceito(bruto string, motores []string) string {
+	if slices.Contains(motores, bruto) {
+		return bruto
+	}
+	return motores[0]
+}
+
+func motoresAlheios(motores []string) []string {
+	alheios := make([]string, 0, len(todosOsMotores))
+	for _, m := range todosOsMotores {
+		if !slices.Contains(motores, m) {
+			alheios = append(alheios, m)
+		}
+	}
+	return alheios
+}
+
 func normalizarSondaPostgres(p PostgresProbePayload) PostgresProbePayload {
+	return normalizarSondaDeBancos(p, motoresDoPostgres)
+}
+
+func normalizarSondaDeBancos(p PostgresProbePayload, motores []string) PostgresProbePayload {
 	limpas := make([]PostgresInstanciaPayload, 0, len(p.Instancias))
 	vistas := make(map[int]bool, len(p.Instancias))
 	for _, inst := range p.Instancias {
@@ -144,7 +176,9 @@ func normalizarSondaPostgres(p PostgresProbePayload) PostgresProbePayload {
 			continue
 		}
 		vistas[inst.Porta] = true
-		limpas = append(limpas, normalizarInstancia(inst))
+		limpa := normalizarInstancia(inst)
+		limpa.Motor = motorAceito(limpa.Motor, motores)
+		limpas = append(limpas, limpa)
 	}
 	return PostgresProbePayload{
 		DescobertaHostOk:      p.DescobertaHostOk,
@@ -153,13 +187,13 @@ func normalizarSondaPostgres(p PostgresProbePayload) PostgresProbePayload {
 	}
 }
 
-func gravarInstanciaPostgres(serverID string, inst PostgresInstanciaPayload, agora time.Time) (uint, error) {
+func gravarInstancia(serverID string, inst PostgresInstanciaPayload, agora time.Time, motores []string) (uint, bool, error) {
 	linha := database.PostgresInstancia{
 		ServerID:      serverID,
 		Porta:         inst.Porta,
 		EmContainer:   inst.EmContainer,
 		ContainerNome: inst.ContainerNome,
-		Motor:         motorPostgres,
+		Motor:         inst.Motor,
 		Versao:        inst.Versao,
 		Papel:         inst.Papel,
 		WalLevel:      inst.WalLevel,
@@ -170,26 +204,34 @@ func gravarInstanciaPostgres(serverID string, inst PostgresInstanciaPayload, ago
 		ObservadoEm:   agora,
 	}
 
+	alheios := motoresAlheios(motores)
 	err := database.DB.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "server_id"}, {Name: "porta"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"em_container", "container_nome", "motor", "versao", "papel", "wal_level",
 			"max_wal_senders", "archive_mode", "estado", "motivo", "observado_em", "updated_at",
 		}),
+		Where: clause.Where{Exprs: []clause.Expression{
+			clause.Expr{SQL: "postgres_instancias.motor NOT IN ?", Vars: []any{alheios}},
+		}},
 	}).Create(&linha).Error
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if linha.ID != 0 {
-		return linha.ID, nil
+		return linha.ID, true, nil
 	}
 
 	var existente database.PostgresInstancia
-	err = database.DB.Where("server_id = ? AND porta = ?", serverID, inst.Porta).Take(&existente).Error
-	if err != nil {
-		return 0, err
+	err = database.DB.Where("server_id = ? AND porta = ? AND motor NOT IN ?", serverID, inst.Porta, alheios).
+		Take(&existente).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, false, nil
 	}
-	return existente.ID, nil
+	if err != nil {
+		return 0, false, err
+	}
+	return existente.ID, true, nil
 }
 
 func gravarBasesPostgres(instanciaID uint, bases []PostgresBasePayload, agora time.Time) error {
@@ -219,15 +261,24 @@ func gravarBasesPostgres(instanciaID uint, bases []PostgresBasePayload, agora ti
 }
 
 func gravarSondaPostgres(serverID string, p PostgresProbePayload, agora time.Time) error {
+	return gravarSondaDeBancos(serverID, p, agora, motoresDoPostgres)
+}
+
+func gravarSondaDeBancos(serverID string, p PostgresProbePayload, agora time.Time, motores []string) error {
 	if database.DB == nil {
-		return errors.New("banco indisponível para gravar a sonda do postgres")
+		return errors.New("banco indisponível para gravar a sonda de bancos")
 	}
 
-	limpo := normalizarSondaPostgres(p)
+	limpo := normalizarSondaDeBancos(p, motores)
 	for _, inst := range limpo.Instancias {
-		id, err := gravarInstanciaPostgres(serverID, inst, agora)
+		id, gravada, err := gravarInstancia(serverID, inst, agora, motores)
 		if err != nil {
 			return err
+		}
+		if !gravada {
+			log.Printf("[Bancos] porta %d do servidor %s já pertence a outro motor; instância de %s ignorada nesta rodada",
+				inst.Porta, serverID, inst.Motor)
+			continue
 		}
 		if err := gravarBasesPostgres(id, inst.Bases, agora); err != nil {
 			return err
@@ -242,13 +293,13 @@ func gravarSondaPostgres(serverID string, p PostgresProbePayload, agora time.Tim
 		}
 	}
 
-	return podarInstanciasPostgres(serverID, limpo, agora)
+	return podarInstancias(serverID, limpo, agora, motores)
 }
 
-func podarInstanciasPostgres(serverID string, p PostgresProbePayload, agora time.Time) error {
+func podarInstancias(serverID string, p PostgresProbePayload, agora time.Time, motores []string) error {
 	if p.DescobertaHostOk {
 		err := database.DB.
-			Where("server_id = ? AND em_container = ? AND observado_em < ?", serverID, false, agora).
+			Where("server_id = ? AND motor IN ? AND em_container = ? AND observado_em < ?", serverID, motores, false, agora).
 			Delete(&database.PostgresInstancia{}).Error
 		if err != nil {
 			return err
@@ -257,7 +308,7 @@ func podarInstanciasPostgres(serverID string, p PostgresProbePayload, agora time
 
 	if p.DescobertaContainerOk {
 		err := database.DB.
-			Where("server_id = ? AND em_container = ? AND observado_em < ?", serverID, true, agora).
+			Where("server_id = ? AND motor IN ? AND em_container = ? AND observado_em < ?", serverID, motores, true, agora).
 			Delete(&database.PostgresInstancia{}).Error
 		if err != nil {
 			return err
@@ -268,6 +319,10 @@ func podarInstanciasPostgres(serverID string, p PostgresProbePayload, agora time
 }
 
 func SondarPostgres(ctx context.Context, t Target) (PostgresProbePayload, error) {
+	return rodarSondaDeBancos(ctx, t, scripts.ProbePostgres, "sonda do postgres não devolveu JSON")
+}
+
+func rodarSondaDeBancos(ctx context.Context, t Target, script, semJSON string) (PostgresProbePayload, error) {
 	var vazio PostgresProbePayload
 
 	client, session, err := openSession(t)
@@ -283,7 +338,7 @@ func SondarPostgres(ctx context.Context, t Target) (PostgresProbePayload, error)
 	if err != nil {
 		return vazio, err
 	}
-	if err := runScript(session, t, scripts.ProbePostgres); err != nil {
+	if err := runScript(session, t, script); err != nil {
 		return vazio, err
 	}
 
@@ -306,7 +361,7 @@ func SondarPostgres(ctx context.Context, t Target) (PostgresProbePayload, error)
 		return vazio, err
 	}
 	if !lido {
-		return vazio, errors.New("sonda do postgres não devolveu JSON")
+		return vazio, errors.New(semJSON)
 	}
 	return payload, nil
 }
@@ -317,6 +372,10 @@ func executarSondaPostgres(ctx context.Context, t Target) {
 		if ctx.Err() == nil {
 			log.Printf("[Postgres] sonda de %s falhou: %v", t.Host, err)
 		}
+		return
+	}
+
+	if ctx.Err() != nil {
 		return
 	}
 
@@ -344,7 +403,30 @@ func executarSondaPostgres(ctx context.Context, t Target) {
 	log.Printf("[Postgres] %s: %d instância(s) inventariada(s)", t.Host, len(payload.Instancias))
 }
 
+func apagarInventarioDeBancos(serverID string) error {
+	if database.DB == nil {
+		return errors.New("banco indisponível para apagar o inventário de bancos")
+	}
+	return database.DB.Where("server_id = ?", serverID).Delete(&database.PostgresInstancia{}).Error
+}
+
+func sondaDeBancosDesligada(rotulo string, t Target) bool {
+	if t.CollectBancos {
+		return false
+	}
+	if err := apagarInventarioDeBancos(t.ID); err != nil {
+		log.Printf("[%s] sonda de bancos desligada em %s, mas o inventário não foi apagado: %v", rotulo, t.Host, err)
+		return true
+	}
+	log.Printf("[%s] sonda de bancos desligada em %s; inventário do servidor apagado", rotulo, t.Host)
+	return true
+}
+
 func SondarPostgresPeriodicamente(ctx context.Context, t Target) {
+	if sondaDeBancosDesligada("Postgres", t) {
+		return
+	}
+
 	for {
 		executarSondaPostgres(ctx, t)
 

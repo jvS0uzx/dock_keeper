@@ -23,7 +23,8 @@ type ServerPatchRequest struct {
 
 	AbsenceAlert *bool `json:"absence_alert"`
 
-	CollectNginx *bool `json:"collect_nginx"`
+	CollectNginx  *bool `json:"collect_nginx"`
+	CollectBancos *bool `json:"collect_bancos"`
 }
 
 type servidorComEnderecos struct {
@@ -172,7 +173,7 @@ func (c Config) patchServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "corpo inválido")
 		return
 	}
-	if req.Name == nil && req.User == nil && req.Port == nil && req.Aliases == nil && req.BehindLB == nil && req.AbsenceAlert == nil && req.CollectNginx == nil {
+	if req.Name == nil && req.User == nil && req.Port == nil && req.Aliases == nil && req.BehindLB == nil && req.AbsenceAlert == nil && req.CollectNginx == nil && req.CollectBancos == nil {
 		writeError(w, http.StatusBadRequest, "nenhum campo para atualizar")
 		return
 	}
@@ -252,10 +253,17 @@ func (c Config) patchServer(w http.ResponseWriter, r *http.Request) {
 		updates["absence_alert"] = *req.AbsenceAlert
 	}
 
-	reiniciarColeta := req.CollectNginx != nil && *req.CollectNginx != server.CollectNginx
-	if reiniciarColeta {
+	mudouNginx := req.CollectNginx != nil && *req.CollectNginx != server.CollectNginx
+	if mudouNginx {
 		updates["collect_nginx"] = *req.CollectNginx
 	}
+
+	mudouBancos := req.CollectBancos != nil && *req.CollectBancos != server.CollectBancos
+	if mudouBancos {
+		updates["collect_bancos"] = *req.CollectBancos
+	}
+
+	reiniciarColeta := mudouNginx || mudouBancos
 
 	if limparBehindLB {
 		updates["behind_lb"] = nil
@@ -338,14 +346,14 @@ func lookupServer(w http.ResponseWriter, sess auth.Session, id string) (database
 
 func (c Config) sshTarget(s database.Server) ssh.Target {
 	return ssh.Target{
-		ID:              s.ID,
-		Name:            s.Name,
-		Host:            s.HostIP,
-		User:            s.User,
-		Port:            s.Port,
-		KeyPath:         c.SSHKeyPath,
-		SiteID:          s.SiteID,
-		CollectNginx:    s.CollectNginx,
-		CollectPostgres: s.CollectPostgres,
+		ID:            s.ID,
+		Name:          s.Name,
+		Host:          s.HostIP,
+		User:          s.User,
+		Port:          s.Port,
+		KeyPath:       c.SSHKeyPath,
+		SiteID:        s.SiteID,
+		CollectNginx:  s.CollectNginx,
+		CollectBancos: s.CollectBancos,
 	}
 }

@@ -32,8 +32,8 @@ type Target struct {
 	KeyPath string
 	SiteID  *uint
 
-	CollectNginx    bool
-	CollectPostgres bool
+	CollectNginx  bool
+	CollectBancos bool
 }
 
 func (t Target) addr() string {

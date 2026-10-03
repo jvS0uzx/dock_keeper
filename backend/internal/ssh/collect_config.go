@@ -64,6 +64,7 @@ func scriptPrelude(t Target) string {
 	b.WriteString("DOCKKEEPER_INTERVAL=" + strconv.Itoa(CollectIntervalSec()) + "\n")
 	b.WriteString("DOCKKEEPER_NGINX_LOG=" + NginxLogPath() + "\n")
 	b.WriteString("DOCKKEEPER_PSQL_CMD=\"" + PsqlCmd(t) + "\"\n")
+	b.WriteString("DOCKKEEPER_MYSQL_CMD=\"" + MysqlCmd(t) + "\"\n")
 	if useSudo(t) {
 		b.WriteString("DOCKKEEPER_TAIL=\"" + sudoPrefix + "/usr/bin/tail\"\n")
 		b.WriteString("DOCKKEEPER_NGINX_CMD=\"" + sudoPrefix + "nginx\"\n")
@@ -91,4 +92,25 @@ func PsqlCmd(t Target) string {
 		return psqlComSudo
 	}
 	return psqlComoRoot
+}
+
+const (
+	mysqlSemSudo = "mysql"
+	mysqlComSudo = sudoPrefix + "mysql"
+)
+
+var safeMysqlCmd = regexp.MustCompile(`^[A-Za-z0-9._/ -]+$`)
+
+func MysqlCmd(t Target) string {
+	raw := strings.TrimSpace(os.Getenv("SSH_MYSQL_CMD"))
+	if raw != "" {
+		if safeMysqlCmd.MatchString(raw) {
+			return raw
+		}
+		log.Printf("[SSH] SSH_MYSQL_CMD=%q recusado: use nome ou caminho sem metacaractere", raw)
+	}
+	if useSudo(t) {
+		return mysqlComSudo
+	}
+	return mysqlSemSudo
 }

@@ -225,7 +225,9 @@ const EsquemaDiagrama = ({
           data-testid="motor-sem-diagrama"
           className="rounded-ctrl border border-line bg-ink-850 p-3 text-xs text-text-mut"
         >
-          {`O motor ${esquema.motor} não declara relacionamento entre tabelas, então não há diagrama para desenhar. Abaixo, as tabelas que a coleta encontrou.`}
+          {esquema.motivo
+            ? esquema.motivo
+            : `O motor ${esquema.motor} não declara relacionamento entre tabelas, então não há diagrama para desenhar. Abaixo, as tabelas que a coleta encontrou.`}
         </p>
         <ListaDeTabelas tabelas={doSchema} />
       </div>

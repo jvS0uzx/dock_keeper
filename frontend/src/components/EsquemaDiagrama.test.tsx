@@ -201,6 +201,26 @@ describe('diagrama de esquema', () => {
     expect(screen.getAllByTestId('tabela-listada')).toHaveLength(5);
   });
 
+  it('usa o motivo do servidor quando o motor ainda não tem diagrama', () => {
+    render(
+      <EsquemaDiagrama
+        esquema={{
+          ...base,
+          motor: 'mysql',
+          suporta_diagrama: false,
+          motivo: 'O diagrama ainda não está disponível para MySQL.',
+          tabelas: [],
+          relacoes: [],
+        }}
+      />,
+    );
+
+    expect(screen.queryByTestId('tela-do-diagrama')).toBeNull();
+    expect(screen.getByTestId('motor-sem-diagrama').textContent).toBe(
+      'O diagrama ainda não está disponível para MySQL.',
+    );
+  });
+
   it('a linha sem medida aparece com travessão, nunca com zero', () => {
     render(<EsquemaDiagrama esquema={{ ...base, relacoes: [] }} />);
 

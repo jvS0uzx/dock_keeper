@@ -31,6 +31,7 @@ export interface EsquemaDaBase {
   motor: string;
   coletado_em: string;
   suporta_diagrama: boolean;
+  motivo?: string;
   schemas: string[] | null;
   tabelas: TabelaDoEsquema[] | null;
   relacoes: RelacaoDoEsquema[] | null;

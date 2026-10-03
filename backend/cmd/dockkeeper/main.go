@@ -115,15 +115,15 @@ func startCollectors(sshKeyPath string) {
 			continue
 		}
 		ssh.Manager.Start(ssh.Target{
-			ID:              s.ID,
-			Name:            s.Name,
-			Host:            s.HostIP,
-			User:            s.User,
-			Port:            s.Port,
-			KeyPath:         sshKeyPath,
-			SiteID:          s.SiteID,
-			CollectNginx:    s.CollectNginx,
-			CollectPostgres: s.CollectPostgres,
+			ID:            s.ID,
+			Name:          s.Name,
+			Host:          s.HostIP,
+			User:          s.User,
+			Port:          s.Port,
+			KeyPath:       sshKeyPath,
+			SiteID:        s.SiteID,
+			CollectNginx:  s.CollectNginx,
+			CollectBancos: s.CollectBancos,
 		})
 		started++
 	}

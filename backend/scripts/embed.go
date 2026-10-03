@@ -16,3 +16,6 @@ var ProbePostgres string
 
 //go:embed probe_schema.sh
 var ProbeSchema string
+
+//go:embed probe_mysql.sh
+var ProbeMySQL string

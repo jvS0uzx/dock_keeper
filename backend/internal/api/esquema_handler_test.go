@@ -475,3 +475,45 @@ func TestEsquemaDaBaseRecusaNomeDeBaseHostil(t *testing.T) {
 		t.Errorf("a sonda rodou %d vez(es) com nome de base recusado", *chamadas)
 	}
 }
+
+func TestEsquemaDeMySQLRespondeSemDiagramaSemConectar(t *testing.T) {
+	for _, caso := range []struct {
+		motor, estado, nome string
+	}{
+		{"mysql", "ativo", "MySQL"},
+		{"mariadb", "ativo", "MariaDB"},
+		{"mysql", "sem_acesso", "MySQL"},
+	} {
+		t.Run(caso.motor+"/"+caso.estado, func(t *testing.T) {
+			cenario := montarCenarioDeEsquema(t, caso.estado)
+			chamadas := coletorQueNaoDeveriaRodar(t)
+			if err := database.DB.Model(&database.PostgresInstancia{}).Where("id = ?", cenario.instancia).
+				Update("motor", caso.motor).Error; err != nil {
+				t.Fatalf("trocar o motor da instância: %v", err)
+			}
+
+			rec := pedirEsquema(t, cenario, cenario.instancia, "base=app")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, esperado 200: %s", rec.Code, rec.Body.String())
+			}
+			if *chamadas != 0 {
+				t.Errorf("o probe_schema.sh rodou %d vez(es) para %s", *chamadas, caso.motor)
+			}
+
+			var view EsquemaView
+			if err := json.NewDecoder(rec.Body).Decode(&view); err != nil {
+				t.Fatalf("resposta não é JSON: %v", err)
+			}
+			if view.SuportaDiagrama || view.Motor != caso.motor {
+				t.Errorf("motor = %q suporta_diagrama = %v, esperado %s sem diagrama", view.Motor, view.SuportaDiagrama, caso.motor)
+			}
+			esperado := "O diagrama ainda não está disponível para " + caso.nome + "."
+			if view.Motivo != esperado {
+				t.Errorf("motivo = %q, esperado %q", view.Motivo, esperado)
+			}
+			if view.Tabelas == nil || len(view.Tabelas) != 0 || view.Relacoes == nil {
+				t.Errorf("tabelas = %v relacoes = %v, esperado listas vazias, não nulas", view.Tabelas, view.Relacoes)
+			}
+		})
+	}
+}

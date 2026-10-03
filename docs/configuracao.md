@@ -96,7 +96,7 @@ nessa ordem, quem está bloqueado continua bloqueado.
 | `SSH_KNOWN_HOSTS` | — | Arquivo `known_hosts`. Obrigatório |
 | `SSH_INSECURE_HOST_KEY` | `false` | Desliga a verificação de host key, com aviso alto no log |
 | `SSH_AUTH_LOG_PATH` | `/var/log/auth.log` | Log de autenticação **no host remoto** |
-| `SSH_NGINX_LOG_PATH` | `/var/log/nginx/access.log` | Access log do Nginx no host remoto |
+| `SSH_NGINX_LOG_PATH` | `/var/log/nginx/access.log` | Access log do Nginx no host remoto. Precisa estar no `log_format` descrito em [`operacao.md`](operacao.md#formato-do-access-log-do-nginx); no `combined` padrão, nenhuma linha é contada |
 | `SSH_COLLECT_INTERVAL` | `2` | Segundos entre amostras do script de coleta |
 | `SSH_KEY_PASSPHRASE` | — | Passphrase da chave de `SSH_KEY_PATH`, quando ela é protegida. Sem ela, chave protegida recusa com "chave protegida por passphrase" |
 | `SSH_USE_AGENT` | `false` | Autentica também pelas chaves do `ssh-agent` em `SSH_AUTH_SOCK`. Ligado, o `SSH_KEY_PATH` passa a ser opcional |
@@ -107,12 +107,30 @@ nessa ordem, quem está bloqueado continua bloqueado.
 | `SSH_KEEPALIVE_MAX_MISSES` | `3` | Keepalives seguidos sem resposta (timeout de 3 s cada) que fazem o painel fechar a conexão e reconectar |
 | `SSH_MAX_SESSIONS_PER_HOST` | `6` | Sessões SSH sob demanda simultâneas por servidor (logs, `auth.log`, radar, ações). A excedente recebe 503 sem abrir conexão. Os streams de fundo (métricas e nginx) não contam |
 | `SSH_PSQL_CMD` | ver abaixo | Como a sonda de banco invoca o `psql` na máquina remota. Vazio, o padrão depende de `SSH_USE_SUDO`: ligado usa `sudo -n -u postgres psql`, desligado usa `psql -U postgres`. Valor com metacaractere é recusado com log, porque é interpolado num comando remoto |
+| `SSH_MYSQL_CMD` | ver abaixo | Como a sonda de bancos invoca o cliente `mysql` no host remoto, para MySQL e MariaDB fora de container. Vazio, o padrão depende de `SSH_USE_SUDO`: ligado, com usuário diferente de root, usa `sudo -n mysql`; desligado usa `mysql`. Mesma regra de metacaractere do `SSH_PSQL_CMD` |
 
 O padrão sem sudo é `psql -U postgres` e não `psql` puro: conectado como `root`,
 o `psql` sem `-U` tentaria autenticar como o usuário `root` do banco, que em
 geral não existe. Onde o `pg_hba.conf` usa `peer`, nem um nem outro funciona — é
 o caso de definir `SSH_PSQL_CMD` explicitamente. A sonda trata a recusa como
 `sem_acesso` com o motivo em português, e não apaga o que já sabia da instância.
+
+O padrão do `mysql` sem `-u` é entrar como `root` pelo `unix_socket`, que é como
+o Debian, o Ubuntu e o MariaDB vêm configurados. Isso só vale pelo socket local:
+a instância na porta 3306 é consultada pelo socket, e uma instância em outra
+porta vai por TCP em `127.0.0.1` (`--protocol=TCP -h 127.0.0.1 -P <porta>`),
+onde o `unix_socket` não autentica — ela fica `sem_acesso` até existir
+credencial, por exemplo um `~/.my.cnf` do usuário SSH com um usuário só de
+leitura. O `sudo -n mysql` não tem como ser restrito por argumento no sudoers
+(a consulta vai no `-e`), por isso o exemplo de sudoers não o concede.
+
+Em container a sonda não usa `SSH_MYSQL_CMD`: roda o cliente (`mysql`, ou
+`mariadb` nas imagens novas que só trazem esse) com `docker exec`, lê a senha de
+`MYSQL_ROOT_PASSWORD` ou `MARIADB_ROOT_PASSWORD` do ambiente do próprio container
+e a entrega ao cliente por `MYSQL_PWD` dentro do exec — ela nunca aparece na
+linha de comando visível no `ps` do host. Sem senha disponível, tenta sem senha;
+se a autenticação falhar, a instância fica `sem_acesso` com o motivo. Toda
+conexão usa `--connect-timeout=5`.
 
 ## Sondas periódicas
 
@@ -124,22 +142,64 @@ ciclo seguinte.
 |---|---|---|
 | `NGINX_PROBE_INTERVAL` | `15m` | Intervalo entre sondagens do Nginx em cada VPS, que classificam `nginx_estado` e reconciliam os upstreams. Formato `time.ParseDuration` |
 | `POSTGRES_PROBE_INTERVAL` | `15m` | Intervalo entre sondagens de PostgreSQL em cada servidor alcançado por SSH: descobre instâncias no host e em container, papel via `pg_is_in_recovery()`, e a lista de bases com tamanho. Formato `time.ParseDuration` |
+| `MYSQL_PROBE_INTERVAL` | `15m` | Intervalo entre sondagens de MySQL e MariaDB em cada servidor com a sonda de bancos ligada: descobre instâncias no host e em container, papel via `SHOW REPLICA STATUS` (ou `SHOW SLAVE STATUS`), e a lista de bases com tamanho, encoding e conexões. Formato `time.ParseDuration` |
 | `MALHA_ELEICAO_INTERVAL` | `5m` | Intervalo entre eleições do balanceador principal por tráfego somado |
 | `MALHA_MARGEM_TROCA_PCT` | `20` | Margem percentual que o candidato precisa ter sobre o atual para a troca ser considerada |
 | `MALHA_CICLOS_TROCA` | `3` | Ciclos seguidos com a margem satisfeita antes de a troca acontecer. É a histerese que evita o papel oscilar a cada pico |
 
-A sonda de PostgreSQL roda em **todo servidor alcançado por SSH**, e é somente
-leitura: descobre porta por `ss` ou `netstat` e container por `docker ps`, e só
+A sonda de PostgreSQL roda em **todo servidor alcançado por SSH** que esteja com
+a sonda de bancos ligada — o padrão —, e é somente leitura: descobre porta por `ss` ou `netstat` e container por `docker ps`, e só
 então consulta `pg_database`, `pg_stat_activity` e `SHOW`. Em host sem PostgreSQL
 a descoberta não encontra nada e nenhuma consulta é feita.
 
-Ela **não** é opt-in de propósito. A coluna `servers.collect_postgres` existe no
-esquema desde a migração 016, mas hoje não controla nada: nenhuma rota da API a
-escreve e nenhuma tela a liga. Um interruptor que ninguém alcança não protege,
-só esconde a funcionalidade — foi o que aconteceu com `collect_nginx`, que
-manteve o parser desligado e a malha vazia até setembro de 2026 (ADR 014). A
-coluna fica reservada para quando existir a tela que a ligue, e neste momento
-ligá-la ou não muda coisa nenhuma.
+Ela é **ligada por padrão** e desligada **por servidor**, pela coluna
+`servers.collect_bancos` (migração 018, que renomeou a antiga `collect_postgres`,
+mudou o padrão para `true` e ligou todos os servidores existentes). A tela
+Servidores tem a alternância "Sonda de bancos" ao lado da coleta do Nginx, e a
+API aceita `PATCH /api/servers?id=<uuid>` com `{"collect_bancos":false}`. Mudar o
+valor reinicia a coleta daquele servidor. Desligada, a sonda não abre sessão
+naquele servidor e o inventário dele (`postgres_instancias` e, em cascata,
+`postgres_bases`) é apagado, para a tela Bancos não mostrar dado parado como se
+fosse atual. Religar refaz o inventário na rodada seguinte.
+
+O mesmo interruptor governa a sonda de MySQL e MariaDB, descrita abaixo.
+
+O padrão é ligado e não opt-in de propósito: um interruptor que nasce desligado
+e que ninguém lembra de ligar só esconde a funcionalidade — foi o que aconteceu
+com `collect_nginx`, que manteve o parser desligado e a malha vazia até setembro
+de 2026 (ADR 014).
+
+### MySQL e MariaDB
+
+A sonda de MySQL e MariaDB (`backend/scripts/probe_mysql.sh`) grava nas mesmas
+tabelas, `postgres_instancias` e `postgres_bases`, com `motor` igual a `mysql`
+ou `mariadb` (migração 019). Ela é só inventário: não há diagrama de esquema
+para esses motores, e `GET /api/bancos/{id}/esquema` responde com
+`suporta_diagrama: false` e o motivo, sem abrir sessão no servidor.
+
+- **Descoberta.** No host, as portas do `ss -tulnp` cujo processo é `mysqld` ou
+  `mariadbd`, ignorando 33060 e 33062 (X Protocol e porta administrativa do
+  MySQL 8). Em container, as imagens `mysql`, `mariadb` e `percona`, com a porta
+  publicada para a 3306 interna, ou a própria 3306 quando nada está publicado.
+- **Motor.** Decidido por `VERSION()` e `@@version_comment` quando a instância
+  responde (o MariaDB do Debian ainda pode rodar como `mysqld`); antes disso,
+  pelo nome do processo ou da imagem.
+- **Papel.** `replica` quando `SHOW REPLICA STATUS` (ou `SHOW SLAVE STATUS`, nas
+  versões antigas) devolve linha, `primario` quando devolve vazio, e
+  `desconhecido` quando nenhum dos dois pôde ser consultado.
+- **Bases.** `information_schema.schemata` sem `mysql`, `information_schema`,
+  `performance_schema` e `sys`; tamanho pela soma de `data_length` e
+  `index_length`, encoding por `default_character_set_name`, conexões pela
+  `processlist` (nulas se ela não puder ser lida). O dono fica vazio, porque o
+  MySQL não tem dono de base.
+- **WAL.** `wal_level`, `max_wal_senders` e `archive_mode` ficam vazios: a tela
+  Bancos não os mostra para esses motores.
+
+As duas sondas dividem as tabelas, então cada uma só poda as instâncias do
+próprio motor: a do PostgreSQL nunca apaga linha `mysql` ou `mariadb`, e a do
+MySQL nunca apaga linha `postgres`. Se uma porta já está registrada por outro
+motor, a sonda não a sobrescreve; a linha antiga só sai quando a sonda dona
+dela deixar de vê-la.
 
 Instância detectada mas sem credencial de consulta é gravada com estado
 `sem_acesso` e o motivo em português — nunca como `inativo`, porque sonda cega

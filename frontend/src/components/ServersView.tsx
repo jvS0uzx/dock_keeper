@@ -131,6 +131,21 @@ const ServersView = () => {
     }
   };
 
+  const alternarSondaDeBancos = async (server: Server, valor: boolean) => {
+    try {
+      await api.setServerCollectBancos(server.id, valor);
+      await fetchServers();
+      dialog.notify(
+        valor
+          ? `${server.name} volta a ter os bancos de dados inventariados.`
+          : `${server.name} deixa de ter os bancos de dados inventariados; o inventário dele foi apagado.`,
+        'success',
+      );
+    } catch (err) {
+      dialog.notify(apiErrorMessage(err, 'Falha ao mudar a sonda de bancos.'), 'error');
+    }
+  };
+
   const handleRename = async (server: Server) => {
     const novo = await dialog.prompt({
       title: `Renomear ${server.name}`,
@@ -255,6 +270,7 @@ const ServersView = () => {
                     <th className="text-right">Load</th>
                     <th className="text-right">Latência</th>
                     <th>Nginx</th>
+                    <th>Bancos</th>
                     <th>Balanceador</th>
                     <th className="text-right">Ação</th>
                   </tr>
@@ -328,6 +344,34 @@ const ServersView = () => {
                                   onClick={() => alternarColetaDoNginx(s, !coletando)}
                                 >
                                   {coletando ? 'Parar de coletar o log' : 'Coletar log do Nginx'}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td data-testid="bancos">
+                        {(() => {
+                          const sondando = s.collect_bancos !== false;
+                          return (
+                            <div className="flex flex-col gap-1">
+                              <span
+                                className={`badge ${sondando ? 'badge-ok' : 'badge-muted'} self-start`}
+                                title={
+                                  sondando
+                                    ? 'A sonda inventaria PostgreSQL, MySQL e MariaDB deste servidor'
+                                    : 'Sonda desligada: nenhum banco deste servidor é inventariado'
+                                }
+                              >
+                                {sondando ? 'Sonda de bancos ligada' : 'Sonda de bancos desligada'}
+                              </span>
+                              {podeRenomear && (
+                                <button
+                                  className="btn btn-ghost btn-sm self-start"
+                                  title="Liga ou desliga a sonda de bancos só neste servidor"
+                                  onClick={() => alternarSondaDeBancos(s, !sondando)}
+                                >
+                                  {sondando ? 'Desligar sonda de bancos' : 'Ligar sonda de bancos'}
                                 </button>
                               )}
                             </div>

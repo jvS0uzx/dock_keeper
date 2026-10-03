@@ -66,6 +66,8 @@ const marcaDoEstado = (estado: string): Marca => MARCA_DE_ESTADO[estado] ?? MARC
 
 const NOME_DO_MOTOR: Record<string, string> = {
   postgres: 'PostgreSQL',
+  mysql: 'MySQL',
+  mariadb: 'MariaDB',
 };
 
 const nomeDoMotor = (motor: string): string => NOME_DO_MOTOR[motor] ?? formatarTexto(motor);
@@ -80,7 +82,7 @@ const MOTORES_COM_DIAGRAMA = new Set(['postgres']);
 const suportaDiagrama = (motor: string): boolean => MOTORES_COM_DIAGRAMA.has(motor);
 
 const motivoSemDiagrama = (motor: string): string =>
-  `${nomeDoMotor(motor)} não declara relacionamentos ao painel; não há diagrama desta base.`;
+  `O diagrama ainda não está disponível para ${nomeDoMotor(motor)}; o inventário mostra só as bases.`;
 
 const enderecoDe = (instancia: PostgresInstanciaRecord): string =>
   instancia.em_container && instancia.container_nome !== ''

@@ -100,6 +100,7 @@ export interface ServerRecord {
   aliases?: string[] | null;
   addresses?: string[] | null;
   absence_alert?: boolean;
+  collect_bancos?: boolean;
 }
 
 export interface DomainRecord {
@@ -560,6 +561,7 @@ export interface EsquemaDaBaseRecord {
   motor: string;
   coletado_em: string;
   suporta_diagrama: boolean;
+  motivo?: string;
   schemas: string[];
   tabelas: EsquemaTabelaRecord[];
   relacoes: EsquemaRelacaoRecord[];
@@ -711,6 +713,10 @@ export const api = {
 
   setServerCollectNginx(id: string, collect_nginx: boolean) {
     return request<ServerRecord>(`/api/servers?id=${encodeURIComponent(id)}`, send('PATCH', { collect_nginx }));
+  },
+
+  setServerCollectBancos(id: string, collect_bancos: boolean) {
+    return request<ServerRecord>(`/api/servers?id=${encodeURIComponent(id)}`, send('PATCH', { collect_bancos }));
   },
 
   renameServer(id: string, name: string) {

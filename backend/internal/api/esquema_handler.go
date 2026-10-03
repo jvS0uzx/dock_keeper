@@ -56,6 +56,7 @@ type EsquemaView struct {
 	Motor           string               `json:"motor"`
 	ColetadoEm      time.Time            `json:"coletado_em"`
 	SuportaDiagrama bool                 `json:"suporta_diagrama"`
+	Motivo          string               `json:"motivo,omitempty"`
 	Schemas         []string             `json:"schemas"`
 	Tabelas         []EsquemaTabelaView  `json:"tabelas"`
 	Relacoes        []EsquemaRelacaoView `json:"relacoes"`
@@ -197,6 +198,19 @@ func motorDaInstancia(inst instanciaParaEsquema) string {
 	return inst.Motor
 }
 
+func nomeDoMotor(motor string) string {
+	switch motor {
+	case "mysql":
+		return "MySQL"
+	case "mariadb":
+		return "MariaDB"
+	case motorPostgres:
+		return "PostgreSQL"
+	default:
+		return motor
+	}
+}
+
 func motivoDaInstanciaParada(inst instanciaParaEsquema) string {
 	texto := "a instância está em " + inst.Estado + " e não foi consultada"
 	if strings.TrimSpace(inst.Motivo) == "" {
@@ -212,6 +226,7 @@ func esquemaSemDiagrama(inst instanciaParaEsquema, base string) EsquemaView {
 		Motor:           motorDaInstancia(inst),
 		ColetadoEm:      time.Now().UTC(),
 		SuportaDiagrama: false,
+		Motivo:          "O diagrama ainda não está disponível para " + nomeDoMotor(motorDaInstancia(inst)) + ".",
 		Schemas:         []string{},
 		Tabelas:         []EsquemaTabelaView{},
 		Relacoes:        []EsquemaRelacaoView{},

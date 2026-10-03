@@ -145,12 +145,12 @@ func TestInventarioDeBancosSobeNaVersao016(t *testing.T) {
 		"updated_at":    {"timestamp with time zone", "NO"},
 	})
 
-	coluna, ok := colunasDe(t, db, "servers")["collect_postgres"]
+	coluna, ok := colunasDe(t, db, "servers")["collect_bancos"]
 	if !ok {
-		t.Fatal("servers.collect_postgres não existe")
+		t.Fatal("servers.collect_bancos não existe")
 	}
 	if coluna.DataType != "boolean" || coluna.IsNullable != "NO" {
-		t.Errorf("servers.collect_postgres é %s/%s, esperado boolean/NO", coluna.DataType, coluna.IsNullable)
+		t.Errorf("servers.collect_bancos é %s/%s, esperado boolean/NO", coluna.DataType, coluna.IsNullable)
 	}
 }
 
