@@ -3,17 +3,29 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"github.com/jvS0uzx/dock_keeper/internal/config"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/jvS0uzx/dock_keeper/internal/config"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"gorm.io/gorm"
 )
 
+const esquemaDeIngestao = 1
+
+func esquemaDeIngestaoAceito(w http.ResponseWriter, schema int) bool {
+	if schema == 0 || schema == esquemaDeIngestao {
+		return true
+	}
+	writeError(w, http.StatusBadRequest, fmt.Sprintf("schema %d não suportado; este painel aceita %d", schema, esquemaDeIngestao))
+	return false
+}
+
 type ingestPayload struct {
+	Schema    int      `json:"schema"`
 	Hostname  string   `json:"hostname"`
 	CPU       *float64 `json:"cpu"`
 	MemUsed   int64    `json:"mem_used"`
@@ -83,6 +95,9 @@ func IngestHandler(w http.ResponseWriter, r *http.Request) {
 	var p ingestPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if !esquemaDeIngestaoAceito(w, p.Schema) {
 		return
 	}
 	p.Hostname = strings.TrimSpace(p.Hostname)
@@ -155,9 +170,22 @@ func siteOfAgent(p ingestPayload) *uint {
 
 func findOrCreateAgentServer(hostname, machineID, hostIP string, siteID *uint) (database.Server, error) {
 	var server database.Server
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", "agente:"+hostname).Error; err != nil {
+			return err
+		}
+		var err error
+		server, err = buscarOuCriarServidorDoAgente(tx, hostname, machineID, hostIP, siteID)
+		return err
+	})
+	return server, err
+}
+
+func buscarOuCriarServidorDoAgente(db *gorm.DB, hostname, machineID, hostIP string, siteID *uint) (database.Server, error) {
+	var server database.Server
 
 	if machineID != "" {
-		q := database.DB.Where("machine_id = ?", machineID)
+		q := db.Where("machine_id = ?", machineID)
 		if siteID != nil {
 			q = q.Where("site_id = ?", *siteID)
 		} else {
@@ -172,7 +200,7 @@ func findOrCreateAgentServer(hostname, machineID, hostIP string, siteID *uint) (
 		}
 	}
 
-	q := database.DB.Where("name = ?", hostname)
+	q := db.Where("name = ?", hostname)
 	if siteID != nil {
 		q = q.Where("site_id = ?", *siteID)
 	} else {
@@ -188,7 +216,7 @@ func findOrCreateAgentServer(hostname, machineID, hostIP string, siteID *uint) (
 	}
 
 	if siteID != nil {
-		err = database.DB.Where("name = ? AND site_id IS NULL", hostname).First(&server).Error
+		err = db.Where("name = ? AND site_id IS NULL", hostname).First(&server).Error
 		if err == nil {
 			return server, nil
 		}
@@ -200,7 +228,7 @@ func findOrCreateAgentServer(hostname, machineID, hostIP string, siteID *uint) (
 	server = database.Server{
 		Name: hostname, HostIP: hostIP, Kind: "agent", SiteID: siteID, MachineID: machineID,
 	}
-	return server, database.DB.Create(&server).Error
+	return server, db.Create(&server).Error
 }
 
 func hostFacts(p ingestPayload, hostIP string, siteID *uint) map[string]any {

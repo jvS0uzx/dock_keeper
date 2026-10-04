@@ -1,5 +1,6 @@
 BIN_DIR := dist
-LDFLAGS := -s -w
+VERSAO ?= dev
+LDFLAGS := -s -w -X main.Version=$(VERSAO)
 
 .PHONY: agent-all agent-linux-amd64 agent-linux-arm64 agent-windows-amd64 agent-darwin-arm64 clean
 

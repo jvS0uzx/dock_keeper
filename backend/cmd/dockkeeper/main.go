@@ -21,6 +21,7 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/observabilidade"
 	"github.com/jvS0uzx/dock_keeper/internal/rules"
 	"github.com/jvS0uzx/dock_keeper/internal/ssh"
+	"github.com/jvS0uzx/dock_keeper/internal/versao"
 )
 
 const (
@@ -42,7 +43,7 @@ func apiAddr() string {
 
 func main() {
 	observabilidade.Configurar()
-	log.Println("Iniciando motor DockKeeper...")
+	log.Printf("Iniciando motor DockKeeper %s...", versao.Versao)
 
 	for _, arquivo := range []string{"../.env", ".env"} {
 		if err := godotenv.Load(arquivo); err != nil && !errors.Is(err, os.ErrNotExist) {

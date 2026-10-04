@@ -11,6 +11,7 @@ import (
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"github.com/jvS0uzx/dock_keeper/internal/logstore"
 	"github.com/jvS0uzx/dock_keeper/internal/observabilidade"
+	"github.com/jvS0uzx/dock_keeper/internal/versao"
 )
 
 const readyPingTimeout = 2 * time.Second
@@ -45,6 +46,9 @@ func corpoReadyz(r *http.Request, detalhado bool, status, db string) map[string]
 	corpo["alertas"] = saude.Estado
 	if detalhado && saude.Detalhe != "" {
 		corpo["alertas_detalhe"] = saude.Detalhe
+	}
+	if detalhado {
+		corpo["versao"] = versao.Versao
 	}
 
 	descartados := logstore.Descartadas()

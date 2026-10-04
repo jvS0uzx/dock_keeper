@@ -18,7 +18,7 @@ services:
     restart: unless-stopped
 
   prepara-dados:
-    image: alpine:3.20
+    image: alpine:3.24
     container_name: dockkeeper_prepara_dados
     command: sh -c "mkdir -p /app/data && chown -R ${DOCKKEEPER_UID:-1000}:${DOCKKEEPER_GID:-1000} /app/data"
     volumes:
@@ -28,6 +28,8 @@ services:
   backend:
     build:
       context: ./backend
+      args:
+        VERSAO: ${DOCKKEEPER_VERSAO:-dev}
     container_name: dockkeeper_backend
     user: "${DOCKKEEPER_UID:-1000}:${DOCKKEEPER_GID:-1000}"
     depends_on:
@@ -58,6 +60,8 @@ services:
   frontend:
     build:
       context: ./frontend
+      args:
+        VERSAO: ${DOCKKEEPER_VERSAO:-dev}
     container_name: dockkeeper_frontend
     depends_on:
       - backend

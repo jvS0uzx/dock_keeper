@@ -25,7 +25,9 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
-const Version = "1.1.0"
+var Version = "dev"
+
+const esquemaDasMetricas = 1
 
 const (
 	defaultIntervalSec = 5
@@ -35,6 +37,7 @@ const (
 )
 
 type metricsPayload struct {
+	Schema    int      `json:"schema"`
 	Hostname  string   `json:"hostname"`
 	CPU       *float64 `json:"cpu,omitempty"`
 	MemUsed   int64    `json:"mem_used"`
@@ -264,6 +267,7 @@ func formatPct(v *float64) string {
 
 func collect(hostname, siteCode string, intervalSec int) metricsPayload {
 	p := metricsPayload{
+		Schema:            esquemaDasMetricas,
 		Hostname:          hostname,
 		SiteCode:          siteCode,
 		AgentVersion:      Version,
