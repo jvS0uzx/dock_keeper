@@ -119,6 +119,23 @@ describe('malha desenhada pela topologia', () => {
     expect(screen.getAllByTestId('aresta-parada')).toHaveLength(1);
   });
 
+  it('desenha parada tracejada e ativa contínua, como a malha do painel', async () => {
+    responder([
+      { upstream_addr: '198.51.100.21:80', server_name: 'app.exemplo.com.br', status: '200', requests_count: 9, server_id: 'lb1' },
+    ]);
+    renderizar();
+
+    await screen.findByLabelText('Malha de roteamento do Nginx');
+    const parada = screen.getByTestId('aresta-parada');
+    const ativa = screen.getByTestId('aresta-com-trafego');
+    expect(parada.getAttribute('stroke-dasharray')).toBe('4 4');
+    expect(parada.getAttribute('stroke')).toBe('var(--color-text-faint)');
+    expect(parada.getAttribute('data-estado')).toBe('parada');
+    expect(ativa.getAttribute('stroke-dasharray')).toBeNull();
+    expect(ativa.getAttribute('data-estado')).toBe('com-trafego');
+    expect(screen.getByTestId('aresta-potencial').getAttribute('data-estado')).toBe('potencial');
+  });
+
   it('mostra a reserva com aresta potencial, distinta e sem animação', async () => {
     responder([
       { upstream_addr: '198.51.100.21:80', server_name: 'app.exemplo.com.br', status: '200', requests_count: 9, server_id: 'lb1' },

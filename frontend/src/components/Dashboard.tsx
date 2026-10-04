@@ -33,6 +33,7 @@ import {
   carregarFiltroDaMalha,
   classificarMalha,
   deriveUpstreams,
+  estadoDaAresta,
   ehBalanceador,
   ehPrincipal,
   ehReserva,
@@ -42,6 +43,8 @@ import {
   salvarFiltroDaMalha,
   splitUpstreams,
   totalRequests,
+  TRACEJADO_DA_ARESTA,
+  TRACO_OCIOSO,
   type ArestaDaMalha,
   type FiltroDaMalha,
   type NoDaMalha,
@@ -105,9 +108,6 @@ const Gauge = ({ value, title, detalhe }: { value: number | null; title: string;
 };
 
 const TRACO_ATIVO = 'color-mix(in srgb, var(--color-accent) 45%, var(--color-ink-900))';
-const TRACO_OCIOSO = 'var(--color-text-faint)';
-const TRACEJADO_OCIOSO = '4 4';
-const TRACEJADO_POTENCIAL = '5 5';
 
 const FILTROS_DA_MALHA: { value: FiltroDaMalha; label: string }[] = [
   { value: 'tudo', label: 'Tudo' },
@@ -378,19 +378,18 @@ const LoadBalancerFlow = ({
               aria-hidden="true"
             >
               {lbs.map((lb, li) => {
-                const entrandoAnima = !lb.potencial && lb.reqs > 0;
+                const estadoDeEntrada = estadoDaAresta(lb.potencial, lb.reqs);
+                const entrandoAnima = estadoDeEntrada === 'com-trafego';
                 return (
                   <g key={`lb-${lb.id}`}>
                     <path
                       id={`path-in-${li}`}
                       data-testid="malha-aresta"
-                      data-estado={lb.potencial ? 'potencial' : entrandoAnima ? 'com-trafego' : 'parada'}
+                      data-estado={estadoDeEntrada}
                       d={curva(xIn, yMeio, xLbIn, yLb(li))}
                       fill="none"
                       stroke={entrandoAnima ? TRACO_ATIVO : TRACO_OCIOSO}
-                      strokeDasharray={
-                        lb.potencial ? TRACEJADO_POTENCIAL : entrandoAnima ? undefined : TRACEJADO_OCIOSO
-                      }
+                      strokeDasharray={TRACEJADO_DA_ARESTA[estadoDeEntrada]}
                       strokeOpacity={lb.potencial ? 0.45 : undefined}
                       strokeWidth="1.25"
                     />
@@ -404,21 +403,20 @@ const LoadBalancerFlow = ({
                     {[...arestas[li].entries()].map(([idDoNo, aresta]) => {
                       const ui = posicaoDoNo.get(idDoNo);
                       if (ui === undefined) return null;
-                      const anima = !aresta.potencial && aresta.reqs > 0;
+                      const estado = estadoDaAresta(aresta.potencial, aresta.reqs);
+                      const anima = estado === 'com-trafego';
                       return (
                         <g key={`edge-${lb.id}-${idDoNo}`}>
                           <path
                             id={`edge-${li}-${ui}`}
                             data-testid="malha-aresta"
-                            data-estado={aresta.potencial ? 'potencial' : anima ? 'com-trafego' : 'parada'}
+                            data-estado={estado}
                             data-de={lb.id}
                             data-para={idDoNo}
                             d={curva(xLbOut, yLb(li), xUp, yNo(ui))}
                             fill="none"
                             stroke={anima ? TRACO_ATIVO : TRACO_OCIOSO}
-                            strokeDasharray={
-                              aresta.potencial ? TRACEJADO_POTENCIAL : anima ? undefined : TRACEJADO_OCIOSO
-                            }
+                            strokeDasharray={TRACEJADO_DA_ARESTA[estado]}
                             strokeOpacity={aresta.potencial ? 0.45 : undefined}
                             strokeWidth="1.25"
                           />
@@ -446,7 +444,7 @@ const LoadBalancerFlow = ({
                     d={curva(xLbOut, yLb(0), xUp, yNo(ui))}
                     fill="none"
                     stroke={TRACO_OCIOSO}
-                    strokeDasharray={TRACEJADO_OCIOSO}
+                    strokeDasharray={TRACEJADO_DA_ARESTA.parada}
                     strokeWidth="1.25"
                   />
                 );

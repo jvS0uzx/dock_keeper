@@ -145,6 +145,17 @@ func semPrazoDeEscrita(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func urlDeEscuta(addr string) string {
+	host, porta, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://" + addr
+	}
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "localhost"
+	}
+	return "http://" + net.JoinHostPort(host, porta)
+}
+
 func StartServer(ctx context.Context, cfg Config) error {
 	srv := &http.Server{
 		Addr:              cfg.Addr,
@@ -158,7 +169,7 @@ func StartServer(ctx context.Context, cfg Config) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("[API] escutando em http://localhost%s", cfg.Addr)
+		log.Printf("[API] escutando em %s", urlDeEscuta(cfg.Addr))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}

@@ -21,6 +21,7 @@ func StreamAuthLogs(ctx context.Context, t Target, w http.ResponseWriter, flushe
 	defer session.Close()
 
 	stopOnCancel(ctx, client, session)
+	defer manterVivo(ctx, t, client)()
 
 	stdout, err := session.StdoutPipe()
 	if err != nil {

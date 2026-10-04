@@ -164,6 +164,9 @@ describe('malha do painel com papel descoberto', () => {
     await screen.findAllByTestId('malha-no');
     await vi.waitFor(() => expect(arestasComEstado('parada').length).toBeGreaterThan(0));
     expect(arestasComEstado('com-trafego')).toHaveLength(0);
+    for (const aresta of arestasComEstado('parada')) {
+      expect(aresta.getAttribute('stroke-dasharray')).toBe('4 4');
+    }
   });
 
   it('aresta que sai da reserva é potencial e nunca anima', async () => {

@@ -87,6 +87,12 @@ func runKeepalive(ctx context.Context, t Target, client *ssh.Client, interval, t
 	}
 }
 
+func manterVivo(ctx context.Context, t Target, client *ssh.Client) context.CancelFunc {
+	vigiaCtx, parar := context.WithCancel(ctx)
+	go runKeepalive(vigiaCtx, t, client, rttInterval(), keepaliveTimeout(), keepaliveMaxMisses(), false)
+	return parar
+}
+
 func latestRTT(id string) *float64 {
 	rttCache.mu.Lock()
 	defer rttCache.mu.Unlock()
