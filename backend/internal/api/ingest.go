@@ -170,9 +170,22 @@ func siteOfAgent(p ingestPayload) *uint {
 
 func findOrCreateAgentServer(hostname, machineID, hostIP string, siteID *uint) (database.Server, error) {
 	var server database.Server
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", "agente:"+hostname).Error; err != nil {
+			return err
+		}
+		var err error
+		server, err = buscarOuCriarServidorDoAgente(tx, hostname, machineID, hostIP, siteID)
+		return err
+	})
+	return server, err
+}
+
+func buscarOuCriarServidorDoAgente(db *gorm.DB, hostname, machineID, hostIP string, siteID *uint) (database.Server, error) {
+	var server database.Server
 
 	if machineID != "" {
-		q := database.DB.Where("machine_id = ?", machineID)
+		q := db.Where("machine_id = ?", machineID)
 		if siteID != nil {
 			q = q.Where("site_id = ?", *siteID)
 		} else {
@@ -187,7 +200,7 @@ func findOrCreateAgentServer(hostname, machineID, hostIP string, siteID *uint) (
 		}
 	}
 
-	q := database.DB.Where("name = ?", hostname)
+	q := db.Where("name = ?", hostname)
 	if siteID != nil {
 		q = q.Where("site_id = ?", *siteID)
 	} else {
@@ -203,7 +216,7 @@ func findOrCreateAgentServer(hostname, machineID, hostIP string, siteID *uint) (
 	}
 
 	if siteID != nil {
-		err = database.DB.Where("name = ? AND site_id IS NULL", hostname).First(&server).Error
+		err = db.Where("name = ? AND site_id IS NULL", hostname).First(&server).Error
 		if err == nil {
 			return server, nil
 		}
@@ -215,7 +228,7 @@ func findOrCreateAgentServer(hostname, machineID, hostIP string, siteID *uint) (
 	server = database.Server{
 		Name: hostname, HostIP: hostIP, Kind: "agent", SiteID: siteID, MachineID: machineID,
 	}
-	return server, database.DB.Create(&server).Error
+	return server, db.Create(&server).Error
 }
 
 func hostFacts(p ingestPayload, hostIP string, siteID *uint) map[string]any {
