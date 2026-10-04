@@ -15,7 +15,10 @@ import {
   balanceadoresDaMalha,
   deriveUpstreams,
   destinosDaMalha,
+  estadoDaAresta,
   rotuloDaJanela,
+  TRACEJADO_DA_ARESTA,
+  TRACO_OCIOSO,
   upstreamsSemCadastro,
   type BalanceadorDaMalha,
   type SeveridadeDoDestino,
@@ -66,10 +69,11 @@ const MalhaDeTrafego = ({
           <g key={balanceador.id || balanceador.nome}>
             {balanceador.arestas.map((aresta, iAresta) => {
               const yDestino = yDoDestino.get(aresta.destino) ?? altura / 2;
-              const cor = aresta.potencial ? 'var(--color-text-faint)' : corDaSeveridade(aresta.severidade);
+              const estado = estadoDaAresta(aresta.potencial, aresta.reqs);
+              const anima = estado === 'com-trafego';
+              const cor = anima ? corDaSeveridade(aresta.severidade) : TRACO_OCIOSO;
               const caminho = `malha-${iLb}-${iAresta}`;
               const d = `M ${lbX + 32} ${yLb} C ${(lbX + destX) / 2} ${yLb}, ${(lbX + destX) / 2} ${yDestino}, ${destX - 12} ${yDestino}`;
-              const anima = !aresta.potencial && aresta.reqs > 0;
               const pontos = anima ? Math.min(1 + Math.floor(aresta.reqs / 3), 6) : 0;
               const duracao = Math.max(0.7, 2.6 - aresta.reqs * 0.04);
 
@@ -77,13 +81,14 @@ const MalhaDeTrafego = ({
                 <g key={`${aresta.bloco}-${aresta.destino}`}>
                   <path
                     id={caminho}
-                    data-testid={aresta.potencial ? 'aresta-potencial' : anima ? 'aresta-com-trafego' : 'aresta-parada'}
+                    data-testid={`aresta-${estado}`}
+                    data-estado={estado}
                     d={d}
                     fill="none"
                     stroke={cor}
-                    strokeOpacity={aresta.potencial ? 0.16 : 0.22}
+                    strokeOpacity={estado === 'potencial' ? 0.45 : undefined}
                     strokeWidth="2"
-                    strokeDasharray={aresta.potencial ? '5 5' : undefined}
+                    strokeDasharray={TRACEJADO_DA_ARESTA[estado]}
                   />
                   {Array.from({ length: pontos }).map((_, k) => (
                     <circle key={k} r="3.5" fill={cor}>

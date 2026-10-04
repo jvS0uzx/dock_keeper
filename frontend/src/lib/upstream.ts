@@ -396,3 +396,16 @@ export const destinosDaMalha = (balanceadores: BalanceadorDaMalha[]): DestinoDaM
   }
   return [...mapa.values()].sort((a, b) => b.reqs - a.reqs || a.destino.localeCompare(b.destino));
 };
+
+export type EstadoDaAresta = 'potencial' | 'com-trafego' | 'parada';
+
+export const estadoDaAresta = (potencial: boolean, reqs: number): EstadoDaAresta =>
+  potencial ? 'potencial' : reqs > 0 ? 'com-trafego' : 'parada';
+
+export const TRACEJADO_DA_ARESTA: Record<EstadoDaAresta, string | undefined> = {
+  potencial: '5 5',
+  'com-trafego': undefined,
+  parada: '4 4',
+};
+
+export const TRACO_OCIOSO = 'var(--color-text-faint)';
