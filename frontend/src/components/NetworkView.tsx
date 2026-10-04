@@ -6,12 +6,14 @@ import {
   HardDrive, Pencil, X, Globe, Lock,
 } from 'lucide-react';
 import { api, type HostInventoryPatch, type NetworkHostView, type NetworkInventory, type Site } from '../lib/api';
-import { relativeTime } from '../lib/format';
+import { formatDateTime, relativeTime } from '../lib/format';
 import { useDialog } from './ui/dialog-context';
 import { useRole } from './ui/session-context';
 import { useSiteScope } from './ui/site-scope-context';
 import Select from './ui/Select';
 import { POLL } from '../lib/polling';
+import { AbaDeInterfaces } from './InterfacesDeRede';
+import { temSNMP } from '../lib/snmp';
 
 
 const SCAN_SETTLE_MS = 8000;
@@ -49,6 +51,97 @@ const detectedTypeLabel = (host: NetworkHostView) =>
   host.device_type_locked ? identify(host).label : typeLabel(host.device_type);
 
 type Filter = 'all' | 'unmonitored' | 'online';
+
+type AbaDoHost = 'resumo' | 'interfaces';
+
+const PainelDoHost = ({ host, local, onClose }: { host: NetworkHostView; local: string; onClose: () => void }) => {
+  const comSNMP = temSNMP(host);
+  const [aba, setAba] = useState<AbaDoHost>('resumo');
+
+  useEffect(() => {
+    const aoTeclar = (evento: KeyboardEvent) => {
+      if (evento.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', aoTeclar);
+    return () => document.removeEventListener('keydown', aoTeclar);
+  }, [onClose]);
+
+  const pares: [string, string][] = [
+    ['Endereço', host.ip],
+    ['Nome', host.hostname || '—'],
+    ['MAC', host.mac || '—'],
+    ['Tipo provável', detectedTypeLabel(host)],
+    ['Local', local || '—'],
+    ['Portas abertas', host.open_ports.length > 0 ? host.open_ports.join(', ') : '—'],
+    ['Primeira vez', formatDateTime(host.first_seen)],
+    ['Última vez', formatDateTime(host.last_seen)],
+  ];
+
+  const abas: { chave: AbaDoHost; rotulo: string }[] = [
+    { chave: 'resumo', rotulo: 'Resumo' },
+    ...(comSNMP ? [{ chave: 'interfaces' as const, rotulo: 'Interfaces' }] : []),
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Detalhe do host ${host.ip}`}
+        data-testid="painel-do-host"
+        onClick={(evento) => evento.stopPropagation()}
+        className="h-full w-full max-w-3xl overflow-y-auto custom-scrollbar border-l border-line bg-ink-900 shadow-pop"
+      >
+        <div className="sticky top-0 z-10 border-b border-line bg-ink-850">
+          <div className="flex items-start justify-between gap-4 p-5 pb-3">
+            <div className="min-w-0">
+              <h2 className="mono-data truncate text-base font-semibold text-text-hi">{host.ip}</h2>
+              <p className="mt-1 truncate text-xs text-text-faint">{host.hostname || '—'}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Fechar detalhe"
+              className="shrink-0 text-text-faint transition-colors hover:text-text-hi"
+            >
+              <X size={18} strokeWidth={1.75} />
+            </button>
+          </div>
+          <div role="tablist" aria-label="Seções do host" className="flex gap-1 px-5 pb-3">
+            {abas.map(({ chave, rotulo }) => (
+              <button
+                key={chave}
+                type="button"
+                role="tab"
+                aria-selected={aba === chave}
+                onClick={() => setAba(chave)}
+                className={`btn text-xs ${
+                  aba === chave ? 'border border-accent/50 bg-accent/10 text-accent' : 'btn-ghost text-text-mut'
+                }`}
+              >
+                {rotulo}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {aba === 'resumo' && (
+          <section className="p-5">
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3">
+              {pares.map(([rotulo, valor]) => (
+                <div key={rotulo} className="flex min-w-0 flex-col gap-0.5">
+                  <dt className="eyebrow">{rotulo}</dt>
+                  <dd className="mono-data truncate text-sm text-text-hi" title={valor}>{valor}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        )}
+        {aba === 'interfaces' && comSNMP && <AbaDeInterfaces hostId={host.id} />}
+      </aside>
+    </div>
+  );
+};
 
 const StatCard = ({ label, value, accent }: { label: string; value: number | string; accent: string }) => (
   <div className="stat-card">
@@ -219,6 +312,7 @@ const NetworkView = () => {
   const [inventory, setInventory] = useState<NetworkInventory | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [editing, setEditing] = useState<NetworkHostView | null>(null);
+  const [detalheId, setDetalheId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const carga = useLoadStatus();
   const { ok: cargaOk, fail: cargaFail } = carga;
@@ -300,6 +394,10 @@ const NetworkView = () => {
   const onlineCount = scoped.filter(h => h.online).length;
   const unmonitored = scoped.length - monitoredCount;
   const siteName = (id: number | null) => sites.find((s) => s.id === id)?.name ?? '';
+  const localDe = (host: NetworkHostView) =>
+    [siteName(host.site_id), host.sector, host.room].filter(Boolean).join(' · ');
+  const detalhe = detalheId === null ? null : (inventory?.hosts.find((h) => h.id === detalheId) ?? null);
+  const fecharDetalhe = useCallback(() => setDetalheId(null), []);
   const columns = canOperate ? 9 : 8;
 
   return (
@@ -392,18 +490,38 @@ const NetworkView = () => {
               )}
               {hosts.map(host => {
                 const { label, Icon } = identify(host);
-                const local = [siteName(host.site_id), host.sector, host.room]
-                  .filter(Boolean)
-                  .join(' · ');
+                const local = localDe(host);
                 return (
-                  <tr key={host.ip}>
+                  <tr key={host.id}>
                     <td>
                       <span className={`badge ${host.online ? 'badge-ok' : 'badge-muted'}`}>
                         {host.online ? 'Online' : 'Offline'}
                       </span>
                     </td>
-                    <td className="mono-data text-text-hi selectable">{host.ip}</td>
-                    <td className="text-text">{host.hostname || <span className="text-text-faint">—</span>}</td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => setDetalheId(host.id)}
+                        aria-label={`Ver detalhe de ${host.ip}`}
+                        className="mono-data text-text-hi hover:text-accent transition-colors"
+                      >
+                        {host.ip}
+                      </button>
+                    </td>
+                    <td className="text-text">
+                      <span className="inline-flex items-center gap-2">
+                        {host.hostname || <span className="text-text-faint">—</span>}
+                        {temSNMP(host) && (
+                          <span
+                            className={`badge ${host.snmp_erro ? 'badge-warn' : 'badge-info'}`}
+                            title={host.snmp_erro ? `SNMP com falha: ${host.snmp_erro}` : 'Telemetria SNMP ativa'}
+                            data-testid="marca-snmp"
+                          >
+                            SNMP
+                          </span>
+                        )}
+                      </span>
+                    </td>
                     <td>
                       <span className="inline-flex items-center gap-2 text-xs text-text-mut">
                         <Icon size={14} strokeWidth={1.75} className="text-text-faint" />
@@ -470,6 +588,10 @@ const NetworkView = () => {
           )}
         </div>
       </div>
+
+      {detalhe !== null && (
+        <PainelDoHost key={detalhe.id} host={detalhe} local={localDe(detalhe)} onClose={fecharDetalhe} />
+      )}
 
       {editing && (
         <HostEditModal

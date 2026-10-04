@@ -11,6 +11,7 @@ export const POLL = {
   unidade: 15000,
   serieDoGrafico: 15000,
   inventarioDeRede: 20000,
+  interfacesDeRede: 20000,
   planta: 20000,
   saudeDoPainel: 30000,
   historicoDoPainel: 30000,

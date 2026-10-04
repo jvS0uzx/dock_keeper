@@ -20,3 +20,4 @@ que costuma sumir quando alguém revisita a escolha meses depois.
 | [012](012-migracoes-versionadas-em-sql.md) | Esquema por migração versionada, não por AutoMigrate |
 | [013](013-entrega-por-canal-e-alvo-estruturado.md) | Entrega por canal, e o alerta deixa de ser um texto de Telegram |
 | [014](014-balanceador-descoberto-e-eleito-por-trafego.md) | O balanceador é descoberto por sonda e eleito pelo tráfego |
+| [015](015-telemetria-snmp-no-coletor.md) | A telemetria SNMP vive no coletor, e o painel só guarda |

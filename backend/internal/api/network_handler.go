@@ -22,6 +22,7 @@ func hostOnline(lastSeen, now time.Time) bool {
 }
 
 type NetworkHostView struct {
+	ID        uint      `json:"id"`
 	IP        string    `json:"ip"`
 	Hostname  string    `json:"hostname"`
 	MAC       string    `json:"mac"`
@@ -43,6 +44,9 @@ type NetworkHostView struct {
 	AssetTag         string `json:"asset_tag"`
 	Owner            string `json:"owner"`
 	Notes            string `json:"notes"`
+
+	SnmpVistoEm *time.Time `json:"snmp_visto_em"`
+	SnmpErro    string     `json:"snmp_erro"`
 }
 
 type NetworkInventory struct {
@@ -82,6 +86,7 @@ func networkHostsHandler(w http.ResponseWriter, r *http.Request) {
 	for _, h := range hosts {
 		kind, isMonitored := monitored.lookup(h.IP, h.Hostname)
 		view := NetworkHostView{
+			ID:        h.ID,
 			IP:        h.IP,
 			Hostname:  h.Hostname,
 			MAC:       h.MAC,
@@ -103,6 +108,9 @@ func networkHostsHandler(w http.ResponseWriter, r *http.Request) {
 			AssetTag:         h.AssetTag,
 			Owner:            h.Owner,
 			Notes:            h.Notes,
+
+			SnmpVistoEm: h.SnmpVistoEm,
+			SnmpErro:    h.SnmpErro,
 		}
 		if view.Online {
 			inventory.Online++

@@ -32,6 +32,20 @@ const defaultAlertRetentionDays = 90
 
 const defaultAddressRetentionDays = 30
 
+const defaultNetworkMetricRetention = 72 * time.Hour
+
+func PodarMetricasDeInterface(maxAge time.Duration) {
+	cutoff := time.Now().UTC().Add(-maxAge)
+	n, err := pruneBatched(dbExec, "metric_network_interfaces", "ts", cutoff, time.Sleep)
+	if err != nil {
+		log.Printf("[Retention] erro ao podar metric_network_interfaces: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("[Retention] metric_network_interfaces: %d linhas antigas removidas", n)
+	}
+}
+
 func pruneAlerts(maxAge time.Duration) {
 	cutoff := time.Now().UTC().Add(-maxAge)
 	sql := `DELETE FROM alerts WHERE id IN (
@@ -88,6 +102,7 @@ func prune(maxAge, auditMaxAge time.Duration) {
 	pruneAuditLog(auditMaxAge)
 	pruneAlerts(config.Dias("ALERT_RETENTION_DAYS", defaultAlertRetentionDays))
 	PodarEnderecos(config.Dias("ADDRESS_RETENTION_DAYS", defaultAddressRetentionDays))
+	PodarMetricasDeInterface(config.Duracao("NETWORK_METRIC_RETENTION", defaultNetworkMetricRetention))
 }
 
 func pruneAuditLog(maxAge time.Duration) {

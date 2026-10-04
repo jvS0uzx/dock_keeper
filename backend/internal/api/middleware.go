@@ -348,20 +348,21 @@ var auditVerbs = map[string]string{
 }
 
 var auditRouteActions = map[string]string{
-	"/api/ssl/import":       "ssl.import",
-	"/api/ssl/recheck":      "ssl.recheck",
-	"/api/ssl/recheck-all":  "ssl.recheck-all",
-	"/api/network/scan":     "network.scan",
-	"/api/auth/login":       "auth.login",
-	"/api/enroll":           "device.enroll-http",
-	"/api/enroll/tokens":    "enroll-token.create",
-	"/api/devices":          "device.revoke",
-	"/api/auth/logout":      "auth.logout",
-	"/api/stream-ticket":    "stream-ticket.create",
-	"/api/alerts/ack":       "alert.ack",
-	"/api/alerts/resolve":   "alert.resolve",
-	"/api/ingest/metrics":   "ingest.metrics",
-	"/api/ingest/inventory": "ingest.inventory",
+	"/api/ssl/import":             "ssl.import",
+	"/api/ssl/recheck":            "ssl.recheck",
+	"/api/ssl/recheck-all":        "ssl.recheck-all",
+	"/api/network/scan":           "network.scan",
+	"/api/auth/login":             "auth.login",
+	"/api/enroll":                 "device.enroll-http",
+	"/api/enroll/tokens":          "enroll-token.create",
+	"/api/devices":                "device.revoke",
+	"/api/auth/logout":            "auth.logout",
+	"/api/stream-ticket":          "stream-ticket.create",
+	"/api/alerts/ack":             "alert.ack",
+	"/api/alerts/resolve":         "alert.resolve",
+	"/api/ingest/metrics":         "ingest.metrics",
+	"/api/ingest/inventory":       "ingest.inventory",
+	"/api/ingest/network-metrics": "ingest.network-metrics",
 }
 
 var auditRouteResources = map[string]string{

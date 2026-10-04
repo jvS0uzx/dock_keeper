@@ -142,8 +142,10 @@ antes de iniciar o SSE.
 
 | Rota | Métodos | Exige | O que faz |
 |---|---|---|---|
-| `/api/network/hosts` | GET | `viewer` | Inventário, recortado por unidade. Aceita `?site_id=` |
+| `/api/network/hosts` | GET | `viewer` | Inventário, recortado por unidade. Aceita `?site_id=`. Cada host traz `id`, `snmp_visto_em` e `snmp_erro`: com um dos dois preenchido, o host tem telemetria SNMP |
 | `/api/network/scan` | POST | **operador global** | Dispara uma varredura fora do ciclo |
+| `/api/network/hosts/{id}/interfaces` | GET | `viewer` | Cabeçalho SNMP do host (`snmp_sys_name`, `snmp_sys_descr`, `snmp_uptime_sec`, `snmp_visto_em`, `snmp_erro`, `snmp_erro_em`) e as interfaces dele, cada uma com a última leitura em `ultima` (`null` quando ainda não há leitura). Host fora do alcance responde **404**. Teto de 4096 interfaces |
+| `/api/network/interfaces/{id}/serie` | GET | `viewer` | Série de tráfego da interface: `{"pontos":[{ts,in_bps,out_bps}]}` em ordem de `ts`. `?janela=` aceita `1h` (padrão), `6h`, `24h` e `72h`; qualquer outra coisa é **400**. Os pontos são médias por balde (1 min até 6 h, 5 min em 24 h, 15 min em 72 h), com teto de 2000; balde sem medição sai com `null`, nunca zero. Interface de host fora do alcance responde **404** |
 | `/api/network/host` | PATCH | `viewer` + papel na unidade | Cadastro do host (sala, dono, patrimônio, unidade, tipo). O papel na unidade do host é conferido **dentro** do handler |
 | `/api/sites` | GET, POST, DELETE | `viewer` / `operator` | Unidades (filiais). O `DELETE` responde **409** enquanto houver credencial de dispositivo ativa ou convite válido na unidade: revogue antes, senão o dispositivo continuaria enviando para uma unidade que não existe. Sem dispositivo preso, a remoção roda numa transação única que anula `servers.site_id` e `alert_rules.target_site_id`, limpa `network_hosts` e `floor_plans` e apaga acessos, credenciais revogadas e convites gastos |
 
@@ -177,8 +179,9 @@ responde `GET` e `/pins` só `PUT`.
 |---|---|---|---|
 | `/api/ingest/metrics` | POST | credencial `agent` | Push de métricas do agente. `cpu` e `load1` são **opcionais**: ausentes gravam `NULL` (a amostra ainda vale por memória, disco e rede) e nunca viram zero, então não disparam regra em falso; `0` explícito continua sendo medição. `net_rx_bps` e `net_tx_bps` (bytes/s) são opcionais; ausente ou negativo vira `NULL` |
 | `/api/ingest/inventory` | POST | credencial `collector` | Push de inventário do coletor remoto. `report_interval_sec` (opcional) declara de quanto em quanto tempo o coletor envia; fica gravado na credencial e é a base do alerta de ausência. Sem ele o painel assume 900 s |
+| `/api/ingest/network-metrics` | POST | credencial `collector` | Telemetria SNMP do coletor remoto, contrato versionado `schema: 1`. Detalhe em [Telemetria SNMP](#telemetria-snmp) |
 
-Estas duas **não passam pelos wrappers comuns**: sem CORS de navegador, e a
+Estas rotas **não passam pelos wrappers comuns**: sem CORS de navegador, e a
 conferência de método acontece dentro do próprio handler, não em `allowMethods`.
 Os únicos middlewares são o teto de corpo e a auditoria.
 
@@ -191,7 +194,8 @@ Cada rota aceita um tipo de credencial. Credencial `agent` em
 `/api/ingest/inventory`, ou `collector` em `/api/ingest/metrics`, recebe **403**
 antes de o corpo ser lido, e o handler grava uma única linha de auditoria de
 recusa, com o tipo apresentado e o exigido: `inventory.kind_mismatch` na rota de
-inventário e `ingest.kind_mismatch` na de métricas. O middleware não grava uma
+inventário, `network_metrics.kind_mismatch` na de telemetria SNMP e
+`ingest.kind_mismatch` na de métricas. O middleware não grava uma
 segunda linha para a mesma recusa. Credencial gravada **sem tipo** não passa em rota
 nenhuma: tipo vazio só vale para o token compartilhado legado.
 
@@ -205,8 +209,8 @@ então atrás do nginx do compose a estação aparece com o endereço dela, não
 O token compartilhado (`X-Agent-Token`, valor de `AGENT_INGEST_TOKEN`) é legado e
 vem **desligado**. Apresentado com `ALLOW_LEGACY_INGEST_TOKEN` desligada, recebe
 401 com a instrução de trocar o convite em `POST /api/enroll`, e o handler grava
-uma única linha de recusa com o IP de origem: `ingest.legacy_token_disabled` ou
-`inventory.legacy_token_disabled`. Ligado, é aceito nas duas rotas como antes, sem
+uma única linha de recusa com o IP de origem: `ingest.legacy_token_disabled`,
+`inventory.legacy_token_disabled` ou `network_metrics.legacy_token_disabled`. Ligado, é aceito nas duas rotas como antes, sem
 tipo e com aviso no log a cada uso. Ver o ADR
 [009](adr/009-token-compartilhado-desligado-por-padrao.md).
 
@@ -215,7 +219,55 @@ tipo e com aviso no log a cada uso. Ver o ADR
 | 401 | Credencial ausente, inválida ou revogada, ou token compartilhado com `ALLOW_LEGACY_INGEST_TOKEN` desligada |
 | 403 | Credencial válida de outro tipo |
 | 409 | Unidade declarada diferente da unidade da credencial (`*.site_mismatch`) |
-| 413 | Inventário com mais de 5000 hosts ou corpo acima do teto |
+| 413 | Inventário com mais de 5000 hosts, telemetria com mais de 256 dispositivos ou de 1024 interfaces num dispositivo, ou corpo acima do teto |
+
+### Telemetria SNMP
+
+`POST /api/ingest/network-metrics` recebe o que o coletor leu por SNMP. O coletor
+calcula o delta dos contadores; o painel só guarda. O contrato é o abaixo, e
+`schema` diferente de `1` é recusado com 400 para que uma mudança de formato nunca
+seja gravada como se fosse a antiga.
+
+```json
+{
+  "schema": 1,
+  "site_code": "filial-a",
+  "collector_version": "x.y.z",
+  "interval_sec": 60,
+  "collected_at": "2026-10-03T15:00:00Z",
+  "devices": [
+    {
+      "ip": "192.0.2.1", "reachable": true, "error": "",
+      "sys_name": "sw-core", "sys_descr": "texto", "uptime_sec": 123456,
+      "interfaces": [
+        {
+          "if_index": 1, "if_name": "ge-0/0/1", "if_descr": "", "if_alias": "uplink",
+          "speed_mbps": 1000, "oper_status": "up", "admin_status": "up",
+          "in_bps": 1234.5, "out_bps": 99.0,
+          "in_errors": 0, "out_errors": 0, "in_discards": 0, "out_discards": 0
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Campo | Regra no painel |
+|---|---|
+| `uptime_sec`, `speed_mbps`, `in_bps`, `out_bps`, `in_errors`, `out_errors`, `in_discards`, `out_discards` | Anuláveis. `null` grava `NULL`, nunca zero |
+| `in_bps`, `out_bps` negativos | **400** no lote inteiro: delta negativo é defeito do coletor |
+| Contadores, `speed_mbps` e `uptime_sec` negativos | Gravados como `NULL` (não medido) |
+| `oper_status`, `admin_status` | `up`, `down`, `testing`, `unknown`, `dormant`, `notPresent`, `lowerLayerDown`, sem diferenciar maiúscula; fora disso vira `unknown` |
+| `ip` | Inválido é **400** no lote inteiro |
+| `sys_name`, `sys_descr` | Truncados em 255 caracteres |
+| `if_name`, `if_descr`, `if_alias` | Truncados em 128 caracteres |
+| `error` | Truncado em 200 caracteres; vazio num dispositivo inalcançável vira `sem resposta SNMP` |
+| `collected_at` | Ausente, ilegível ou mais de 5 min no futuro: vale o relógio do painel |
+| Campo desconhecido | Ignorado |
+
+Resposta 200: `{"devices": n, "interfaces": m}`, em que `m` conta as leituras
+gravadas. As demais respostas seguem a tabela acima; a unidade divergente grava
+`network_metrics.site_mismatch`.
 
 ## Identidade de dispositivo
 

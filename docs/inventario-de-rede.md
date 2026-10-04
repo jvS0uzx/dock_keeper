@@ -148,6 +148,54 @@ Host sem ser visto por `HOST_RETENTION_DAYS` (padrão 30) sai do inventário. Cu
 demais apaga notebook de quem tirou férias; longo demais deixa a tela cheia de
 máquina que não existe mais.
 
+## Telemetria SNMP
+
+O coletor remoto também lê, por SNMP v2c, os equipamentos de rede da filial
+(switch, roteador, firewall) e manda o resultado para
+`POST /api/ingest/network-metrics`. **O coletor lê, o painel guarda**: a sessão
+SNMP, a comunidade e o cálculo do delta dos contadores (`ifHCInOctets` e
+companhia) vivem no coletor, e o painel recebe taxas em bps prontas. O contrato
+está em [`api.md`](api.md#telemetria-snmp) e a decisão no
+[ADR 015](adr/015-telemetria-snmp-no-coletor.md).
+
+**O equipamento é um host do inventário.** O par `(unidade da credencial, ip)`
+resolve a linha de `network_hosts` pela mesma chave da varredura. Se o IP ainda
+não estava no inventário, a linha nasce com `device_type` vazio; se estava, o
+cadastro do operador (tipo travado, unidade travada, sala, dono) não é tocado. O
+host ganha `snmp_sys_name`, `snmp_sys_descr`, `snmp_uptime_sec` e `snmp_visto_em`
+a cada leitura bem-sucedida, que também renova o `last_seen` — equipamento que
+responde SNMP está vivo, mesmo que a varredura de portas não o veja.
+
+**Inalcançável grava só o erro.** Dispositivo com `reachable: false` atualiza
+`snmp_erro` e `snmp_erro_em` e não mexe em interface nem grava leitura. A
+próxima leitura bem-sucedida limpa o erro.
+
+**A interface é identificada pelo nome.** `ifIndex` muda quando o equipamento
+reinicia ou ganha um módulo; o `ifName` não. A reconciliação casa primeiro por
+`if_name` dentro do host e só cai para `if_index` quando o nome vem vazio. Com
+o mesmo nome em outro índice, a linha é a mesma: o `if_index` é atualizado e o
+histórico continua. Interface que some do envio **não é apagada**, só deixa de
+ter o `last_seen` renovado, para o histórico não sumir junto com um cabo solto.
+
+| Limite | Valor |
+|---|---|
+| Dispositivos por envio | 256 (413 acima) |
+| Interfaces por dispositivo | 1024 (413 acima) |
+| Corpo | 4 MB |
+| Leitura bruta | `NETWORK_METRIC_RETENTION`, padrão `72h` |
+| Série na tela | Janelas de 1h, 6h, 24h e 72h |
+
+Na tela, o host com `snmp_visto_em` ou `snmp_erro` ganha a marca **SNMP** na
+lista e a aba **Interfaces** no detalhe: cabeçalho com sysName, sysDescr, tempo
+ligado, "visto há" e a última falha; tabela com velocidade, estado (interface
+desligada pelo administrador aparece como **Desativada**, distinta de down),
+entrada e saída da última leitura, erros e descartes do último ciclo; e o gráfico
+de tráfego da interface escolhida.
+
+Ainda não existe: tendência horária de interface (passado o prazo, a leitura
+some), poda de interface que sumiu há muito tempo, alerta sobre interface e
+SNMP v3.
+
 ## Planta baixa
 
 Os marcadores da planta identificam o host por **IP mais a unidade da planta** —

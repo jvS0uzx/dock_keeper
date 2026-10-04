@@ -87,6 +87,8 @@ func Routes(cfg Config) http.Handler {
 	mux.HandleFunc("/api/network/hosts", api(networkHostsHandler, http.MethodGet))
 	mux.HandleFunc("/api/network/scan", globalWrite(networkScanHandler, http.MethodPost))
 	mux.HandleFunc("/api/network/host", api(networkHostUpdateHandler, http.MethodPatch))
+	mux.HandleFunc("/api/network/hosts/{id}/interfaces", api(interfacesDoHostHandler, http.MethodGet))
+	mux.HandleFunc("/api/network/interfaces/{id}/serie", api(serieDaInterfaceHandler, http.MethodGet))
 
 	mux.HandleFunc("/api/bancos", api(bancosHandler, http.MethodGet))
 	mux.HandleFunc("/api/bancos/", api(cfg.esquemaDaBaseHandler, http.MethodGet))
@@ -109,6 +111,8 @@ func Routes(cfg Config) http.Handler {
 		chain(IngestHandler, cfg.audit(auditOnlyDenied), limitBody(maxFormBodyBytes)))
 	mux.HandleFunc("/api/ingest/inventory",
 		chain(InventoryIngestHandler, cfg.audit(auditOnlyDenied), limitBody(maxIngestBodyBytes)))
+	mux.HandleFunc("/api/ingest/network-metrics",
+		chain(NetworkMetricsIngestHandler, cfg.audit(auditOnlyDenied), limitBody(maxIngestBodyBytes)))
 
 	mux.HandleFunc("/api/enroll/tokens", admin(cfg.enrollTokensHandler, http.MethodPost))
 	mux.HandleFunc("/api/devices", admin(cfg.devicesHandler, http.MethodGet, http.MethodDelete))

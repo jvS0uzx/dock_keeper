@@ -34,6 +34,7 @@ func TestTokenLegadoDesligadoPorPadraoRecebe401ComOCaminhoDoConvite(t *testing.T
 	}{
 		{"/api/ingest/metrics", `{"hostname":"estacao-b4","cpu":1}`, "ingest.legacy_token_disabled", "ingest.metrics"},
 		{"/api/ingest/inventory", `{"site_code":"qa-b4","hosts":[]}`, "inventory.legacy_token_disabled", "ingest.inventory"},
+		{"/api/ingest/network-metrics", `{"schema":1,"site_code":"qa-b4","devices":[]}`, "network_metrics.legacy_token_disabled", "ingest.network-metrics"},
 	}
 	for _, c := range casos {
 		rec := enviarComTokenLegado(t, c.rota, c.corpo, "token-legado-b4")

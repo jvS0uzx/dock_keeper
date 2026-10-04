@@ -157,6 +157,7 @@ export interface LogEntryRecord {
 }
 
 export interface NetworkHostView {
+  id: number;
   ip: string;
   hostname: string;
   mac: string;
@@ -177,6 +178,65 @@ export interface NetworkHostView {
   asset_tag: string;
   owner: string;
   notes: string;
+  snmp_visto_em: string | null;
+  snmp_erro: string;
+}
+
+export type EstadoDeInterface =
+  | 'up'
+  | 'down'
+  | 'testing'
+  | 'unknown'
+  | 'dormant'
+  | 'notPresent'
+  | 'lowerLayerDown';
+
+export interface HostSNMP {
+  id: number;
+  ip: string;
+  hostname: string;
+  snmp_sys_name: string;
+  snmp_sys_descr: string;
+  snmp_uptime_sec: number | null;
+  snmp_visto_em: string | null;
+  snmp_erro: string;
+  snmp_erro_em: string | null;
+}
+
+export interface LeituraDeInterface {
+  ts: string;
+  in_bps: number | null;
+  out_bps: number | null;
+  in_errors: number | null;
+  out_errors: number | null;
+  in_discards: number | null;
+  out_discards: number | null;
+}
+
+export interface InterfaceDeRede {
+  id: number;
+  if_index: number;
+  if_name: string;
+  if_descr: string;
+  if_alias: string;
+  speed_mbps: number | null;
+  oper_status: EstadoDeInterface;
+  admin_status: EstadoDeInterface;
+  last_seen: string;
+  ultima: LeituraDeInterface | null;
+}
+
+export interface InterfacesDoHost {
+  host: HostSNMP;
+  interfaces: InterfaceDeRede[];
+}
+
+export type JanelaDaSerie = '1h' | '6h' | '24h' | '72h';
+
+export interface PontoDeInterface {
+  ts: string;
+  in_bps: number | null;
+  out_bps: number | null;
 }
 
 export type HostInventoryPatch = Partial<
@@ -787,6 +847,21 @@ export const api = {
       last_scan: data.last_scan ?? null,
       scan_active: data.scan_active ?? false,
     };
+  },
+
+  async interfacesDoHost(hostId: number, signal?: AbortSignal): Promise<InterfacesDoHost> {
+    const dados = await request<InterfacesDoHost>(`/api/network/hosts/${hostId}/interfaces`, { signal });
+    return { host: dados.host, interfaces: asArray<InterfaceDeRede>(dados.interfaces) };
+  },
+
+  async serieDaInterface(
+    interfaceId: number,
+    janela: JanelaDaSerie,
+    signal?: AbortSignal,
+  ): Promise<PontoDeInterface[]> {
+    const params = new URLSearchParams({ janela });
+    const dados = await request<{ pontos?: unknown }>(`/api/network/interfaces/${interfaceId}/serie?${params}`, { signal });
+    return asArray<PontoDeInterface>(dados.pontos);
   },
 
   scanNetwork() {

@@ -128,6 +128,40 @@ type NetworkHost struct {
 	AssetTag string `gorm:"size:64;index" json:"asset_tag"`
 	Owner    string `gorm:"size:255" json:"owner"`
 	Notes    string `gorm:"type:text" json:"notes"`
+
+	SnmpSysName   string     `gorm:"size:255;not null;default:''" json:"snmp_sys_name"`
+	SnmpSysDescr  string     `gorm:"size:255;not null;default:''" json:"snmp_sys_descr"`
+	SnmpUptimeSec *int64     `json:"snmp_uptime_sec"`
+	SnmpVistoEm   *time.Time `json:"snmp_visto_em"`
+	SnmpErro      string     `gorm:"type:text;not null;default:''" json:"snmp_erro"`
+	SnmpErroEm    *time.Time `json:"snmp_erro_em"`
+}
+
+type NetworkInterface struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	NetworkHostID uint      `gorm:"not null" json:"network_host_id"`
+	IfIndex       int       `gorm:"not null" json:"if_index"`
+	IfName        string    `gorm:"size:128;not null;default:''" json:"if_name"`
+	IfDescr       string    `gorm:"size:128;not null;default:''" json:"if_descr"`
+	IfAlias       string    `gorm:"size:128;not null;default:''" json:"if_alias"`
+	SpeedMbps     *int64    `json:"speed_mbps"`
+	OperStatus    string    `gorm:"size:16;not null" json:"oper_status"`
+	AdminStatus   string    `gorm:"size:16;not null" json:"admin_status"`
+	FirstSeen     time.Time `gorm:"not null" json:"first_seen"`
+	LastSeen      time.Time `gorm:"not null" json:"last_seen"`
+}
+
+type MetricNetworkInterface struct {
+	ID          uint      `gorm:"primaryKey"`
+	InterfaceID uint      `gorm:"not null"`
+	Ts          time.Time `gorm:"not null"`
+	InBps       *float64
+	OutBps      *float64
+	InErrors    *int64
+	OutErrors   *int64
+	InDiscards  *int64
+	OutDiscards *int64
+	OperStatus  string `gorm:"size:16;not null"`
 }
 
 func networkHostSiteExpr(prefix string) string {

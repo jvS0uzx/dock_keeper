@@ -311,6 +311,7 @@ inexistente é apenas registrada no log; a varredura continua, sem classificar.
 | `TREND_RETENTION_DAYS` | `400` | Tendência agregada por hora |
 | `HOST_RETENTION_DAYS` | `30` | Host do inventário sem ser visto |
 | `AUDIT_RETENTION_DAYS` | `365` | Log de auditoria |
+| `NETWORK_METRIC_RETENTION` | `72h` | Leitura bruta de interface SNMP (`metric_network_interfaces`). Duração Go (`72h`, `168h`), não dias. Ainda não há tendência horária de interface: passado o prazo, a leitura some |
 
 Os prazos não são arbitrários e só fazem sentido juntos: métrica bruta é volumosa
 e vira tendência; tendência é barata e serve à comparação ano a ano; inventário é
@@ -347,8 +348,11 @@ Constantes de código, listadas porque a mensagem de erro `413` não diz o valor
 |---|---|
 | Formulário e JSON em geral | 128 KB |
 | `POST /api/ingest/inventory` | 4 MB |
+| `POST /api/ingest/network-metrics` | 4 MB |
 | Upload de planta baixa | `maxPlanBytes + 1 MB` |
 | Hosts por envio de inventário | 5000 |
+| Dispositivos por envio de telemetria SNMP | 256 |
+| Interfaces por dispositivo num envio SNMP | 1024 |
 
 ---
 

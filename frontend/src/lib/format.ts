@@ -38,3 +38,34 @@ export const formatLatency = (ms: number | null): string => {
   if (ms < 1000) return `${Math.round(ms)} ms`;
   return `${(ms / 1000).toFixed(1).replace('.', ',')} s`;
 };
+
+const UNIDADES_DE_BIT = ['bps', 'kbps', 'Mbps', 'Gbps', 'Tbps'];
+
+const numeroCurto = (valor: number): string =>
+  valor.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+
+export const formatBps = (bps: number | null | undefined): string => {
+  if (bps === null || bps === undefined) return '—';
+  if (bps < 1000) return `${Math.round(bps)} bps`;
+  const escala = Math.min(Math.floor(Math.log10(bps) / 3), UNIDADES_DE_BIT.length - 1);
+  return `${numeroCurto(bps / 1000 ** escala)} ${UNIDADES_DE_BIT[escala]}`;
+};
+
+export const formatVelocidade = (mbps: number | null | undefined): string => {
+  if (mbps === null || mbps === undefined) return '—';
+  if (mbps >= 1000) return `${numeroCurto(mbps / 1000)} Gbps`;
+  return `${numeroCurto(mbps)} Mbps`;
+};
+
+export const formatUptime = (segundos: number | null | undefined): string => {
+  if (segundos === null || segundos === undefined) return '—';
+  const dias = Math.floor(segundos / 86400);
+  const horas = Math.floor((segundos % 86400) / 3600);
+  const minutos = Math.floor((segundos % 3600) / 60);
+  if (dias > 0) return `${dias}d ${horas}h`;
+  if (horas > 0) return `${horas}h ${minutos}min`;
+  return `${minutos}min`;
+};
+
+export const formatContador = (valor: number | null | undefined): string =>
+  valor === null || valor === undefined ? '—' : valor.toLocaleString('pt-BR');
