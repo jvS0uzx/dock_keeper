@@ -798,10 +798,9 @@ export default function Dashboard() {
   const [historyRange, setHistoryRange] = useState<HistoryRange>('1h');
   const [diskHistory, setDiskHistory] = useState<DiskPoint[]>([]);
 
-  const [now, setNow] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
-    setNow(new Date());
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
@@ -845,10 +844,7 @@ export default function Dashboard() {
   }, [cargaOk, cargaFail]);
 
   useEffect(() => {
-    if (selectedServerId === 'all') {
-      setDiskHistory([]);
-      return;
-    }
+    if (selectedServerId === 'all') return;
     const controller = new AbortController();
     const fetchHistory = () => {
       api.history(selectedServerId, 'disk', historyRange, controller.signal)
@@ -870,6 +866,11 @@ export default function Dashboard() {
       controller.abort();
     };
   }, [selectedServerId, historyRange, discoOk, discoFail]);
+
+  const selecionarServidor = (id: string) => {
+    setSelectedServerId(id);
+    if (id === 'all') setDiskHistory([]);
+  };
 
   const activeServer = selectedServerId === 'all' ? null : servers.find((s) => s.id === selectedServerId) ?? null;
   const scopedServers = activeServer ? [activeServer] : servers;
@@ -919,7 +920,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-3">
           <Filter size={16} strokeWidth={1.75} className="text-text-faint" />
           <span className="eyebrow">Filtro IP</span>
-          <Select ariaLabel="Filtrar por IP" options={vpsOptions} value={selectedServerId} onChange={setSelectedServerId} />
+          <Select ariaLabel="Filtrar por IP" options={vpsOptions} value={selectedServerId} onChange={selecionarServidor} />
         </div>
 
         <div className="h-6 w-px bg-line" />
@@ -967,10 +968,10 @@ export default function Dashboard() {
 
             <div className="stat-card flex flex-col items-center justify-center">
               <span className="eyebrow">
-                {now ? now.toLocaleDateString('pt-BR').replace(/\//g, '-') : 'Carregando...'}
+                {now.toLocaleDateString('pt-BR').replace(/\//g, '-')}
               </span>
               <span className="stat-value text-4xl mt-2">
-                {now ? now.toLocaleTimeString('pt-BR') : '00:00:00'}
+                {now.toLocaleTimeString('pt-BR')}
               </span>
             </div>
           </div>

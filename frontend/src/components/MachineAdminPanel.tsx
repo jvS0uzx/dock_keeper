@@ -18,16 +18,18 @@ const MachineAdminPanel = ({ machine }: { machine: ServerLiveStat }) => {
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
 
-  const carregar = useCallback(async () => {
-    try {
-      const cadastro = (await api.servers()).find((s) => s.id === machine.id);
-      setAliases(cadastro?.aliases ?? []);
-      if (cadastro?.absence_alert !== undefined) setAvisarAusencia(cadastro.absence_alert);
-      setErro(null);
-    } catch (err) {
-      setErro(apiErrorMessage(err, 'Falha ao ler o cadastro da máquina.'));
-    }
-  }, [machine.id]);
+  const carregar = useCallback(
+    () =>
+      api.servers()
+        .then((lista) => {
+          const cadastro = lista.find((s) => s.id === machine.id);
+          setAliases(cadastro?.aliases ?? []);
+          if (cadastro?.absence_alert !== undefined) setAvisarAusencia(cadastro.absence_alert);
+          setErro(null);
+        })
+        .catch((err: unknown) => setErro(apiErrorMessage(err, 'Falha ao ler o cadastro da máquina.'))),
+    [machine.id],
+  );
 
   useEffect(() => {
     if (podeAdministrar) carregar();

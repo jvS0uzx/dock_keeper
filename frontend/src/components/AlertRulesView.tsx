@@ -72,26 +72,30 @@ const AlertRulesView = () => {
   };
   const metricaDoForm = form.metric || (opcoesDeMetrica[0]?.nome ?? '');
 
-  const fetchRules = useCallback(async () => {
-    try {
-      setRules(await api.alertRules());
-      cargaOk();
-    } catch (err) {
-      cargaFail(err, 'Falha ao listar as regras.');
-    } finally {
-      setLoading(false);
-    }
-  }, [cargaOk, cargaFail]);
+  const fetchRules = useCallback(
+    () =>
+      api.alertRules()
+        .then((lista) => {
+          setRules(lista);
+          cargaOk();
+        })
+        .catch((err: unknown) => cargaFail(err, 'Falha ao listar as regras.'))
+        .finally(() => setLoading(false)),
+    [cargaOk, cargaFail],
+  );
 
-  const fetchServers = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const data = await api.liveMetrics(signal);
-      setServers(data.servers.map(({ id, name }) => ({ id, name })));
-      alvosOk();
-    } catch (err) {
-      if (!signal?.aborted) alvosFail(err, 'Falha ao listar os servidores para o alvo.');
-    }
-  }, [alvosOk, alvosFail]);
+  const fetchServers = useCallback(
+    (signal?: AbortSignal) =>
+      api.liveMetrics(signal)
+        .then((data) => {
+          setServers(data.servers.map(({ id, name }) => ({ id, name })));
+          alvosOk();
+        })
+        .catch((err: unknown) => {
+          if (!signal?.aborted) alvosFail(err, 'Falha ao listar os servidores para o alvo.');
+        }),
+    [alvosOk, alvosFail],
+  );
 
   useEffect(() => {
     const controller = new AbortController();

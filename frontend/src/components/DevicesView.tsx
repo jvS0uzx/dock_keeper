@@ -42,16 +42,17 @@ const DevicesView = () => {
   const [issued, setIssued] = useState<EnrollToken | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      setDevices(await api.devices());
-      setLoadError(null);
-    } catch (err) {
-      setLoadError(messageOf(err, 'Falha ao listar os dispositivos.'));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    () =>
+      api.devices()
+        .then((lista) => {
+          setDevices(lista);
+          setLoadError(null);
+        })
+        .catch((err: unknown) => setLoadError(messageOf(err, 'Falha ao listar os dispositivos.')))
+        .finally(() => setLoading(false)),
+    [],
+  );
 
   useEffect(() => {
     if (isGlobalAdmin) load();

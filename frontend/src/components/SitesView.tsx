@@ -23,23 +23,19 @@ const SitesView = () => {
   const carga = useLoadStatus();
   const { ok: cargaOk, fail: cargaFail } = carga;
 
-  const load = useCallback(async () => {
-    try {
-      const [siteList, live, inventory] = await Promise.all([
-        api.sites(),
-        api.liveMetrics(),
-        api.networkHosts(),
-      ]);
-      setSites(siteList);
-      setStations(live.servers);
-      setHosts(inventory.hosts);
-      cargaOk();
-    } catch (err) {
-      cargaFail(err, 'Falha ao ler as unidades.');
-    } finally {
-      setLoading(false);
-    }
-  }, [cargaOk, cargaFail]);
+  const load = useCallback(
+    () =>
+      Promise.all([api.sites(), api.liveMetrics(), api.networkHosts()])
+        .then(([siteList, live, inventory]) => {
+          setSites(siteList);
+          setStations(live.servers);
+          setHosts(inventory.hosts);
+          cargaOk();
+        })
+        .catch((err: unknown) => cargaFail(err, 'Falha ao ler as unidades.'))
+        .finally(() => setLoading(false)),
+    [cargaOk, cargaFail],
+  );
 
   useEffect(() => {
     load();

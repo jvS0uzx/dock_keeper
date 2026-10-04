@@ -38,7 +38,7 @@ const Select = ({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [rect, setRect] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
   const generatedId = useId();
   const listboxId = `${id ?? generatedId}-listbox`;
 
@@ -57,6 +57,7 @@ const Select = ({
       top: openUp ? box.top - GAP : box.bottom + GAP,
       left: box.left,
       width: box.width,
+      openUp,
     });
   }, []);
 
@@ -185,9 +186,7 @@ const Select = ({
             left: rect.left,
             width: rect.width,
             maxHeight: MAX_LIST_HEIGHT,
-            transform: rect.top < (buttonRef.current?.getBoundingClientRect().top ?? 0)
-              ? 'translateY(-100%)'
-              : undefined,
+            transform: rect.openUp ? 'translateY(-100%)' : undefined,
           }}
           className="overflow-y-auto custom-scrollbar rounded-ctrl border border-line-hi bg-ink-800 shadow-pop z-[200]"
         >

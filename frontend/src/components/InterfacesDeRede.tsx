@@ -39,7 +39,9 @@ const rotuloDoEixo = (spanMs: number) => (ms: number) => {
 export const GraficoDeInterface = ({ interfaceId, nome }: { interfaceId: number; nome: string }) => {
   const [janela, setJanela] = useState<JanelaDaSerie>('1h');
   const [pontos, setPontos] = useState<PontoDeInterface[]>([]);
-  const [carregando, setCarregando] = useState(true);
+  const [carregadoPara, setCarregadoPara] = useState<string | null>(null);
+  const chave = `${interfaceId}|${janela}`;
+  const carregando = carregadoPara !== chave;
   const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
@@ -53,10 +55,9 @@ export const GraficoDeInterface = ({ interfaceId, nome }: { interfaceId: number;
         setPontos([]);
         setErro(apiErrorMessage(err, 'Falha ao carregar o tráfego da interface.'));
       } finally {
-        if (!controller.signal.aborted) setCarregando(false);
+        if (!controller.signal.aborted) setCarregadoPara(`${interfaceId}|${janela}`);
       }
     };
-    setCarregando(true);
     carregar();
     const intervalo = setInterval(carregar, POLL.serieDoGrafico);
     return () => {

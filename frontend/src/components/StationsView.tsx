@@ -54,17 +54,19 @@ const StationsView = () => {
   const carga = useLoadStatus();
   const { ok: cargaOk, fail: cargaFail } = carga;
 
-  const fetchData = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const data = await api.liveMetrics(signal);
-      setStations(data.servers.filter(s => s.kind === 'agent'));
-      cargaOk();
-    } catch (err) {
-      if (!signal?.aborted) cargaFail(err, 'Falha ao ler as estações.');
-    } finally {
-      setLoading(false);
-    }
-  }, [cargaOk, cargaFail]);
+  const fetchData = useCallback(
+    (signal?: AbortSignal) =>
+      api.liveMetrics(signal)
+        .then((data) => {
+          setStations(data.servers.filter(s => s.kind === 'agent'));
+          cargaOk();
+        })
+        .catch((err: unknown) => {
+          if (!signal?.aborted) cargaFail(err, 'Falha ao ler as estações.');
+        })
+        .finally(() => setLoading(false)),
+    [cargaOk, cargaFail],
+  );
 
   useEffect(() => {
     const controller = new AbortController();

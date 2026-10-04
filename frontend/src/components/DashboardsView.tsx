@@ -82,21 +82,21 @@ const DashboardsView = () => {
   const [saving, setSaving] = useState(false);
   const nextKey = useRef(1);
 
-  const load = useCallback(async (select?: number) => {
-    try {
-      const list = await api.dashboards();
-      setDashboards(list);
-      setLoadError(null);
-      setSelectedId((prev) => {
-        const wanted = select ?? prev;
-        return list.some((d) => d.id === wanted) ? (wanted as number) : (list[0]?.id ?? null);
-      });
-    } catch (err) {
-      setLoadError(apiErrorMessage(err, 'Falha ao carregar os painéis.'));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    (select?: number) =>
+      api.dashboards()
+        .then((list) => {
+          setDashboards(list);
+          setLoadError(null);
+          setSelectedId((prev) => {
+            const wanted = select ?? prev;
+            return list.some((d) => d.id === wanted) ? (wanted as number) : (list[0]?.id ?? null);
+          });
+        })
+        .catch((err: unknown) => setLoadError(apiErrorMessage(err, 'Falha ao carregar os painéis.')))
+        .finally(() => setLoading(false)),
+    [],
+  );
 
   useEffect(() => {
     load();

@@ -26,18 +26,18 @@ const UsersView = () => {
   const carga = useLoadStatus();
   const { ok: cargaOk, fail: cargaFail } = carga;
 
-  const load = useCallback(async () => {
-    try {
-      const [userList, siteList] = await Promise.all([api.users(), api.sites()]);
-      setUsers(userList);
-      setSites(siteList);
-      cargaOk();
-    } catch (err) {
-      cargaFail(err, 'Falha ao listar as contas.');
-    } finally {
-      setLoading(false);
-    }
-  }, [cargaOk, cargaFail]);
+  const load = useCallback(
+    () =>
+      Promise.all([api.users(), api.sites()])
+        .then(([userList, siteList]) => {
+          setUsers(userList);
+          setSites(siteList);
+          cargaOk();
+        })
+        .catch((err: unknown) => cargaFail(err, 'Falha ao listar as contas.'))
+        .finally(() => setLoading(false)),
+    [cargaOk, cargaFail],
+  );
 
   useEffect(() => {
     load();

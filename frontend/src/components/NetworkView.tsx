@@ -322,16 +322,19 @@ const NetworkView = () => {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
 
-  const fetchInventory = useCallback(async (signal?: AbortSignal) => {
-    try {
-      setInventory(await api.networkHosts(signal));
-      cargaOk();
-    } catch (err) {
-      if (!signal?.aborted) cargaFail(err, 'Falha ao ler o inventário de rede.');
-    } finally {
-      setLoading(false);
-    }
-  }, [cargaOk, cargaFail]);
+  const fetchInventory = useCallback(
+    (signal?: AbortSignal) =>
+      api.networkHosts(signal)
+        .then((dados) => {
+          setInventory(dados);
+          cargaOk();
+        })
+        .catch((err: unknown) => {
+          if (!signal?.aborted) cargaFail(err, 'Falha ao ler o inventário de rede.');
+        })
+        .finally(() => setLoading(false)),
+    [cargaOk, cargaFail],
+  );
 
   useEffect(() => {
     const controller = new AbortController();

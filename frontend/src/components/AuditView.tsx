@@ -95,25 +95,26 @@ const AuditView = () => {
 
   const [items, setItems] = useState<AuditEntry[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [erro, setErro] = useState('');
+  const [resposta, setResposta] = useState<{ query: AuditQuery; offset: number; erro: string } | null>(null);
+  const loading = resposta === null || resposta.query !== applied || resposta.offset !== offset;
+  const erro = loading ? '' : resposta.erro;
 
   const carregar = useCallback((query: AuditQuery, nextOffset: number, signal: AbortSignal) => {
-    setLoading(true);
-    setErro('');
     api.audit({ ...query, limit: PAGE_SIZE, offset: nextOffset }, signal)
       .then((page) => {
         setItems(page.items);
         setTotal(page.total);
+        if (!signal.aborted) setResposta({ query, offset: nextOffset, erro: '' });
       })
       .catch((err: unknown) => {
         if (signal.aborted) return;
         setItems([]);
         setTotal(0);
-        setErro(err instanceof Error ? err.message : 'falha ao consultar a auditoria');
-      })
-      .finally(() => {
-        if (!signal.aborted) setLoading(false);
+        setResposta({
+          query,
+          offset: nextOffset,
+          erro: err instanceof Error ? err.message : 'falha ao consultar a auditoria',
+        });
       });
   }, []);
 

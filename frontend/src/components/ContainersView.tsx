@@ -113,9 +113,11 @@ const ContainersView = () => {
     onMessage: (data) => setLogs(prev => [...prev, data].slice(-MAX_LOG_LINES)),
   });
 
-  useEffect(() => {
+  const selecionarContainer = (c: ContainerLiveStat | null) => {
+    if (c === selectedContainer) return;
+    setSelectedContainer(c);
     setLogs([]);
-  }, [selectedContainer]);
+  };
 
   useEffect(() => {
     if (logsEndRef.current) {
@@ -320,7 +322,7 @@ const ContainersView = () => {
                             <td className="text-center">
                               <div className="flex items-center justify-center gap-1.5">
                                 <button
-                                  onClick={() => setSelectedContainer(c)}
+                                  onClick={() => selecionarContainer(c)}
                                   className="btn btn-ghost btn-sm text-accent"
                                   title="Ver logs ao vivo"
                                 >
@@ -381,7 +383,7 @@ const ContainersView = () => {
                   ao vivo
                 </span>
               </div>
-              <button onClick={() => setSelectedContainer(null)} className="btn btn-ghost btn-sm" title="Fechar">
+              <button onClick={() => selecionarContainer(null)} className="btn btn-ghost btn-sm" title="Fechar">
                 <X size={18} strokeWidth={1.75} />
               </button>
             </div>
