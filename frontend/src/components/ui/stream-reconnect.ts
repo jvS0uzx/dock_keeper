@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 
 import { openStream } from '../../lib/api';
 
@@ -26,18 +26,13 @@ interface Opcoes {
 
 export const useStreamComReconexao = ({ path, params, onMessage, onAbrir }: Opcoes): StreamReconectavel => {
   const [estado, setEstado] = useState<StreamReconectavel>({ conectado: false, reconectando: false, erro: null });
-  const mensagem = useRef(onMessage);
-  const abrir = useRef(onAbrir);
-  mensagem.current = onMessage;
-  abrir.current = onAbrir;
+  const mensagem = useEffectEvent((data: string) => onMessage(data));
+  const abrir = useEffectEvent(() => onAbrir?.());
 
   const chave = params === null ? '' : JSON.stringify([path, params]);
 
   useEffect(() => {
-    if (!chave) {
-      setEstado({ conectado: false, reconectando: false, erro: null });
-      return;
-    }
+    if (!chave) return;
 
     const [rota, consulta] = JSON.parse(chave) as [string, Record<string, string>];
     let cancelado = false;
@@ -63,8 +58,8 @@ export const useStreamComReconexao = ({ path, params, onMessage, onAbrir }: Opco
           fonte = es;
           tentativa = 0;
           setEstado({ conectado: true, reconectando: false, erro: null });
-          abrir.current?.();
-          es.onmessage = (evento: MessageEvent) => mensagem.current(evento.data);
+          abrir();
+          es.onmessage = (evento: MessageEvent) => mensagem(evento.data);
           es.onerror = () => {
             es.close();
             if (fonte === es) fonte = null;

@@ -151,22 +151,26 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
   const metric = escolhida || (opcoesDeMetrica[0]?.nome ?? '');
   const [range, setRange] = useState<HistoryRange>('1h');
   const [history, setHistory] = useState<{ time: string; value: number }[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historicoPara, setHistoricoPara] = useState<string | null>(null);
+  const [recarregandoHistorico, setRecarregandoHistorico] = useState(false);
+  const loadingHistory = (Boolean(metric) && historicoPara !== `${serverId}|${metric}|${range}`) || recarregandoHistorico;
 
   const unidade = catalogo.unidade(metric);
   const threshold = LIMIAR_POR_UNIDADE[unidade];
 
-  const fetchLive = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const data = await api.liveMetrics(signal);
-      setMachine(data.servers.find((s) => s.id === serverId) ?? null);
-      liveOk();
-    } catch (err) {
-      if (!signal?.aborted) liveFail(err, 'Falha ao ler a máquina.');
-    } finally {
-      setLoading(false);
-    }
-  }, [serverId, liveOk, liveFail]);
+  const fetchLive = useCallback(
+    (signal?: AbortSignal) =>
+      api.liveMetrics(signal)
+        .then((data) => {
+          setMachine(data.servers.find((s) => s.id === serverId) ?? null);
+          liveOk();
+        })
+        .catch((err: unknown) => {
+          if (!signal?.aborted) liveFail(err, 'Falha ao ler a máquina.');
+        })
+        .finally(() => setLoading(false)),
+    [serverId, liveOk, liveFail],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -213,41 +217,50 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
     return () => controller.abort();
   }, [machine?.host_ip]);
 
-  const fetchHistory = useCallback(async (signal?: AbortSignal) => {
+  const fetchHistory = useCallback((signal?: AbortSignal) => {
     if (!metric) return;
-    setLoadingHistory(true);
-    try {
-      const points = await api.history(serverId, metric, range, signal);
-      setHistory(points.map((p) => ({
-        time: fmtTime(p.ts, range),
-        value: Number(p.value.toFixed(2)),
-      })));
-      setHistoryError(null);
-    } catch (err) {
-      if (!signal?.aborted) {
+    api.history(serverId, metric, range, signal)
+      .then((points) => {
+        setHistory(points.map((p) => ({
+          time: fmtTime(p.ts, range),
+          value: Number(p.value.toFixed(2)),
+        })));
+        setHistoryError(null);
+      })
+      .catch((err: unknown) => {
+        if (signal?.aborted) return;
         setHistory([]);
         setHistoryError(apiErrorMessage(err, 'Falha ao ler o histórico.'));
-      }
-    } finally {
-      setLoadingHistory(false);
-    }
+      })
+      .finally(() => {
+        if (signal?.aborted) return;
+        setHistoricoPara(`${serverId}|${metric}|${range}`);
+        setRecarregandoHistorico(false);
+      });
   }, [serverId, metric, range]);
+
+  const recarregarHistorico = useCallback((signal?: AbortSignal) => {
+    if (!metric) return;
+    setRecarregandoHistorico(true);
+    fetchHistory(signal);
+  }, [metric, fetchHistory]);
 
   useEffect(() => {
     const controller = new AbortController();
     fetchHistory(controller.signal);
-    const interval = setInterval(() => fetchHistory(controller.signal), POLL.historicoDaMaquina);
+    const interval = setInterval(() => recarregarHistorico(controller.signal), POLL.historicoDaMaquina);
     return () => {
       clearInterval(interval);
       controller.abort();
     };
-  }, [fetchHistory]);
+  }, [fetchHistory, recarregarHistorico]);
 
+  const siteDaMaquina = machine?.site_id;
   const siteName = useMemo(() => {
-    if (!machine?.site_id) return 'Sem unidade';
+    if (!siteDaMaquina) return 'Sem unidade';
     if (sitesError) return 'Unidade indisponível';
-    return sites.find((s) => s.id === machine.site_id)?.name ?? 'Sem unidade';
-  }, [machine?.site_id, sites, sitesError]);
+    return sites.find((s) => s.id === siteDaMaquina)?.name ?? 'Sem unidade';
+  }, [siteDaMaquina, sites, sitesError]);
 
   const backButton = (
     <button
@@ -439,7 +452,7 @@ const MachineDetailView = ({ serverId }: MachineDetailViewProps) => {
           </div>
 
           <button
-            onClick={() => fetchHistory()}
+            onClick={() => recarregarHistorico()}
             className="btn btn-ghost ml-auto text-xs"
           >
             <RefreshCw size={14} strokeWidth={1.75} className={loadingHistory ? 'animate-spin' : ''} />

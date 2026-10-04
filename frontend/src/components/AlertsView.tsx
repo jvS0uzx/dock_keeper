@@ -76,31 +76,32 @@ const AlertsView = () => {
   const [alertas, setAlertas] = useState<AlertItem[]>([]);
   const [estado, setEstado] = useState<AlertStatus | 'all'>('open');
   const [severidade, setSeveridade] = useState('all');
-  const [carregando, setCarregando] = useState(true);
+  const [carregadoPara, setCarregadoPara] = useState<string | null>(null);
+  const filtroAtual = `${estado}|${numericSiteId}`;
+  const carregando = carregadoPara !== filtroAtual;
   const { error, lastOk, ok, fail } = useLoadStatus();
 
   const carregar = useCallback(
-    async (signal?: AbortSignal) => {
-      try {
-        const lista = await api.alerts(
-          numericSiteId === null ? { status: estado } : { status: estado, site_id: numericSiteId },
-          signal,
-        );
-        setAlertas(lista);
-        ok();
-      } catch (err) {
-        if (signal?.aborted) return;
-        fail(err, 'Falha ao carregar os alertas.');
-      } finally {
-        setCarregando(false);
-      }
-    },
+    (signal?: AbortSignal) =>
+      api.alerts(
+        numericSiteId === null ? { status: estado } : { status: estado, site_id: numericSiteId },
+        signal,
+      )
+        .then((lista) => {
+          setAlertas(lista);
+          ok();
+        })
+        .catch((err: unknown) => {
+          if (!signal?.aborted) fail(err, 'Falha ao carregar os alertas.');
+        })
+        .finally(() => {
+          if (!signal?.aborted) setCarregadoPara(`${estado}|${numericSiteId}`);
+        }),
     [estado, numericSiteId, ok, fail],
   );
 
   useEffect(() => {
     const controle = new AbortController();
-    setCarregando(true);
     carregar(controle.signal);
     const timer = setInterval(() => carregar(), POLL.alertas);
     return () => {

@@ -39,7 +39,8 @@ const SecurityView = () => {
   const [selectedServer, setSelectedServer] = useState<string>('');
 
   const [ports, setPorts] = useState<PortInfo[]>([]);
-  const [loadingPorts, setLoadingPorts] = useState(false);
+  const [radarDe, setRadarDe] = useState<string | null>(null);
+  const loadingPorts = selectedServer !== '' && radarDe !== selectedServer;
 
   const [authLogs, setAuthLogs] = useState<AuthLog[]>([]);
   const lineId = useRef(0);
@@ -63,18 +64,17 @@ const SecurityView = () => {
     if (activeTab !== 'radar' || !selectedServer) return;
 
     const controller = new AbortController();
-    setLoadingPorts(true);
     api.securityRadar(selectedServer, controller.signal)
       .then(data => {
         setPorts(data);
-        setLoadingPorts(false);
+        setRadarDe(selectedServer);
         radarOk();
       })
       .catch(err => {
         if (controller.signal.aborted) return;
         setPorts([]);
         radarFail(err, 'Falha ao ler as portas deste servidor.');
-        setLoadingPorts(false);
+        setRadarDe(selectedServer);
       });
 
     return () => controller.abort();
@@ -90,9 +90,18 @@ const SecurityView = () => {
     },
   });
 
-  useEffect(() => {
+  const trocarAba = (aba: 'radar' | 'auth') => {
+    if (aba === activeTab) return;
+    setActiveTab(aba);
     setAuthLogs([]);
-  }, [activeTab, selectedServer]);
+    setRadarDe(null);
+  };
+
+  const trocarServidor = (id: string) => {
+    if (id === selectedServer) return;
+    setSelectedServer(id);
+    setAuthLogs([]);
+  };
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden anim-rise">
@@ -110,7 +119,7 @@ const SecurityView = () => {
           <Select
             id="security-server"
             value={selectedServer}
-            onChange={setSelectedServer}
+            onChange={trocarServidor}
             className="min-w-[260px]"
             placeholder="Nenhum servidor"
             options={servers.map(s => ({ value: s.id, label: `${s.name} (${s.host_ip})` }))}
@@ -121,13 +130,13 @@ const SecurityView = () => {
       <div className="panel flex flex-col flex-1 min-h-0 overflow-hidden">
         <div className="flex border-b border-line bg-ink-950/60">
           <button
-            onClick={() => setActiveTab('radar')}
+            onClick={() => trocarAba('radar')}
             className={`flex-1 py-3.5 text-sm font-medium transition-colors border-b-2 flex justify-center items-center gap-2 ${activeTab === 'radar' ? 'border-accent text-accent bg-accent/5' : 'border-transparent text-text-faint hover:text-text'}`}
           >
             <Activity size={16} strokeWidth={1.75} /> Radar de portas
           </button>
           <button
-            onClick={() => setActiveTab('auth')}
+            onClick={() => trocarAba('auth')}
             className={`flex-1 py-3.5 text-sm font-medium transition-colors border-b-2 flex justify-center items-center gap-2 ${activeTab === 'auth' ? 'border-accent text-accent bg-accent/5' : 'border-transparent text-text-faint hover:text-text'}`}
           >
             <Terminal size={16} strokeWidth={1.75} /> Logs de autenticação

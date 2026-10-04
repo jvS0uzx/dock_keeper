@@ -55,17 +55,18 @@ const MetricsHistoryView = () => {
   const series = useMetricSeries(serverId, metric, janela);
   const notes = useAnnotations(serverId, janela);
 
-  const fetchServers = useCallback(async () => {
-    try {
-      const data = await api.liveMetrics();
-      const opts = data.servers.map(({ id, name }) => ({ id, name }));
-      setServers(opts);
-      setServersError(null);
-      setServerId((prev) => prev || (opts[0]?.id ?? ''));
-    } catch (err) {
-      setServersError(apiErrorMessage(err, 'Falha ao listar os servidores.'));
-    }
-  }, []);
+  const fetchServers = useCallback(
+    () =>
+      api.liveMetrics()
+        .then((data) => {
+          const opts = data.servers.map(({ id, name }) => ({ id, name }));
+          setServers(opts);
+          setServersError(null);
+          setServerId((prev) => prev || (opts[0]?.id ?? ''));
+        })
+        .catch((err: unknown) => setServersError(apiErrorMessage(err, 'Falha ao listar os servidores.'))),
+    [],
+  );
 
   useEffect(() => {
     fetchServers();

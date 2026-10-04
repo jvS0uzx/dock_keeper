@@ -263,16 +263,19 @@ const BancosView = () => {
   const carga = useLoadStatus();
   const { ok: cargaOk, fail: cargaFail } = carga;
 
-  const buscar = useCallback(async (signal?: AbortSignal) => {
-    try {
-      setInstancias(await api.bancos(numericSiteId, signal));
-      cargaOk();
-    } catch (err) {
-      if (!signal?.aborted) cargaFail(err, 'Falha ao listar as instâncias de banco.');
-    } finally {
-      setLoading(false);
-    }
-  }, [numericSiteId, cargaOk, cargaFail]);
+  const buscar = useCallback(
+    (signal?: AbortSignal) =>
+      api.bancos(numericSiteId, signal)
+        .then((lista) => {
+          setInstancias(lista);
+          cargaOk();
+        })
+        .catch((err: unknown) => {
+          if (!signal?.aborted) cargaFail(err, 'Falha ao listar as instâncias de banco.');
+        })
+        .finally(() => setLoading(false)),
+    [numericSiteId, cargaOk, cargaFail],
+  );
 
   useEffect(() => {
     const controller = new AbortController();

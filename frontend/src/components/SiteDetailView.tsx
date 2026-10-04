@@ -67,21 +67,20 @@ const SiteDetailView = ({ siteId }: SiteDetailViewProps) => {
   const regras = useLoadStatus();
   const { ok: regrasOk, fail: regrasFail } = regras;
 
-  const load = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const [live, inventory] = await Promise.all([
-        api.liveMetrics(signal),
-        api.networkHosts(signal),
-      ]);
-      setStations(live.servers.filter((s) => s.site_id === siteId));
-      setHosts(inventory.hosts.filter((h) => h.site_id === siteId));
-      cargaOk();
-    } catch (err) {
-      if (!signal?.aborted) cargaFail(err, 'Falha ao ler as máquinas da unidade.');
-    } finally {
-      setLoading(false);
-    }
-  }, [siteId, cargaOk, cargaFail]);
+  const load = useCallback(
+    (signal?: AbortSignal) =>
+      Promise.all([api.liveMetrics(signal), api.networkHosts(signal)])
+        .then(([live, inventory]) => {
+          setStations(live.servers.filter((s) => s.site_id === siteId));
+          setHosts(inventory.hosts.filter((h) => h.site_id === siteId));
+          cargaOk();
+        })
+        .catch((err: unknown) => {
+          if (!signal?.aborted) cargaFail(err, 'Falha ao ler as máquinas da unidade.');
+        })
+        .finally(() => setLoading(false)),
+    [siteId, cargaOk, cargaFail],
+  );
 
   useEffect(() => {
     let active = true;

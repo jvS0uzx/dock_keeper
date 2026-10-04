@@ -69,29 +69,32 @@ const FloorPlanView = () => {
   const imageRef = useRef<HTMLImageElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const loadPlans = useCallback(async () => {
-    try {
-      const all = await api.floorPlans();
-      const list = numericSiteId === null ? [] : all.filter(p => p.site_id === numericSiteId);
-      setPlans(list);
-      setCurrent(prev => (prev && list.some(p => p.id === prev.id) ? prev : list[0] ?? null));
-      cargaOk();
-    } catch (err) {
-      cargaFail(err, 'Falha ao listar as plantas.');
-    } finally {
-      setLoading(false);
-    }
-  }, [numericSiteId, cargaOk, cargaFail]);
+  const loadPlans = useCallback(
+    () =>
+      api.floorPlans()
+        .then((all) => {
+          const list = numericSiteId === null ? [] : all.filter(p => p.site_id === numericSiteId);
+          setPlans(list);
+          setCurrent(prev => (prev && list.some(p => p.id === prev.id) ? prev : list[0] ?? null));
+          cargaOk();
+        })
+        .catch((err: unknown) => cargaFail(err, 'Falha ao listar as plantas.'))
+        .finally(() => setLoading(false)),
+    [numericSiteId, cargaOk, cargaFail],
+  );
 
   useEffect(() => {
     loadPlans();
   }, [loadPlans]);
 
+  const [siteDosHosts, setSiteDosHosts] = useState(numericSiteId);
+  if (siteDosHosts !== numericSiteId) {
+    setSiteDosHosts(numericSiteId);
+    if (numericSiteId === null) setHosts([]);
+  }
+
   useEffect(() => {
-    if (numericSiteId === null) {
-      setHosts([]);
-      return;
-    }
+    if (numericSiteId === null) return;
     const controller = new AbortController();
     api.networkHosts(controller.signal, numericSiteId)
       .then(inv => {
@@ -104,12 +107,15 @@ const FloorPlanView = () => {
     return () => controller.abort();
   }, [numericSiteId, hostsCargaOk, hostsCargaFail]);
 
+  const [planoDaImagem, setPlanoDaImagem] = useState(current);
+  if (planoDaImagem !== current) {
+    setPlanoDaImagem(current);
+    if (current) setImageError(null);
+    else setImageUrl('');
+  }
+
   useEffect(() => {
-    if (!current) {
-      setImageUrl('');
-      return;
-    }
-    setImageError(null);
+    if (!current) return;
     const controller = new AbortController();
     let url = '';
 
@@ -131,15 +137,16 @@ const FloorPlanView = () => {
     };
   }, [current]);
 
-  const refreshPins = useCallback(async (signal?: AbortSignal) => {
+  const refreshPins = useCallback((signal?: AbortSignal) => {
     if (!current) return;
-    try {
-      const plan = await api.floorPlan(current.id, signal);
-      setPins(plan.pins);
-      marcadoresOk();
-    } catch (err) {
-      if (!signal?.aborted) marcadoresFail(err, 'Falha ao ler os marcadores da planta.');
-    }
+    api.floorPlan(current.id, signal)
+      .then((plan) => {
+        setPins(plan.pins);
+        marcadoresOk();
+      })
+      .catch((err: unknown) => {
+        if (!signal?.aborted) marcadoresFail(err, 'Falha ao ler os marcadores da planta.');
+      });
   }, [current, marcadoresOk, marcadoresFail]);
 
   useEffect(() => {

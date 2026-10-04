@@ -150,7 +150,6 @@ function App() {
     setLoginNotice('');
     setSiteId(ALL_SITES);
     setSites([]);
-    destinoRef.current = null;
     navegar(CAMINHO_LOGIN, { substituir: true });
   }, [navegar]);
 
@@ -221,10 +220,11 @@ function App() {
     !hasGlobalAdmin(sessionState.accesses);
   const abaValida = abaDaURL !== null && !semPermissao ? abaDaURL : null;
 
-  useEffect(() => {
-    if (abaValida === null) return;
-    setPanel((atual) => painelDaAba(abaValida, atual));
-  }, [abaValida]);
+  const [abaAplicada, setAbaAplicada] = useState<typeof abaValida>(null);
+  if (abaAplicada !== abaValida) {
+    setAbaAplicada(abaValida);
+    if (abaValida !== null) setPanel((atual) => painelDaAba(abaValida, atual));
+  }
 
   useEffect(() => {
     if (!sessionState) {

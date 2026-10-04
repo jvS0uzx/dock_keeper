@@ -16,40 +16,54 @@ const parseKey = (key: string): HistoryWindow | null => {
 
 export const useMetricSeries = (serverId: string, metric: string, janela: HistoryWindow | null) => {
   const [points, setPoints] = useState<HistoryPoint[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [concluidoPara, setConcluidoPara] = useState<string | null>(null);
+  const [recarregando, setRecarregando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = windowKey(janela);
+  const ativo = Boolean(serverId && metric && key);
+  const alvo = `${serverId}|${metric}|${key}`;
+  const loading = (ativo && concluidoPara !== alvo) || recarregando;
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  const load = useCallback((signal?: AbortSignal) => {
     const current = parseKey(key);
     if (!serverId || !metric || current === null) return;
-    setLoading(true);
-    try {
-      setPoints(await api.history(serverId, metric, current, signal));
-      setError(null);
-    } catch (err) {
-      if (signal?.aborted) return;
-      setPoints([]);
-      setError(apiErrorMessage(err, 'Falha ao carregar o histórico.'));
-    } finally {
-      if (!signal?.aborted) setLoading(false);
-    }
+    api.history(serverId, metric, current, signal)
+      .then((lista) => {
+        setPoints(lista);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (signal?.aborted) return;
+        setPoints([]);
+        setError(apiErrorMessage(err, 'Falha ao carregar o histórico.'));
+      })
+      .finally(() => {
+        if (signal?.aborted) return;
+        setConcluidoPara(`${serverId}|${metric}|${key}`);
+        setRecarregando(false);
+      });
   }, [serverId, metric, key]);
+
+  const recarregar = useCallback((signal?: AbortSignal) => {
+    if (!ativo) return;
+    setRecarregando(true);
+    load(signal);
+  }, [ativo, load]);
 
   useEffect(() => {
     const controller = new AbortController();
     load(controller.signal);
     if (!key.includes('|')) {
-      const interval = setInterval(() => load(controller.signal), POLL.serieDoGrafico);
+      const interval = setInterval(() => recarregar(controller.signal), POLL.serieDoGrafico);
       return () => {
         clearInterval(interval);
         controller.abort();
       };
     }
     return () => controller.abort();
-  }, [load, key]);
+  }, [load, recarregar, key]);
 
-  return { points, loading, error, reload: () => load() };
+  return { points, loading, error, reload: () => recarregar() };
 };
 
 export const useAnnotations = (serverId: string, janela: HistoryWindow | null) => {
@@ -57,17 +71,19 @@ export const useAnnotations = (serverId: string, janela: HistoryWindow | null) =
   const [error, setError] = useState<string | null>(null);
   const key = windowKey(janela);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  const load = useCallback((signal?: AbortSignal) => {
     const current = parseKey(key);
     if (!serverId || current === null) return;
-    try {
-      setAnnotations(await api.annotations({ server_id: serverId, ...windowBounds(current) }, signal));
-      setError(null);
-    } catch (err) {
-      if (signal?.aborted) return;
-      setAnnotations([]);
-      setError(apiErrorMessage(err, 'Falha ao carregar as anotações.'));
-    }
+    api.annotations({ server_id: serverId, ...windowBounds(current) }, signal)
+      .then((lista) => {
+        setAnnotations(lista);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (signal?.aborted) return;
+        setAnnotations([]);
+        setError(apiErrorMessage(err, 'Falha ao carregar as anotações.'));
+      });
   }, [serverId, key]);
 
   useEffect(() => {

@@ -52,25 +52,28 @@ const SslView = () => {
   const [discovered, setDiscovered] = useState<DiscoveredDomain[]>([]);
   const [importing, setImporting] = useState(false);
 
-  const fetchDomains = useCallback(async () => {
-    try {
-      setDomains(await api.domains());
-      cargaOk();
-    } catch (e) {
-      cargaFail(e, 'Falha ao listar os domínios.');
-    } finally {
-      setLoading(false);
-    }
-  }, [cargaOk, cargaFail]);
+  const fetchDomains = useCallback(
+    () =>
+      api.domains()
+        .then((lista) => {
+          setDomains(lista);
+          cargaOk();
+        })
+        .catch((e: unknown) => cargaFail(e, 'Falha ao listar os domínios.'))
+        .finally(() => setLoading(false)),
+    [cargaOk, cargaFail],
+  );
 
-  const loadDiscovered = useCallback(async () => {
-    try {
-      setDiscovered((await api.discoverDomains()).filter(d => !d.monitored));
-      descobertaOk();
-    } catch (e) {
-      descobertaFail(e, 'Falha ao ler os domínios atendidos pelo Nginx.');
-    }
-  }, [descobertaOk, descobertaFail]);
+  const loadDiscovered = useCallback(
+    () =>
+      api.discoverDomains()
+        .then((lista) => {
+          setDiscovered(lista.filter(d => !d.monitored));
+          descobertaOk();
+        })
+        .catch((e: unknown) => descobertaFail(e, 'Falha ao ler os domínios atendidos pelo Nginx.')),
+    [descobertaOk, descobertaFail],
+  );
 
   useEffect(() => {
     const pending = timeouts.current;

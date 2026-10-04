@@ -53,26 +53,30 @@ const ServersView = () => {
   const { ok: statusOk, fail: statusFail } = status;
   const [form, setForm] = useState({ ...emptyForm });
 
-  const fetchServers = useCallback(async () => {
-    try {
-      setServers(await api.servers());
-      cargaOk();
-    } catch (err) {
-      cargaFail(err, 'Falha ao listar os servidores.');
-    } finally {
-      setLoading(false);
-    }
-  }, [cargaOk, cargaFail]);
+  const fetchServers = useCallback(
+    () =>
+      api.servers()
+        .then((lista) => {
+          setServers(lista);
+          cargaOk();
+        })
+        .catch((err: unknown) => cargaFail(err, 'Falha ao listar os servidores.'))
+        .finally(() => setLoading(false)),
+    [cargaOk, cargaFail],
+  );
 
-  const fetchLiveStatus = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const data = await api.liveMetrics(signal);
-      setLiveStats(Object.fromEntries(data.servers.map(s => [s.id, s])));
-      statusOk();
-    } catch (err) {
-      if (!signal?.aborted) statusFail(err, 'Falha ao ler o estado das conexões.');
-    }
-  }, [statusOk, statusFail]);
+  const fetchLiveStatus = useCallback(
+    (signal?: AbortSignal) =>
+      api.liveMetrics(signal)
+        .then((data) => {
+          setLiveStats(Object.fromEntries(data.servers.map(s => [s.id, s])));
+          statusOk();
+        })
+        .catch((err: unknown) => {
+          if (!signal?.aborted) statusFail(err, 'Falha ao ler o estado das conexões.');
+        }),
+    [statusOk, statusFail],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
