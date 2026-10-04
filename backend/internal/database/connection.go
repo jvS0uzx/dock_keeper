@@ -49,7 +49,7 @@ func comStatementTimeout(dsn string) string {
 		if strings.Contains(dsn, "?") {
 			separador = "&"
 		}
-		return dsn + separador + "options=" + url.QueryEscape("-c statement_timeout="+ms)
+		return dsn + separador + "options=" + strings.ReplaceAll(url.QueryEscape("-c statement_timeout="+ms), "+", "%20")
 	}
 	if strings.TrimSpace(dsn) == "" {
 		return dsn

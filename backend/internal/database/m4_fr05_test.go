@@ -21,6 +21,9 @@ func TestDSNGanhaStatementTimeout(t *testing.T) {
 	if !strings.Contains(url, "statement_timeout%3D15000") {
 		t.Errorf("DSN de URL não recebeu o limite: %s", url)
 	}
+	if strings.Contains(url, "+") {
+		t.Errorf("espaço codificado como + não é decodificado pelo pgx 5.11: %s", url)
+	}
 
 	chaveValor := comStatementTimeout("host=localhost user=postgres dbname=dockkeeper")
 	if !strings.Contains(chaveValor, "statement_timeout=15000") {
