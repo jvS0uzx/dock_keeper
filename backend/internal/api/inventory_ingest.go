@@ -30,6 +30,7 @@ type inventoryHost struct {
 }
 
 type inventoryPayload struct {
+	Schema           int             `json:"schema"`
 	SiteCode         string          `json:"site_code"`
 	CollectorVersion string          `json:"collector_version"`
 	Hosts            []inventoryHost `json:"hosts"`
@@ -65,6 +66,10 @@ func decodeInventoryPayload(r io.Reader) (inventoryPayload, error) {
 		}
 
 		switch key {
+		case "schema":
+			if err := dec.Decode(&p.Schema); err != nil {
+				return p, err
+			}
 		case "site_code":
 			if err := dec.Decode(&p.SiteCode); err != nil {
 				return p, err
@@ -147,6 +152,9 @@ func InventoryIngestHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if !esquemaDeIngestaoAceito(w, p.Schema) {
 		return
 	}
 

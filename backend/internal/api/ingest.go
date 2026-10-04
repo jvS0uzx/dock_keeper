@@ -3,17 +3,29 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"github.com/jvS0uzx/dock_keeper/internal/config"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/jvS0uzx/dock_keeper/internal/config"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"gorm.io/gorm"
 )
 
+const esquemaDeIngestao = 1
+
+func esquemaDeIngestaoAceito(w http.ResponseWriter, schema int) bool {
+	if schema == 0 || schema == esquemaDeIngestao {
+		return true
+	}
+	writeError(w, http.StatusBadRequest, fmt.Sprintf("schema %d não suportado; este painel aceita %d", schema, esquemaDeIngestao))
+	return false
+}
+
 type ingestPayload struct {
+	Schema    int      `json:"schema"`
 	Hostname  string   `json:"hostname"`
 	CPU       *float64 `json:"cpu"`
 	MemUsed   int64    `json:"mem_used"`
@@ -83,6 +95,9 @@ func IngestHandler(w http.ResponseWriter, r *http.Request) {
 	var p ingestPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if !esquemaDeIngestaoAceito(w, p.Schema) {
 		return
 	}
 	p.Hostname = strings.TrimSpace(p.Hostname)
