@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -63,7 +64,7 @@ func TestPodaDaAuditoriaRespeitaOPrazoProprio(t *testing.T) {
 		t.Fatalf("criar linhas de teste: %v", err)
 	}
 
-	pruneAuditLog(365 * 24 * time.Hour)
+	pruneAuditLog(context.Background(), 365*24*time.Hour)
 
 	if n := contarAuditoria(t, "retencao-teste.antiga"); n != 0 {
 		t.Errorf("linhas antigas = %d, esperada nenhuma", n)
@@ -84,7 +85,7 @@ func TestRetencaoDeMetricaNaoAlcancaAAuditoria(t *testing.T) {
 		t.Fatalf("criar linha de teste: %v", err)
 	}
 
-	prune(7*24*time.Hour, 365*24*time.Hour)
+	prune(context.Background(), 7*24*time.Hour, 365*24*time.Hour)
 
 	if n := contarAuditoria(t, "retencao-teste.recente"); n != 1 {
 		t.Errorf("linhas = %d, esperada 1: a poda de métrica levou a auditoria junto", n)

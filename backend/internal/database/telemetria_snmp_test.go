@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -41,7 +42,7 @@ func TestPodaDeMetricaDeInterfaceRespeitaARetencao(t *testing.T) {
 		t.Fatalf("criar leituras: %v", err)
 	}
 
-	PodarMetricasDeInterface(defaultNetworkMetricRetention)
+	PodarMetricasDeInterface(context.Background(), defaultNetworkMetricRetention)
 
 	var restantes int64
 	DB.Model(&MetricNetworkInterface{}).Where("interface_id = ?", itf.ID).Count(&restantes)

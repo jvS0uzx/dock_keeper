@@ -72,8 +72,6 @@ func main() {
 
 	trendsReady := database.StartTrendWorker(trendInterval)
 
-	metricRetention := database.RetentionDays("METRIC_RETENTION_DAYS", database.DefaultMetricRetentionDays)
-	database.StartRetentionWorker(metricRetention, retentionSweep, trendsReady)
 	logRetention := database.RetentionDays("LOG_RETENTION_DAYS", database.DefaultLogRetentionDays)
 	logstore.StartRetention(logRetention, retentionSweep)
 
@@ -89,6 +87,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	metricRetention := database.RetentionDays("METRIC_RETENTION_DAYS", database.DefaultMetricRetentionDays)
+	database.StartRetentionWorker(ctx, metricRetention, retentionSweep, trendsReady)
 	alert.StartHealthWatch(ctx)
 	alert.StartDispatcher(ctx)
 	malha.StartWorker(ctx, 0)

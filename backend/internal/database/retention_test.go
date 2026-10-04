@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -79,7 +80,7 @@ func TestPruneRemoveContainerSemMetricaRecente(t *testing.T) {
 	makeMetric(t, ctActive, velho)
 	makeMetric(t, ctActive, agora.Add(-time.Minute))
 
-	prune(testRetention, testAuditRetention)
+	prune(context.Background(), testRetention, testAuditRetention)
 
 	if containerExists(t, ctStale) {
 		t.Error("container sem métrica recente deveria ter sido removido")
@@ -100,7 +101,7 @@ func TestPrunePreservaContainerRecemCriado(t *testing.T) {
 
 	makeContainer(t, ctFresh, "recem-criado", time.Now().UTC())
 
-	prune(testRetention, testAuditRetention)
+	prune(context.Background(), testRetention, testAuditRetention)
 
 	if !containerExists(t, ctFresh) {
 		t.Error("container recém-criado sem métrica foi removido")
@@ -113,7 +114,7 @@ func TestPruneRemoveMetricaOrfa(t *testing.T) {
 	orfa := ctActive
 	makeMetric(t, orfa, time.Now().UTC())
 
-	prune(testRetention, testAuditRetention)
+	prune(context.Background(), testRetention, testAuditRetention)
 
 	var n int64
 	DB.Model(&MetricContainer{}).Where("container_id = ?", orfa).Count(&n)
@@ -128,7 +129,7 @@ func TestRetentionEsperaOSinalDoRollup(t *testing.T) {
 	makeContainer(t, ctStale, "alvo-da-poda", time.Now().UTC().Add(-30*24*time.Hour))
 
 	ready := make(chan struct{})
-	StartRetentionWorker(testRetention, time.Hour, ready)
+	StartRetentionWorker(context.Background(), testRetention, time.Hour, ready)
 
 	time.Sleep(100 * time.Millisecond)
 	if !containerExists(t, ctStale) {

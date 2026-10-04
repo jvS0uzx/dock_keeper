@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -25,7 +26,7 @@ func TestPodaTiraResolvidoVelhoEDeixaAberto(t *testing.T) {
 		t.Fatalf("criar alertas: %v", err)
 	}
 
-	pruneAlerts(30 * 24 * time.Hour)
+	pruneAlerts(context.Background(), 30*24*time.Hour)
 
 	for chave, quer := range map[string]int64{prefixo + "resolvido": 0, prefixo + "aberto": 1, prefixo + "recente": 1} {
 		var n int64
