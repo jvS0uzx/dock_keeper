@@ -384,11 +384,17 @@ func StartNginxStream(ctx context.Context, t Target) error {
 	}()
 
 	health := newLBHealth(t)
+	formato := novoVigiaDeFormatoNginx(t.Host, time.Now())
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
-		if e, ok := parseNginxEntry(scanner.Text()); ok {
+		agora := time.Now()
+		e, ok := parseNginxEntry(scanner.Text())
+		if aviso, emitir := formato.observar(ok, agora); emitir {
+			log.Print(aviso)
+		}
+		if ok {
 			counter.add(e.bucket())
-			health.observe(e.Upstream, e.Code, time.Now())
+			health.observe(e.Upstream, e.Code, agora)
 		}
 	}
 	if err := scanner.Err(); err != nil {
