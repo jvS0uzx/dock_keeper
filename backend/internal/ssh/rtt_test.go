@@ -18,10 +18,11 @@ import (
 )
 
 type servidorKeepalive struct {
-	addr      string
-	hostPub   ssh.PublicKey
-	conexoes  atomic.Int32
-	responder atomic.Bool
+	addr        string
+	hostPub     ssh.PublicKey
+	conexoes    atomic.Int32
+	respondidos atomic.Int32
+	responder   atomic.Bool
 }
 
 func novoServidorKeepalive(t *testing.T) *servidorKeepalive {
@@ -69,6 +70,7 @@ func (s *servidorKeepalive) atender(conn net.Conn, cfg *ssh.ServerConfig) {
 		for req := range reqs {
 			if s.responder.Load() && req.WantReply {
 				req.Reply(false, nil)
+				s.respondidos.Add(1)
 			}
 		}
 	}()
@@ -211,7 +213,14 @@ func TestRTTProbeDesligadoMantemADeteccao(t *testing.T) {
 		runKeepalive(ctx, alvo, client, 20*time.Millisecond, keepaliveTimeout(), 3, false)
 		close(fim)
 	}()
-	time.Sleep(150 * time.Millisecond)
+	prazo := time.Now().Add(5 * time.Second)
+	for srv.respondidos.Load() < 3 {
+		if time.Now().After(prazo) {
+			cancel()
+			t.Fatal("o servidor não respondeu a três keepalives")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if v := latestRTT(alvo.ID); v != nil {
 		t.Errorf("com a gravação desligada o RTT virou %v", *v)
 	}

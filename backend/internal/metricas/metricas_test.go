@@ -7,11 +7,13 @@ import (
 	"testing"
 
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+
+	"github.com/jvS0uzx/dock_keeper/internal/bancoteste"
 )
 
 func TestCheckDoBancoBateComORegistro(t *testing.T) {
 	if os.Getenv("DATABASE_URL") == "" {
-		t.Skip("DATABASE_URL não definido; pulando a conferência do CHECK")
+		bancoteste.Pular(t, "DATABASE_URL não definido")
 	}
 	if database.DB == nil {
 		if err := database.Connect(); err != nil {
@@ -61,7 +63,7 @@ func TestRegistroNaoTemNomeRepetidoNemEntradaManca(t *testing.T) {
 
 func TestColunasDoRegistroExistemNoBanco(t *testing.T) {
 	if os.Getenv("DATABASE_URL") == "" {
-		t.Skip("DATABASE_URL não definido")
+		bancoteste.Pular(t, "DATABASE_URL não definido")
 	}
 	if database.DB == nil {
 		if err := database.Connect(); err != nil {

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jvS0uzx/dock_keeper/internal/bancoteste"
 )
 
 func TestRollupSQLIncrementalLimitaAJanela(t *testing.T) {
@@ -71,11 +73,11 @@ func setupTrendDB(t *testing.T) {
 	t.Helper()
 
 	if os.Getenv("DATABASE_URL") == "" {
-		t.Skip("DATABASE_URL não definido; pulando teste de agregação")
+		bancoteste.Pular(t, "DATABASE_URL não definido")
 	}
 	if DB == nil {
 		if err := Connect(); err != nil {
-			t.Skipf("banco indisponível: %v", err)
+			bancoteste.Pular(t, "banco indisponível: %v", err)
 		}
 	}
 	limpaTrendDeTeste(t)

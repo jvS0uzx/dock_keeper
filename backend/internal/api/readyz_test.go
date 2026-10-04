@@ -12,6 +12,8 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+
+	"github.com/jvS0uzx/dock_keeper/internal/bancoteste"
 )
 
 func pedirReadyz(t *testing.T) (int, map[string]any) {
@@ -43,11 +45,11 @@ func TestReadyzSemBancoResponde503(t *testing.T) {
 
 func TestReadyzComBancoRespondendo200(t *testing.T) {
 	if os.Getenv("DATABASE_URL") == "" {
-		t.Skip("DATABASE_URL não definido; pulando /readyz com banco")
+		bancoteste.Pular(t, "DATABASE_URL não definido")
 	}
 	if database.DB == nil {
 		if err := database.Connect(); err != nil {
-			t.Skipf("banco indisponível: %v", err)
+			bancoteste.Pular(t, "banco indisponível: %v", err)
 		}
 	}
 
@@ -60,11 +62,11 @@ func TestReadyzComBancoRespondendo200(t *testing.T) {
 func TestReadyzComBancoForaDoArResponde503(t *testing.T) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		t.Skip("DATABASE_URL não definido; pulando /readyz com banco fechado")
+		bancoteste.Pular(t, "DATABASE_URL não definido")
 	}
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
-		t.Skipf("banco indisponível: %v", err)
+		bancoteste.Pular(t, "banco indisponível: %v", err)
 	}
 	sqlDB, err := db.DB()
 	if err != nil {
@@ -112,11 +114,11 @@ func pedirComOrigem(t *testing.T, caminho, origem string) *httptest.ResponseReco
 
 func TestApiReadyzRespondeIgualAoReadyz(t *testing.T) {
 	if os.Getenv("DATABASE_URL") == "" {
-		t.Skip("DATABASE_URL não definido; pulando /api/readyz com banco")
+		bancoteste.Pular(t, "DATABASE_URL não definido")
 	}
 	if database.DB == nil {
 		if err := database.Connect(); err != nil {
-			t.Skipf("banco indisponível: %v", err)
+			bancoteste.Pular(t, "banco indisponível: %v", err)
 		}
 	}
 

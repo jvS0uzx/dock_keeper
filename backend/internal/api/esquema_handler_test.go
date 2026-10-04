@@ -13,6 +13,8 @@ import (
 
 	"github.com/jvS0uzx/dock_keeper/internal/database"
 	"github.com/jvS0uzx/dock_keeper/internal/ssh"
+
+	"github.com/jvS0uzx/dock_keeper/internal/bancoteste"
 )
 
 const (
@@ -264,11 +266,11 @@ func montarCenarioDeEsquema(t *testing.T, estado string) cenarioDeEsquema {
 	t.Helper()
 
 	if os.Getenv("DATABASE_URL") == "" {
-		t.Skip("DATABASE_URL não definido; pulando teste de esquema com banco")
+		bancoteste.Pular(t, "DATABASE_URL não definido")
 	}
 	if database.DB == nil {
 		if err := database.Connect(); err != nil {
-			t.Skipf("banco indisponível: %v", err)
+			bancoteste.Pular(t, "banco indisponível: %v", err)
 		}
 	}
 

@@ -10,6 +10,8 @@ import (
 
 	"github.com/jvS0uzx/dock_keeper/internal/auth"
 	"github.com/jvS0uzx/dock_keeper/internal/database"
+
+	"github.com/jvS0uzx/dock_keeper/internal/bancoteste"
 )
 
 const (
@@ -65,11 +67,11 @@ func setupInventarioDB(t *testing.T) (uint, uint) {
 	t.Helper()
 
 	if os.Getenv("DATABASE_URL") == "" {
-		t.Skip("DATABASE_URL não definido; pulando teste de inventário")
+		bancoteste.Pular(t, "DATABASE_URL não definido")
 	}
 	if database.DB == nil {
 		if err := database.Connect(); err != nil {
-			t.Skipf("banco indisponível: %v", err)
+			bancoteste.Pular(t, "banco indisponível: %v", err)
 		}
 	}
 	limparInventario(t)
