@@ -9,9 +9,14 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w" -o /out/dockkeeper ./cmd/dockkeeper
+ARG VERSAO=dev
 
-FROM alpine:3.20
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w -X github.com/jvS0uzx/dock_keeper/internal/versao.Versao=${VERSAO}" -o /out/dockkeeper ./cmd/dockkeeper
+
+FROM alpine:3.24
+
+ARG VERSAO=dev
+LABEL org.opencontainers.image.version="${VERSAO}"
 
 RUN apk add --no-cache ca-certificates tzdata \
     && adduser -D -u 10001 dockkeeper

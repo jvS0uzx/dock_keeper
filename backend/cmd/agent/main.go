@@ -25,7 +25,7 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
-const Version = "1.1.0"
+var Version = "dev"
 
 const (
 	defaultIntervalSec = 5
