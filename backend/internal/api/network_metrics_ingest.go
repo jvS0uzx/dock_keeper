@@ -111,7 +111,7 @@ func NetworkMetricsIngestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p.Schema != esquemaDaTelemetriaDeRede {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("schema %d não suportado: este painel aceita o schema %d", p.Schema, esquemaDaTelemetriaDeRede))
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("schema %d não suportado; este painel aceita %d", p.Schema, esquemaDaTelemetriaDeRede))
 		return
 	}
 	rejeitados, err := validarEnvioDeRede(&p)
