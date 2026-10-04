@@ -356,6 +356,7 @@ func StartNginxStream(ctx context.Context, t Target) error {
 	defer session.Close()
 
 	stopOnCancel(ctx, client, session)
+	defer manterVivo(ctx, t, client)()
 
 	stdout, err := session.StdoutPipe()
 	if err != nil {
@@ -431,6 +432,7 @@ func StreamDockerLogs(ctx context.Context, t Target, containerName string, w htt
 	defer session.Close()
 
 	stopOnCancel(ctx, client, session)
+	defer manterVivo(ctx, t, client)()
 
 	stdout, err := session.StdoutPipe()
 	if err != nil {
