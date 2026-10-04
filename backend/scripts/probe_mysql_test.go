@@ -46,6 +46,8 @@ type cenarioMySQL struct {
 	dockerFalha bool
 	mysql       string
 	semCliente  bool
+	soMariaDB   bool
+	dockerExec  string
 	mysqlCmd    string
 	uid         string
 	env         []string
@@ -123,7 +125,10 @@ func rodarSondaMySQL(t *testing.T, c cenarioMySQL) (sondaMySQL, string) {
 		"for a in \"$@\"; do\n"+
 		"  if [ \"$anterior\" = \"-e\" ]; then sql=\"$a\"; fi\n  anterior=\"$a\"\ndone\n"+logica)
 	myfake := filepath.Join(dir, "myfake")
-	if !c.semCliente {
+	switch {
+	case c.soMariaDB:
+		escrever("mariadb", "#!/bin/sh\nexec "+myfake+" \"$@\"\n")
+	case !c.semCliente:
 		escrever("mysql", "#!/bin/sh\nexec "+myfake+" \"$@\"\n")
 	}
 
@@ -145,9 +150,13 @@ func rodarSondaMySQL(t *testing.T, c cenarioMySQL) (sondaMySQL, string) {
 	if c.dockerFalha {
 		respostaDoPS = ">&2 echo 'permission denied while trying to connect to the Docker daemon socket'\nexit 1\n"
 	}
+	respostaDoExec := "shift\nshift\nexec \"$@\"\n"
+	if c.dockerExec != "" {
+		respostaDoExec = c.dockerExec
+	}
 	escrever("docker", "#!/bin/sh\nprintf 'DOCKER %s\\n' \"$*\" >> \""+registro+"\"\n"+
 		"if [ \"$1\" = \"ps\" ]; then\n"+respostaDoPS+"fi\n"+
-		"if [ \"$1\" = \"exec\" ]; then\nshift\nshift\nexec \"$@\"\nfi\nexit 0\n")
+		"if [ \"$1\" = \"exec\" ]; then\n"+respostaDoExec+"fi\nexit 0\n")
 
 	ssCmd := c.ssCmd
 	if ssCmd == "sudo" {
@@ -438,5 +447,78 @@ func TestSondaMySQLExcluiSchemasDeSistema(t *testing.T) {
 		if strings.Count(ProbeMySQL, schema) < 2 {
 			t.Errorf("o SQL das bases não exclui %s nas duas variantes", schema)
 		}
+	}
+}
+
+func TestSondaMySQLNoHostSoComClienteMariaDBTrocaOComando(t *testing.T) {
+	for _, comando := range []string{"", "sudo -n mysql"} {
+		p, chamadas := rodarSondaMySQL(t, cenarioMySQL{
+			ss: ssComMariaDBNaPorta3307, ssCmd: "sudo", mysql: mariadbSaudavel, soMariaDB: true, mysqlCmd: comando,
+		})
+
+		if len(p.Instancias) != 1 || p.Instancias[0].Estado != "ativo" || p.Instancias[0].Motor != "mariadb" {
+			t.Fatalf("comando %q: instâncias = %+v, esperado mariadb ativo pelo cliente mariadb", comando, p.Instancias)
+		}
+		if !strings.Contains(chamadas, "MYSQL --connect-timeout=5 --protocol=TCP -h 127.0.0.1 -P 3307") {
+			t.Errorf("comando %q: o cliente mariadb não foi chamado: %s", comando, chamadas)
+		}
+	}
+}
+
+func TestSondaMySQLConexoesNulasQuandoOBancoDevolveNULL(t *testing.T) {
+	logica := `case "$sql" in
+  *"VERSION()"*) printf '8.4.3\tMySQL Community Server - GPL\n' ;;
+  *"SHOW REPLICA STATUS"*) exit 0 ;;
+  *"information_schema.processlist"*) printf 'app\tutf8mb4\t4096\tNULL\n' ;;
+  *) exit 1 ;;
+esac
+`
+	p, _ := rodarSondaMySQL(t, cenarioMySQL{ss: ssComMySQL, ssCmd: "sudo", mysql: logica})
+
+	if len(p.Instancias) != 1 || len(p.Instancias[0].Bases) != 1 {
+		t.Fatalf("instâncias = %+v, esperado 1 com 1 base", p.Instancias)
+	}
+	if b := p.Instancias[0].Bases[0]; b.Conexoes != nil || b.TamanhoBytes == nil {
+		t.Errorf("base = %+v, sem PROCESS as conexões ficam nulas e o tamanho continua medido", b)
+	}
+	if !strings.Contains(ProbeMySQL, "privilege_type = 'PROCESS'") {
+		t.Error("a contagem de conexões precisa exigir o privilégio PROCESS do usuário corrente")
+	}
+}
+
+func TestSondaMySQLEmContainerSemShellExplicaFaltaDeCliente(t *testing.T) {
+	semShell := `printf 'OCI runtime exec failed: exec failed: unable to start container process: exec: "sh": executable file not found in $PATH\n'
+exit 127
+`
+	p, _ := rodarSondaMySQL(t, cenarioMySQL{
+		dockerPS: "banco|mysql:8.4|127.0.0.1:13306->3306/tcp", dockerExec: semShell,
+	})
+
+	if len(p.Instancias) != 1 {
+		t.Fatalf("instâncias = %+v, esperado 1", p.Instancias)
+	}
+	inst := p.Instancias[0]
+	if inst.Estado != "desconhecido" || !strings.Contains(inst.Motivo, "sem cliente mysql") ||
+		!strings.Contains(inst.Motivo, "executable file not found") {
+		t.Errorf("estado=%q motivo=%q, esperado desconhecido explicando a falta de shell", inst.Estado, inst.Motivo)
+	}
+}
+
+func TestSondaMySQLEmContainerLeSenhaDoArquivoDeSegredo(t *testing.T) {
+	segredo := filepath.Join(t.TempDir(), "raiz")
+	if err := os.WriteFile(segredo, []byte("senha-do-segredo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, chamadas := rodarSondaMySQL(t, cenarioMySQL{
+		dockerPS: "loja-db|mariadb:11|127.0.0.1:13306->3306/tcp",
+		mysql:    mariadbSaudavel,
+		env:      []string{"MARIADB_ROOT_PASSWORD_FILE=" + segredo},
+	})
+
+	if len(p.Instancias) != 1 || p.Instancias[0].Estado != "ativo" {
+		t.Fatalf("instâncias = %+v, esperado ativo", p.Instancias)
+	}
+	if !strings.Contains(chamadas, "PWD senha-do-segredo") {
+		t.Errorf("a senha do arquivo de segredo não chegou por MYSQL_PWD: %s", chamadas)
 	}
 }

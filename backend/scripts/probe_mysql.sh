@@ -10,10 +10,13 @@ PORTA_PADRAO=3306
 SQL_VERSAO="SELECT VERSION(), @@version_comment;"
 SQL_REPLICA="SHOW REPLICA STATUS;"
 SQL_SLAVE="SHOW SLAVE STATUS;"
-SQL_BASES="SELECT s.schema_name, s.default_character_set_name, COALESCE((SELECT SUM(t.data_length + t.index_length) FROM information_schema.tables t WHERE t.table_schema = s.schema_name), 0), (SELECT COUNT(*) FROM information_schema.processlist p WHERE p.db = s.schema_name) FROM information_schema.schemata s WHERE s.schema_name NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys') ORDER BY s.schema_name;"
+SQL_BASES="SELECT s.schema_name, s.default_character_set_name, COALESCE((SELECT SUM(t.data_length + t.index_length) FROM information_schema.tables t WHERE t.table_schema = s.schema_name), 0), CASE WHEN EXISTS (SELECT 1 FROM information_schema.user_privileges u WHERE u.privilege_type = 'PROCESS' AND REPLACE(u.grantee, '''', '') = CURRENT_USER()) THEN (SELECT COUNT(*) FROM information_schema.processlist p WHERE p.db = s.schema_name) END FROM information_schema.schemata s WHERE s.schema_name NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys') ORDER BY s.schema_name;"
 SQL_BASES_SEM_CONEXOES="SELECT s.schema_name, s.default_character_set_name, COALESCE((SELECT SUM(t.data_length + t.index_length) FROM information_schema.tables t WHERE t.table_schema = s.schema_name), 0) FROM information_schema.schemata s WHERE s.schema_name NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys') ORDER BY s.schema_name;"
 
 CLIENTE_NO_CONTAINER='senha="${MYSQL_ROOT_PASSWORD:-${MARIADB_ROOT_PASSWORD:-}}"
+arquivo="${MYSQL_ROOT_PASSWORD_FILE:-${MARIADB_ROOT_PASSWORD_FILE:-}}"
+if [ -z "$senha" ] && [ -n "$arquivo" ] && [ -r "$arquivo" ]; then senha=$(cat "$arquivo"); fi
+unset arquivo
 if [ -n "$senha" ]; then MYSQL_PWD="$senha"; export MYSQL_PWD; fi
 unset senha
 cliente=mysql
@@ -21,7 +24,7 @@ if ! command -v mysql >/dev/null 2>&1; then cliente=mariadb; fi
 exec "$cliente" -uroot --connect-timeout='"$TEMPO_DE_CONEXAO"' -N -B -e "$1"'
 
 limpar_texto() {
-  tr -d '\r\n' | tr -cd 'A-Za-z0-9 ._:/()=,-' | cut -c1-200
+  tr -d '\r\n' | tr -cd 'A-Za-z0-9 ._:/()=,@-' | cut -c1-200
 }
 
 rodar_cliente() {
@@ -43,7 +46,7 @@ consultar() {
 }
 
 erro_da_consulta() {
-  rodar_cliente "$1" 2>&1 >/dev/null </dev/null | head -1 | limpar_texto
+  rodar_cliente "$1" 2>&1 </dev/null | awk 'NF && p == "" { p = $0 } /ERROR/ && e == "" { e = $0 } END { if (e != "") print e; else print p }' | limpar_texto
 }
 
 cliente_disponivel() {
@@ -59,6 +62,15 @@ cliente_disponivel() {
   command -v "$bin" >/dev/null 2>&1
 }
 
+preparar_cliente_do_host() {
+  local alternativo
+  cliente_disponivel && return 0
+  alternativo=$(printf '%s\n' "$MYSQL_CMD" | awk '{ for (i = 1; i <= NF; i++) { n = $i; sub(/.*\//, "", n); if (n == "mysql") { sub(/mysql$/, "mariadb", $i); break } } print }')
+  [ "$alternativo" != "$MYSQL_CMD" ] || return 1
+  MYSQL_CMD="$alternativo"
+  cliente_disponivel
+}
+
 classificar_falha() {
   local detalhe baixo
   detalhe="$1"
@@ -71,7 +83,11 @@ classificar_falha() {
       ESTADO="sem_acesso"
       MOTIVO="Instância detectada, sem credencial ou permissão para consultar: $detalhe"
       ;;
-    *"can't connect"*|*"cant connect"*|*"lost connection"*|*"connection refused"*|*"no such container"*|*"is not running"*|*"server has gone away"*)
+    *"executable file not found"*|*"not found"*)
+      ESTADO="desconhecido"
+      MOTIVO="Instância detectada, sem cliente mysql disponível para consultá-la: $detalhe"
+      ;;
+    *"can't connect"*|*"cant connect"*|*"lost connection"*|*"connection refused"*|*"no such container"*|*"is not running"*|*"is restarting"*|*"is paused"*|*"server has gone away"*)
       ESTADO="inativo"
       MOTIVO="Porta detectada, a instância não respondeu: $detalhe"
       ;;
@@ -158,7 +174,12 @@ sondar_instancia() {
   MOTOR="$MOTOR_PROVAVEL"
   CONTAINER_SEGURO=$(printf '%s' "$CONTAINER_NOME" | limpar_texto)
 
-  if ! cliente_disponivel; then
+  if [ "$EM_CONTAINER" = true ] && ! cliente_disponivel; then
+    MOTIVO="Instância detectada, sem docker disponível para consultá-la"
+    emitir_instancia
+    return
+  fi
+  if [ "$EM_CONTAINER" = false ] && ! preparar_cliente_do_host; then
     MOTIVO="Instância detectada, sem cliente mysql disponível para consultá-la"
     emitir_instancia
     return
