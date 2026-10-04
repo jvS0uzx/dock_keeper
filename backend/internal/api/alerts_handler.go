@@ -184,15 +184,22 @@ func alertsSummaryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var contagem struct {
-		Open   int
-		Acked  int
-		Falhou int
+		Open          int
+		Acked         int
+		Falhou        int
+		FilaPendente  int
+		FilaAtrasoSeg *int64
 	}
+	agora := time.Now().UTC()
 	err := escopo.apply(database.From(r.Context()).Model(&database.Alert{})).
 		Select(`count(*) FILTER (WHERE status = ?) AS open,
 			count(*) FILTER (WHERE status = ?) AS acked,
-			count(*) FILTER (WHERE delivery = ?) AS falhou`,
-			database.AlertStatusOpen, database.AlertStatusAcked, database.AlertDeliveryFalhou).
+			count(*) FILTER (WHERE delivery = ?) AS falhou,
+			count(*) FILTER (WHERE delivery = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)) AS fila_pendente,
+			floor(extract(epoch FROM ?::timestamptz - min(COALESCE(next_attempt_at, created_at))
+				FILTER (WHERE delivery = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?))))::bigint AS fila_atraso_seg`,
+			database.AlertStatusOpen, database.AlertStatusAcked, database.AlertDeliveryFalhou,
+			database.AlertDeliveryPendente, agora, agora, database.AlertDeliveryPendente, agora).
 		Where("status <> ?", database.AlertStatusResolved).
 		Scan(&contagem).Error
 	if err != nil {
@@ -200,8 +207,9 @@ func alertsSummaryHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "falha ao resumir os alertas")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"open": contagem.Open, "acked": contagem.Acked, "falhou": contagem.Falhou,
+		"fila_pendente": contagem.FilaPendente, "fila_atraso_seg": contagem.FilaAtrasoSeg,
 	})
 }
 

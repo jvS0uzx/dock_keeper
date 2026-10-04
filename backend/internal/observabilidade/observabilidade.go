@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 var (
@@ -19,12 +20,28 @@ var (
 	AlertasFalhos       = expvar.NewInt("dockkeeper_alertas_falhos")
 	AlertasDescartados  = expvar.NewInt("dockkeeper_alertas_descartados")
 	AlertasSemCanal     = expvar.NewInt("dockkeeper_alertas_sem_canal")
+	AlertasNaFila       = expvar.NewInt("dockkeeper_alertas_na_fila")
 	LogsDescartados     = expvar.NewInt("dockkeeper_logs_descartados")
 	SessoesSSH          = expvar.NewInt("dockkeeper_sessoes_ssh_abertas")
 	ReconexoesSSH       = expvar.NewInt("dockkeeper_reconexoes_ssh")
 	PanicosRecuperados  = expvar.NewInt("dockkeeper_panicos_recuperados")
 	MigracoesAplicadas  = expvar.NewInt("dockkeeper_migracoes_aplicadas")
 )
+
+var atrasoDaFila atomic.Pointer[int64]
+
+func MarcarAtrasoDaFila(segundos *int64) {
+	atrasoDaFila.Store(segundos)
+}
+
+func init() {
+	expvar.Publish("dockkeeper_alertas_fila_atraso_seg", expvar.Func(func() any {
+		if s := atrasoDaFila.Load(); s != nil {
+			return *s
+		}
+		return nil
+	}))
+}
 
 var uma sync.Once
 

@@ -106,6 +106,51 @@ func TestResumoDeAlertasContaPorEstado(t *testing.T) {
 	}
 }
 
+func TestResumoDeAlertasExpoeAFilaPendenteDaUnidade(t *testing.T) {
+	c := setupC3(t)
+	limparAlertasFR02(t)
+	t.Cleanup(func() { limparAlertasFR02(t) })
+
+	resumo := func() map[string]any {
+		t.Helper()
+		rec := chamar(t, alertsSummaryHandler, c.viewerA, http.MethodGet, "/api/alerts/summary", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("resumo: status %d (%s)", rec.Code, rec.Body.String())
+		}
+		var r map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &r); err != nil {
+			t.Fatalf("resumo: %v", err)
+		}
+		return r
+	}
+
+	vazio := resumo()
+	if vazio["fila_pendente"] != float64(0) {
+		t.Errorf("fila_pendente = %v sem nada pendente, esperado 0", vazio["fila_pendente"])
+	}
+	if v, ok := vazio["fila_atraso_seg"]; !ok || v != nil {
+		t.Errorf("fila_atraso_seg = %v sem nada pendente, esperado null", v)
+	}
+
+	velho := alertaDeTeste(t, "fila-velho", &c.siteA, database.AlertStatusOpen)
+	database.DB.Model(&database.Alert{}).Where("id = ?", velho.ID).
+		Update("created_at", time.Now().UTC().Add(-10*time.Minute))
+	alertaDeTeste(t, "fila-novo", &c.siteA, database.AlertStatusOpen)
+	adiado := alertaDeTeste(t, "fila-adiado", &c.siteA, database.AlertStatusOpen)
+	database.DB.Model(&database.Alert{}).Where("id = ?", adiado.ID).
+		Update("next_attempt_at", time.Now().UTC().Add(time.Hour))
+	alertaDeTeste(t, "fila-outra-unidade", &c.siteB, database.AlertStatusOpen)
+
+	cheio := resumo()
+	if cheio["fila_pendente"] != float64(2) {
+		t.Errorf("fila_pendente = %v, esperado 2: só os vencidos da própria unidade", cheio["fila_pendente"])
+	}
+	atraso, ok := cheio["fila_atraso_seg"].(float64)
+	if !ok || atraso < 590 || atraso > 660 {
+		t.Errorf("fila_atraso_seg = %v, esperado cerca de 600", cheio["fila_atraso_seg"])
+	}
+}
+
 func TestAckGravaQuemReconheceu(t *testing.T) {
 	c := setupC3(t)
 	limparAlertasFR02(t)

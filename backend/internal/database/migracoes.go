@@ -22,7 +22,8 @@ import (
 var arquivosDeMigracao embed.FS
 
 const (
-	versaoDoBaseline = 1
+	versaoDoBaseline     = 1
+	hashDoBaselineLegado = "7cee6841e8192bedd6e33bcb1140e0ce1f239af3a260be166f9fbfa00f8cecd6"
 
 	travaDeMigracao  = 8274523
 	tempoDeMigracao  = 5 * time.Minute
@@ -123,6 +124,11 @@ func Migrate(db *gorm.DB) error {
 		anterior, existe := jaAplicadas[m.versao]
 
 		if m.versao == versaoDoBaseline {
+			if existe && anterior.hash != m.hash && anterior.hash != hashDoBaselineLegado {
+				return fmt.Errorf(
+					"migração %03d_%s mudou depois de aplicada (hash %s no banco, %s no código): o baseline só troca de hash no banco adotado do AutoMigrate; crie uma migração nova em vez de editar a 001",
+					m.versao, anterior.nome, hashCurto(anterior.hash), hashCurto(m.hash))
+			}
 			if err := convergirBaseline(ctx, conn, m, anterior, existe); err != nil {
 				return err
 			}
@@ -136,7 +142,7 @@ func Migrate(db *gorm.DB) error {
 			if anterior.hash != m.hash {
 				return fmt.Errorf(
 					"migração %03d_%s mudou depois de aplicada (hash %s no banco, %s no código): crie uma migração nova em vez de editar a antiga",
-					m.versao, anterior.nome, anterior.hash[:12], m.hash[:12])
+					m.versao, anterior.nome, hashCurto(anterior.hash), hashCurto(m.hash))
 			}
 			continue
 		}
@@ -184,10 +190,14 @@ func convergirBaseline(ctx context.Context, conn *sql.Conn, m migracao, anterior
 	case !existe:
 		log.Printf("[Migração] %03d_%s aplicada", m.versao, m.nome)
 	case anterior.hash != m.hash:
-		log.Printf("[Migração] %03d_%s convergida: o baseline mudou desde a última subida e o hash foi atualizado",
+		log.Printf("[Migração] %03d_%s convergida: banco adotado do AutoMigrate, hash do snapshot legado atualizado",
 			m.versao, m.nome)
 	}
 	return nil
+}
+
+func hashCurto(h string) string {
+	return h[:min(len(h), 12)]
 }
 
 func criarControleDeMigracao(ctx context.Context, conn *sql.Conn) error {

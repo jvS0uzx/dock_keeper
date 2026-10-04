@@ -165,7 +165,7 @@ func TestBancoJaAdotadoComBaselineIncompletoConverge(t *testing.T) {
 	if err := db.Exec(criar).Error; err != nil {
 		t.Fatalf("criar schema_migrations: %v", err)
 	}
-	if err := db.Exec("INSERT INTO schema_migrations (versao, nome, hash) VALUES (1, 'baseline', 'hash-antigo-do-snapshot')").Error; err != nil {
+	if err := db.Exec("INSERT INTO schema_migrations (versao, nome, hash) VALUES (1, 'baseline', ?)", hashDoBaselineLegado).Error; err != nil {
 		t.Fatalf("gravar a adoção anterior: %v", err)
 	}
 
@@ -176,7 +176,7 @@ func TestBancoJaAdotadoComBaselineIncompletoConverge(t *testing.T) {
 
 	var hash string
 	db.Raw("SELECT hash FROM schema_migrations WHERE versao = 1").Scan(&hash)
-	if hash == "hash-antigo-do-snapshot" {
+	if hash == hashDoBaselineLegado {
 		t.Error("o hash do baseline não foi atualizado depois de convergir")
 	}
 

@@ -161,23 +161,60 @@ func TestMigrarDeNovoNaoFazNada(t *testing.T) {
 	}
 }
 
-func TestBaselineComHashAntigoConvergeEmVezDeRecusar(t *testing.T) {
+func TestBaselineComHashDoSnapshotLegadoConverge(t *testing.T) {
 	db := bancoVazio(t)
 
 	if err := Migrate(db); err != nil {
 		t.Fatalf("migrar: %v", err)
 	}
-	if err := db.Exec("UPDATE schema_migrations SET hash = 'hash-do-snapshot-antigo' WHERE versao = 1").Error; err != nil {
+	if err := db.Exec("UPDATE schema_migrations SET hash = ? WHERE versao = 1", hashDoBaselineLegado).Error; err != nil {
 		t.Fatalf("alterar o hash do baseline: %v", err)
 	}
 
 	if err := Migrate(db); err != nil {
-		t.Fatalf("o baseline com hash antigo derrubou a subida: %v", err)
+		t.Fatalf("o baseline com o hash do snapshot legado derrubou a subida: %v", err)
 	}
 	var hash string
 	db.Raw("SELECT hash FROM schema_migrations WHERE versao = 1").Scan(&hash)
-	if hash == "hash-do-snapshot-antigo" {
+	if hash == hashDoBaselineLegado {
 		t.Error("o hash do baseline não foi atualizado")
+	}
+}
+
+func TestBaselineEditadoForaDoCasoLegadoFalha(t *testing.T) {
+	db := bancoVazio(t)
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrar: %v", err)
+	}
+	if err := db.Exec("UPDATE schema_migrations SET hash = 'hash-de-baseline-editado' WHERE versao = 1").Error; err != nil {
+		t.Fatalf("alterar o hash do baseline: %v", err)
+	}
+
+	err := Migrate(db)
+	if err == nil {
+		t.Fatal("baseline com hash desconhecido passou sem erro")
+	}
+	for _, trecho := range []string{"001_baseline", "mudou depois de aplicada", "crie uma migração nova"} {
+		if !strings.Contains(err.Error(), trecho) {
+			t.Errorf("mensagem de erro não explica o problema (%q não contém %q)", err.Error(), trecho)
+		}
+	}
+	var hash string
+	db.Raw("SELECT hash FROM schema_migrations WHERE versao = 1").Scan(&hash)
+	if hash != "hash-de-baseline-editado" {
+		t.Errorf("a recusa ainda gravou o hash novo (%q)", hash)
+	}
+}
+
+func TestBaselineEmbutidoNaoMudou(t *testing.T) {
+	lista, err := migracoesEmbutidas()
+	if err != nil {
+		t.Fatalf("ler as migrações: %v", err)
+	}
+	const hashDoBaselineAtual = "5458e3d2e2a55db04971c344c42147dd13fee1187d7472a379091f7080ad4b51"
+	if lista[0].versao != versaoDoBaseline || lista[0].hash != hashDoBaselineAtual {
+		t.Errorf("001_baseline mudou (hash %s): todo banco já migrado vai recusar subir; desfaça a edição e crie uma migração nova", lista[0].hash)
 	}
 }
 

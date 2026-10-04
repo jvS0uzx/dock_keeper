@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -34,6 +35,22 @@ var (
 	despachoLease       = time.Minute
 	backoffBase         = defaultBackoffBase
 	backoffMax          = defaultBackoffMax
+
+	limiarDaFila     int64 = 50
+	limiarDeAtraso         = 2 * time.Minute
+	avisoDaFilaACada       = 5 * time.Minute
+)
+
+type Fila struct {
+	Pendentes int64  `json:"pendentes"`
+	AtrasoSeg *int64 `json:"atraso_seg"`
+	Atrasada  bool   `json:"atrasada"`
+}
+
+var (
+	filaMu            sync.Mutex
+	filaAtual         Fila
+	ultimoAvisoDaFila time.Time
 )
 
 type Entrada struct {
@@ -304,7 +321,61 @@ func dispatchPending(now time.Time) int {
 	for _, alerta := range claimed {
 		entregarAlerta(alerta, ativos, agora().UTC())
 	}
+	medirFila(agora().UTC())
 	return len(claimed)
+}
+
+func pendentesVencidos(db *gorm.DB, now time.Time) *gorm.DB {
+	return db.Where("delivery = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
+		database.AlertDeliveryPendente, now).
+		Where("status <> ? OR key LIKE ?", database.AlertStatusResolved, "%"+sufixoRecuperacao)
+}
+
+func EstadoDaFila() Fila {
+	filaMu.Lock()
+	defer filaMu.Unlock()
+	return filaAtual
+}
+
+func medirFila(now time.Time) {
+	var medida struct {
+		Pendentes  int64
+		MaisAntigo *time.Time
+	}
+	err := pendentesVencidos(database.DB.Model(&database.Alert{}), now).
+		Select("count(*) AS pendentes, min(COALESCE(next_attempt_at, created_at)) AS mais_antigo").
+		Scan(&medida).Error
+	if err != nil {
+		log.Printf("[Alert] erro ao medir a fila de alertas: %v", err)
+		return
+	}
+
+	f := Fila{Pendentes: medida.Pendentes}
+	if medida.MaisAntigo != nil {
+		atraso := int64(max(now.Sub(medida.MaisAntigo.UTC()), 0) / time.Second)
+		f.AtrasoSeg = &atraso
+	}
+	f.Atrasada = f.Pendentes > limiarDaFila ||
+		(f.AtrasoSeg != nil && time.Duration(*f.AtrasoSeg)*time.Second >= limiarDeAtraso)
+
+	filaMu.Lock()
+	anterior := filaAtual
+	filaAtual = f
+	avisar := f.Atrasada && (!anterior.Atrasada || now.Sub(ultimoAvisoDaFila) >= avisoDaFilaACada)
+	if avisar {
+		ultimoAvisoDaFila = now
+	}
+	filaMu.Unlock()
+
+	observabilidade.AlertasNaFila.Set(f.Pendentes)
+	observabilidade.MarcarAtrasoDaFila(f.AtrasoSeg)
+	switch {
+	case avisar:
+		log.Printf("[Alert] aviso: fila de alertas atrasada: %d pendente(s), o mais antigo espera há %d s; o despacho entrega até %d a cada %s",
+			f.Pendentes, *f.AtrasoSeg, defaultDespachoLote, despachoIntervalo)
+	case anterior.Atrasada && !f.Atrasada:
+		log.Printf("[Alert] fila de alertas em dia de novo: %d pendente(s)", f.Pendentes)
+	}
 }
 
 func janelaDeRetomada() time.Duration {
@@ -380,10 +451,7 @@ func claimBatch(now time.Time) []database.Alert {
 	var lote []database.Alert
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("delivery = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
-				database.AlertDeliveryPendente, now).
-			Where("status <> ? OR key LIKE ?", database.AlertStatusResolved, "%"+sufixoRecuperacao).
+		if err := pendentesVencidos(tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}), now).
 			Order("created_at asc, id asc").
 			Limit(defaultDespachoLote).
 			Find(&lote).Error; err != nil {

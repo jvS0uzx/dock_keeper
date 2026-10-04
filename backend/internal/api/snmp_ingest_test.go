@@ -283,8 +283,6 @@ func TestTelemetriaSNMPRecusaEnvioInvalido(t *testing.T) {
 		{"json quebrado", `{"schema":1,`, http.StatusBadRequest},
 		{"schema 2", strings.Replace(corpoSNMP(""), `"schema":1`, `"schema":2`, 1), http.StatusBadRequest},
 		{"sem schema", strings.Replace(corpoSNMP(""), `"schema":1,`, ``, 1), http.StatusBadRequest},
-		{"ip inválido", corpoSNMP(switchSNMP("999.1.1.1", "")), http.StatusBadRequest},
-		{"bps negativo", corpoSNMP(switchSNMP("198.51.100.8", interfaceSNMP(1, "ge-0/0/1", "up", "-1"))), http.StatusBadRequest},
 		{"dispositivos demais", corpoSNMP(strings.Join(muitos, ",")), http.StatusRequestEntityTooLarge},
 		{"interfaces demais", corpoSNMP(switchSNMP("198.51.100.9", strings.Join(muitasInterfaces, ","))), http.StatusRequestEntityTooLarge},
 	}
@@ -300,6 +298,46 @@ func TestTelemetriaSNMPRecusaEnvioInvalido(t *testing.T) {
 	if n != 0 {
 		t.Errorf("envio recusado gravou %d host(s)", n)
 	}
+}
+
+func TestTelemetriaSNMPLoteParcialDescartaSoODispositivoInvalido(t *testing.T) {
+	sedeA, _, cred := setupSNMP(t)
+
+	corpo := corpoSNMP(strings.Join([]string{
+		switchSNMP("999.1.1.1", interfaceSNMP(1, "ge-0/0/1", "up", "5")),
+		switchSNMP("198.51.100.8", interfaceSNMP(1, "ge-0/0/1", "up", "-1")+","+interfaceSNMP(2, "ge-0/0/2", "up", "7")),
+		switchSNMP("   ", ""),
+		switchSNMP("198.51.100.12", interfaceSNMP(1, "ge-0/0/1", "up", "3")),
+	}, ","))
+	rec := enviarComCredencial(t, rotaDeTelemetria, corpo, cred)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, esperado 200: %s", rec.Code, rec.Body.String())
+	}
+	var resposta map[string]int
+	if err := json.NewDecoder(rec.Body).Decode(&resposta); err != nil {
+		t.Fatalf("resposta não é JSON: %v", err)
+	}
+	esperado := map[string]int{"devices": 2, "interfaces": 3, "rejeitados": 2}
+	if fmt.Sprint(resposta) != fmt.Sprint(esperado) {
+		t.Errorf("resposta = %v, esperado %v", resposta, esperado)
+	}
+
+	h := hostSNMP(t, "198.51.100.8", sedeA)
+	lista := interfacesSNMP(t, h.ID)
+	if len(lista) != 2 {
+		t.Fatalf("%d interfaces gravadas, esperadas 2", len(lista))
+	}
+	negativa := metricasSNMP(t, lista[0].ID)
+	if len(negativa) != 1 || negativa[0].InBps != nil {
+		t.Errorf("bps negativo não virou NULL: %+v", negativa)
+	}
+	if negativa[0].OutBps == nil || *negativa[0].OutBps != 99 {
+		t.Errorf("out_bps válido da mesma interface se perdeu: %+v", negativa[0].OutBps)
+	}
+	if m := metricasSNMP(t, lista[1].ID); len(m) != 1 || m[0].InBps == nil || *m[0].InBps != 7 {
+		t.Errorf("interface vizinha perdeu a leitura: %+v", m)
+	}
+	hostSNMP(t, "198.51.100.12", sedeA)
 }
 
 func TestTelemetriaSNMPCorpoAcimaDoTetoDaIngestao(t *testing.T) {
