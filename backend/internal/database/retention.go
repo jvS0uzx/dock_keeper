@@ -3,6 +3,8 @@ package database
 import (
 	"context"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/jvS0uzx/dock_keeper/internal/config"
@@ -42,6 +44,8 @@ const defaultAddressRetentionDays = 30
 
 const defaultNetworkMetricRetention = 72 * time.Hour
 
+const defaultAnnotationRetentionDays = 365
+
 func PodarMetricasDeInterface(ctx context.Context, maxAge time.Duration) {
 	cutoff := time.Now().UTC().Add(-maxAge)
 	n, err := pruneBatched(ctx, dbExec, "metric_network_interfaces", "ts", cutoff, pruneBatchPause)
@@ -72,6 +76,28 @@ func podarInterfacesSemSinal(ctx context.Context, maxAge time.Duration) {
 	}
 	if n > 0 {
 		log.Printf("[Retention] network_interfaces: %d interfaces sem sinal e sem leitura removidas", n)
+	}
+}
+
+func retencaoDeAnotacoes() time.Duration {
+	if strings.TrimSpace(os.Getenv("ANNOTATION_RETENTION_DAYS")) == "0" {
+		return 0
+	}
+	return config.Dias("ANNOTATION_RETENTION_DAYS", defaultAnnotationRetentionDays)
+}
+
+func podarAnotacoes(ctx context.Context, maxAge time.Duration) {
+	if maxAge <= 0 {
+		return
+	}
+	cutoff := time.Now().UTC().Add(-maxAge)
+	n, err := pruneBatched(ctx, dbExec, "annotations", "at", cutoff, pruneBatchPause)
+	if err != nil {
+		log.Printf("[Retention] erro ao podar annotations: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("[Retention] annotations: %d anotações antigas removidas", n)
 	}
 }
 
@@ -123,6 +149,7 @@ func prune(ctx context.Context, maxAge, auditMaxAge time.Duration) {
 	retencaoDeRede := config.Duracao("NETWORK_METRIC_RETENTION", defaultNetworkMetricRetention)
 	PodarMetricasDeInterface(ctx, retencaoDeRede)
 	podarInterfacesSemSinal(ctx, retencaoDeRede)
+	podarAnotacoes(ctx, retencaoDeAnotacoes())
 }
 
 func pruneAuditLog(ctx context.Context, maxAge time.Duration) {
