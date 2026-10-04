@@ -10,6 +10,8 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/jvS0uzx/dock_keeper/internal/bancoteste"
 )
 
 func TestDSNGanhaStatementTimeout(t *testing.T) {
@@ -34,13 +36,13 @@ func TestDSNGanhaStatementTimeout(t *testing.T) {
 func TestConsultaTravadaMorreNoLimiteESoltaOPool(t *testing.T) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		t.Skip("DATABASE_URL não definido; pulando teste de statement_timeout")
+		bancoteste.Pular(t, "DATABASE_URL não definido")
 	}
 	t.Setenv("DB_STATEMENT_TIMEOUT", "1s")
 
 	db, err := gorm.Open(postgres.Open(comStatementTimeout(dsn)), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
-		t.Skipf("banco indisponível: %v", err)
+		bancoteste.Pular(t, "banco indisponível: %v", err)
 	}
 	t.Cleanup(func() {
 		if sqlDB, err := db.DB(); err == nil {
@@ -70,11 +72,11 @@ func TestConsultaTravadaMorreNoLimiteESoltaOPool(t *testing.T) {
 
 func TestFromRespeitaOCancelamentoDoPedido(t *testing.T) {
 	if os.Getenv("DATABASE_URL") == "" {
-		t.Skip("DATABASE_URL não definido; pulando teste de contexto")
+		bancoteste.Pular(t, "DATABASE_URL não definido")
 	}
 	if DB == nil {
 		if err := Connect(); err != nil {
-			t.Skipf("banco indisponível: %v", err)
+			bancoteste.Pular(t, "banco indisponível: %v", err)
 		}
 	}
 

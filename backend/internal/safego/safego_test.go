@@ -128,9 +128,9 @@ func TestRunNaoReiniciaFuncaoQueRetornaNormalmente(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	Run(ctx, "teste:retorno", func(context.Context) { chamadas.Add(1) })
+	fim := Run(ctx, "teste:retorno", func(context.Context) { chamadas.Add(1) })
 
-	time.Sleep(200 * time.Millisecond)
+	esperar(t, fim, 2*time.Second, "o supervisor não encerrou depois do retorno normal")
 	if n := chamadas.Load(); n != 1 {
 		t.Errorf("execuções = %d, esperado 1: retorno normal não é reinício", n)
 	}

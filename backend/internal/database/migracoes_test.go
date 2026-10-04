@@ -11,6 +11,8 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/jvS0uzx/dock_keeper/internal/bancoteste"
 )
 
 var contadorDeBanco atomic.Int32
@@ -20,19 +22,19 @@ func bancoVazio(t *testing.T) *gorm.DB {
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		t.Skip("DATABASE_URL não definido; pulando teste de migração")
+		bancoteste.Pular(t, "DATABASE_URL não definido")
 	}
 
 	nome := fmt.Sprintf("dockkeeper_mig_%d", os.Getpid()+int(contadorDeBanco.Add(1)))
 	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
-		t.Skipf("banco indisponível: %v", err)
+		bancoteste.Pular(t, "banco indisponível: %v", err)
 	}
 	if err := admin.Exec("DROP DATABASE IF EXISTS " + nome).Error; err != nil {
-		t.Skipf("sem permissão para criar banco de teste: %v", err)
+		bancoteste.Pular(t, "sem permissão para criar banco de teste: %v", err)
 	}
 	if err := admin.Exec("CREATE DATABASE " + nome).Error; err != nil {
-		t.Skipf("sem permissão para criar banco de teste: %v", err)
+		bancoteste.Pular(t, "sem permissão para criar banco de teste: %v", err)
 	}
 	t.Cleanup(func() {
 		admin.Exec("DROP DATABASE IF EXISTS " + nome)
@@ -41,7 +43,7 @@ func bancoVazio(t *testing.T) *gorm.DB {
 		}
 	})
 
-	novo, err := gorm.Open(postgres.Open(trocarBancoNoDSN(dsn, nome)), &gorm.Config{Logger: logger.Discard})
+	novo, err := gorm.Open(postgres.Open(bancoteste.TrocarBanco(dsn, nome)), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatalf("abrir o banco de teste: %v", err)
 	}
@@ -51,44 +53,6 @@ func bancoVazio(t *testing.T) *gorm.DB {
 		}
 	})
 	return novo
-}
-
-func trocarBancoNoDSN(dsn, nome string) string {
-	if strings.Contains(dsn, "dbname=") {
-		campos := strings.Fields(dsn)
-		for i, campo := range campos {
-			if strings.HasPrefix(campo, "dbname=") {
-				campos[i] = "dbname=" + nome
-				return strings.Join(campos, " ")
-			}
-		}
-	}
-	if i := strings.LastIndex(dsn, "/"); i >= 0 {
-		resto := ""
-		if j := strings.Index(dsn[i:], "?"); j >= 0 {
-			resto = dsn[i+j:]
-		}
-		return dsn[:i+1] + nome + resto
-	}
-	return dsn
-}
-
-func TestTrocarBancoNoDSNCobreOsDoisFormatos(t *testing.T) {
-	casos := []struct {
-		nome     string
-		dsn      string
-		esperado string
-	}{
-		{"url", "postgres://u:s@localhost:5433/dockkeeper?sslmode=disable", "postgres://u:s@localhost:5433/alvo?sslmode=disable"},
-		{"chave-valor", "host=localhost user=u password=s dbname=dockkeeper port=5433 sslmode=disable", "host=localhost user=u password=s dbname=alvo port=5433 sslmode=disable"},
-	}
-	for _, caso := range casos {
-		t.Run(caso.nome, func(t *testing.T) {
-			if got := trocarBancoNoDSN(caso.dsn, "alvo"); got != caso.esperado {
-				t.Errorf("trocarBancoNoDSN = %q, esperado %q", got, caso.esperado)
-			}
-		})
-	}
 }
 
 func versaoAplicada(t *testing.T, db *gorm.DB) int {
@@ -241,7 +205,7 @@ func TestMigracaoEditadaDepoisDeAplicadaFalha(t *testing.T) {
 
 func TestDuasInstanciasMigramUmaVezSo(t *testing.T) {
 	db := bancoVazio(t)
-	outra, err := gorm.Open(postgres.Open(trocarBancoNoDSN(os.Getenv("DATABASE_URL"), bancoDe(t, db))), &gorm.Config{Logger: logger.Discard})
+	outra, err := gorm.Open(postgres.Open(bancoteste.TrocarBanco(os.Getenv("DATABASE_URL"), bancoDe(t, db))), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatalf("segunda conexão: %v", err)
 	}

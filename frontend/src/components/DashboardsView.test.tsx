@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { semEspera } from '../test/usuario';
 
@@ -109,10 +109,10 @@ describe('DashboardsView', () => {
     await user.click(await screen.findByRole('button', { name: 'Adicionar gráfico' }));
     await user.click(screen.getByRole('button', { name: 'Adicionar gráfico' }));
 
-    await user.type(screen.getByLabelText('Título do gráfico 1'), 'Entrada');
+    fireEvent.change(screen.getByLabelText('Título do gráfico 1'), { target: { value: 'Entrada' } });
     await escolher(user, 'Métrica do gráfico 1', 'Rede recebida');
 
-    await user.type(screen.getByLabelText('Título do gráfico 2'), 'CPU banco');
+    fireEvent.change(screen.getByLabelText('Título do gráfico 2'), { target: { value: 'CPU banco' } });
     await escolher(user, 'Servidor do gráfico 2', 'db-01');
     await escolher(user, 'Janela do gráfico 2', '7d');
     await user.click(within(screen.getByTestId('editor-grafico-2')).getByRole('button', { name: '2 colunas' }));

@@ -28,7 +28,10 @@ const fontes = Object.fromEntries(
 
 const DIRETIVA = /^\/\/\/\s*<(reference|amd)|^\/\/\s*@ts-|^\/[/*]\s*(eslint|oxlint)-/;
 
+const PODE_TER_COMENTARIO = /\/[/*]|\{\s*\}/;
+
 function linhasTs(nome: string, texto: string): number[] {
+  if (!PODE_TER_COMENTARIO.test(texto)) return [];
   const tipo = nome.endsWith('.tsx')
     ? ts.ScriptKind.TSX
     : nome.endsWith('.json')
@@ -47,6 +50,7 @@ function linhasTs(nome: string, texto: string): number[] {
   };
   const visitar = (no: ts.Node) => {
     if (no.kind === ts.SyntaxKind.JsxText) return;
+    if (!PODE_TER_COMENTARIO.test(texto.slice(no.pos, no.end))) return;
     if (ts.isJsxExpression(no) && !no.expression) {
       anotar(no.getStart(sf), no.end, true);
       return;

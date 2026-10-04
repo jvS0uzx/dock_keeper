@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { semEspera } from '../test/usuario';
@@ -7,9 +8,14 @@ import { DialogContext, type DialogApi } from './ui/dialog-context';
 import { responder } from '../test/recharts';
 import { CATALOGO } from '../test/catalogo';
 
+const grafico = vi.hoisted(() => ({ desenhar: false }));
+
 vi.mock('recharts', async (importOriginal) => {
   const { comLarguraFixa } = await import('../test/recharts');
-  return comLarguraFixa(await importOriginal());
+  const real = comLarguraFixa(await importOriginal());
+  const Fixo = real.ResponsiveContainer;
+  const SoQuandoPedido = (props: ComponentProps<typeof Fixo>) => (grafico.desenhar ? <Fixo {...props} /> : <div />);
+  return { ...real, ResponsiveContainer: SoQuandoPedido };
 });
 
 interface Chamada {
@@ -28,6 +34,7 @@ const minutosAtras = (m: number) => new Date(Date.now() - m * 60 * 1000);
 const localDe = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
 beforeEach(() => {
+  grafico.desenhar = false;
   chamadas = [];
   anotacoes = [];
   erroDoHistorico = null;
@@ -121,13 +128,14 @@ describe('MetricsHistoryView — janelas', () => {
 
 describe('MetricsHistoryView — anotações', () => {
   it('anotação criada aparece como marcador no gráfico', async () => {
+    grafico.desenhar = true;
     const user = semEspera();
     renderizar();
     await waitFor(() => expect(document.querySelector('.recharts-area')).not.toBeNull());
     expect(document.querySelector('.recharts-reference-line')).toBeNull();
 
     const quando = minutosAtras(30);
-    await user.type(screen.getByLabelText('Texto da anotação'), 'deploy 2.3');
+    fireEvent.change(screen.getByLabelText('Texto da anotação'), { target: { value: 'deploy 2.3' } });
     fireEvent.change(screen.getByLabelText('Horário da anotação'), { target: { value: localDe(quando) } });
     await user.click(screen.getByRole('button', { name: 'Anotar' }));
 
@@ -144,7 +152,7 @@ describe('MetricsHistoryView — anotações', () => {
     renderizar();
     await waitFor(() => expect(consultasDoHistorico().length).toBeGreaterThan(0));
 
-    await user.type(screen.getByLabelText('Texto da anotação'), 'janela de manutenção');
+    fireEvent.change(screen.getByLabelText('Texto da anotação'), { target: { value: 'janela de manutenção' } });
     await user.click(screen.getByRole('checkbox', { name: 'Global' }));
     await user.click(screen.getByRole('button', { name: 'Anotar' }));
 
@@ -158,6 +166,7 @@ describe('MetricsHistoryView — anotações', () => {
 describe('MetricsHistoryView — falha não vira vazio', () => {
   it('leitura de anotações recusada mostra a mensagem e o gráfico segue sem marcadores', async () => {
     erroDasAnotacoes = 'anotações exigem sessão de usuário';
+    grafico.desenhar = true;
     renderizar();
 
     expect(await screen.findByText('anotações exigem sessão de usuário')).toBeTruthy();

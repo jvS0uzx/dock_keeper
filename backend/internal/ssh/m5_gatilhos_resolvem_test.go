@@ -195,20 +195,23 @@ func TestHostDeVoltaResolveNaPrimeiraAmostra(t *testing.T) {
 }
 
 func TestStreamSoContaComoDePeDepoisDeEstavel(t *testing.T) {
-	var avisou atomic.Int32
-
-	parar := aoFicarDePe(50*time.Millisecond, func() { avisou.Add(1) })
+	var caiuAntes atomic.Int32
+	parar := aoFicarDePe(50*time.Millisecond, func() { caiuAntes.Add(1) })
 	parar()
-	time.Sleep(120 * time.Millisecond)
-	if n := avisou.Load(); n != 0 {
+
+	estavel := make(chan struct{}, 2)
+	parar = aoFicarDePe(60*time.Millisecond, func() { estavel <- struct{}{} })
+	defer parar()
+	select {
+	case <-estavel:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream estável não avisou que ficou de pé")
+	}
+	if n := caiuAntes.Load(); n != 0 {
 		t.Fatalf("stream que caiu antes de estabilizar contou como de pé %d vez(es)", n)
 	}
-
-	parar = aoFicarDePe(20*time.Millisecond, func() { avisou.Add(1) })
-	defer parar()
-	time.Sleep(120 * time.Millisecond)
-	if n := avisou.Load(); n != 1 {
-		t.Errorf("stream estável avisou %d vez(es), esperado 1", n)
+	if n := len(estavel); n != 0 {
+		t.Errorf("stream estável avisou %d vez(es) a mais, esperado 1", n)
 	}
 }
 

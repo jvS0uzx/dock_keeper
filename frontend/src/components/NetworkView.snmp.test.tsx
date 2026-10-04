@@ -8,10 +8,10 @@ import { SessionContext, type SessionState } from './ui/session-context';
 import { DialogContext, type DialogApi } from './ui/dialog-context';
 import { SiteScopeContext, type SiteScopeState } from './ui/site-scope-context';
 
-vi.mock('recharts', async (importOriginal) => {
-  const { comLarguraFixa } = await import('../test/recharts');
-  return comLarguraFixa(await importOriginal());
-});
+vi.mock('recharts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('recharts')>()),
+  ResponsiveContainer: () => <div />,
+}));
 
 const { networkHosts, sites, interfacesDoHost, serieDaInterface } = vi.hoisted(() => ({
   networkHosts: vi.fn(),
