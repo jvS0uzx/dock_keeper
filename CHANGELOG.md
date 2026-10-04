@@ -117,6 +117,9 @@ Primeira versão numerada. Reúne o que foi entregue desde 2026-09-10.
 
 ### Corrigido
 
+- Painéis laterais e modais de Inventário de Rede, Bancos e Containers paravam
+  na altura do conteúdo da tela: a animação de entrada deixava `transform`
+  aplicado no contêiner e prendia os elementos `fixed` a ele.
 - Envio concorrente do agente sem `machine_id` duplicava o servidor (ED-15): a
   busca e a criação rodam numa transação com `pg_advisory_xact_lock` pelo nome
   do host.
