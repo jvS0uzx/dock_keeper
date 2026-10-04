@@ -6,21 +6,20 @@ alertas no Telegram — com controle de acesso por papel e por unidade.
 
 Backend em Go, frontend em React + Vite, dados em PostgreSQL.
 
----
-
 ## Números
 
 | Medida | Valor |
 |---|---|
-| Linhas de Go | 23.517 |
-| Linhas de Go em teste | 12.801 — **54,4% do código Go** |
-| Funções de teste em Go | 445 |
-| Testes do frontend (vitest) | 116, em 18 arquivos |
-| Pacotes internos | 10 de produção — `alert`, `api`, `audit`, `auth`, `database`, `discovery`, `logstore`, `network`, `rules`, `ssh` — e `semcomentario`, que só tem teste |
-| ADRs | 10, cada uma com contexto, decisão e consequência |
-| Rotas HTTP registradas | 35 |
+| Versão | 1.0.0 |
+| Linhas de Go | 45.924 |
+| Linhas de Go em teste | 27.776, **60,5% do código Go** |
+| Funções de teste em Go | 914 |
+| Testes do frontend (vitest) | 451, em 57 arquivos |
+| Pacotes em `backend/internal/` | 18: `alert`, `api`, `audit`, `auth`, `bancoteste`, `config`, `database`, `discovery`, `logstore`, `malha`, `metricas`, `network`, `observabilidade`, `rules`, `safego`, `ssh`, `versao` e `semcomentario`, que só tem teste |
+| ADRs | 15, cada uma com contexto, decisão e consequência |
+| Rotas HTTP registradas | 47 |
 
-Contagem feita sobre os arquivos do repositório em 18/09/2026: `backend/`
+Contagem feita sobre os arquivos do repositório em 04/10/2026: `backend/`
 inteiro para Go, `npx vitest run` para o frontend e `mux.HandleFunc` em
 `internal/api/server.go` para as rotas.
 
@@ -57,8 +56,6 @@ Gravar e cortar:
 Manter abaixo de 5 MB. Se passar, baixe o fps para 10 ou a largura para 800.
 -->
 
----
-
 ## Arquitetura
 
 Quatro fontes de dado alimentam o mesmo banco: o painel puxa por SSH, o agente
@@ -68,7 +65,7 @@ onde o painel roda. O que cada uma faz e o que cada uma **não** faz está em
 
 ```mermaid
 flowchart TB
-    spa["<b>Navegador — SPA React 19 + Vite</b><br/>17 views, sessão em localStorage"]
+    spa["<b>Navegador — SPA React 19 + Vite</b><br/>21 views, sessão em localStorage"]
 
     subgraph push["Fontes que empurram — não é agentless"]
         agente["<b>Agente de push</b><br/>backend/cmd/agent<br/>Linux e Windows"]
@@ -78,7 +75,7 @@ flowchart TB
     subgraph painel["Painel — Go 1.26, porta 8080"]
         gate["<b>Gate de papel</b><br/>Bearer ou X-API-Token<br/>RBAC por papel e por unidade"]
         ticket["<b>Ticket de SSE</b><br/>uso único, 30 s"]
-        rotas["<b>35 rotas HTTP</b><br/>internal/api/server.go"]
+        rotas["<b>47 rotas HTTP</b><br/>internal/api/server.go"]
         stream["<b>Streams SSE</b><br/>logs de container e auth.log"]
         ingest["<b>Ingestão</b><br/>credencial por dispositivo<br/>tipo agent ou collector"]
         sshmgr["<b>Gerente SSH</b><br/>uma goroutine por VPS<br/>hot-plug, reconexão com backoff"]
@@ -112,8 +109,6 @@ flowchart TB
     workers -->|"regra violada · SSL vence em < 14 d"| tg
 ```
 
----
-
 ## O que ele faz
 
 | Recurso | Como funciona |
@@ -130,8 +125,6 @@ flowchart TB
 **Não é agentless.** O repositório contém dois coletores próprios além da coleta
 por SSH — veja [Fontes de dado](docs/arquitetura.md).
 
----
-
 ## Documentação
 
 | Arquivo | Conteúdo |
@@ -147,15 +140,16 @@ por SSH — veja [Fontes de dado](docs/arquitetura.md).
 | [`docs/dependencias.md`](docs/dependencias.md) | O que o sistema exige do host monitorado e do painel |
 | [`docs/adr/`](docs/adr/) | Decisões de arquitetura, com contexto e consequência |
 
----
-
 ## Limites conhecidos
 
 - **O inventário de rede não funciona bem em container.** A varredura lê
   `/proc/net/arp`, que dentro de um container é a tabela do *namespace*, não a do
   host. Quem depende dela precisa de `network_mode: host` ou do coletor remoto.
-- **A tela de descoberta de SSL depende do access log do Nginx.** Sem um host com
-  `collect_nginx` ligado, ela fica vazia — não há erro, não há o que descobrir.
+- **A tela de descoberta de SSL depende do access log do Nginx.** O painel só
+  acompanha o access log de um host quando a sonda do Nginx o encontra ativo, com
+  upstream declarado e log legível pelo usuário SSH, ou quando `collect_nginx` foi
+  ligado à mão nesse servidor. Sem nenhum host nessas condições a tela fica vazia,
+  sem erro.
 - **O access log do Nginx precisa de um `log_format` próprio.** No `combined`
   padrão, nenhuma linha é contada e a malha fica sem tráfego. O formato está em
   [`docs/operacao.md`](docs/operacao.md#formato-do-access-log-do-nginx).
@@ -175,11 +169,9 @@ por SSH — veja [Fontes de dado](docs/arquitetura.md).
   indisponível o painel recusa login e passa a notificar sem deduplicar — falha
   aberta de propósito, porque alerta duplicado incomoda e alerta perdido mata.
 
----
-
 ## Subindo o painel
 
-> [!IMPORTANTE]
+> [!IMPORTANT]
 > Subindo por `docker compose`: o backend roda com o uid do host (`DOCKKEEPER_UID`, padrão
 > 1000) para conseguir ler a chave SSH e o `known_hosts`, que ficam 600 no seu disco. Se o seu
 > usuário não for 1000, defina `DOCKKEEPER_UID` e `DOCKKEEPER_GID` no `.env` com `id -u` e
@@ -191,10 +183,14 @@ por SSH — veja [Fontes de dado](docs/arquitetura.md).
 
 ### Pré-requisitos
 
-- Go 1.26 ou superior (o `go.mod` declara `go 1.26.5`)
-- Node.js 22 ou superior — o `Dockerfile` e o CI usam 22
-- PostgreSQL 15 ou superior
+- Docker com o plugin `compose`, para o caminho principal
 - Uma chave SSH com acesso aos hosts que serão monitorados
+
+Para desenvolver fora do container, também:
+
+- Go 1.26 ou superior (o `go.mod` declara `go 1.26.5`)
+- Node.js 22 ou superior (`engines` do `package.json`; o `Dockerfile` e o CI usam 22)
+- PostgreSQL 15 ou superior, ou o do compose
 
 As dependências de sistema dos hosts monitorados estão em
 [`docs/dependencias.md`](docs/dependencias.md). Elas não são opcionais: sem `ss`
@@ -230,9 +226,8 @@ naturalidade. Detalhes em [`backend/deploy/README.md`](backend/deploy/README.md)
 Para laboratório, `SSH_INSECURE_HOST_KEY=true` desliga a verificação, com aviso
 alto no log a cada conexão.
 
-As mais de 40 variáveis estão documentadas em
-[`docs/configuracao.md`](docs/configuracao.md) e comentadas no próprio
-`.env.example`.
+O `.env.example` traz 96 variáveis, comentadas no próprio arquivo e documentadas
+em [`docs/configuracao.md`](docs/configuracao.md).
 
 ### 2. Primeiro usuário — sem isto você não entra
 
@@ -258,42 +253,44 @@ O que o código faz, exatamente (`backend/internal/auth/bootstrap.go`):
 O usuário nasce com papel `admin` e **concessão global**. Remova
 `ADMIN_PASSWORD` do `.env` depois do primeiro acesso.
 
-### 3. Banco
+### 3. Subir pelo compose
 
-Com Docker:
+É o caminho principal. Antes, preencha no `.env` a `POSTGRES_PASSWORD` (vem vazia
+no `.env.example`, e o compose recusa subir sem ela), o `API_TOKEN` e os caminhos
+`SSH_KEY_PATH` e `SSH_KNOWN_HOSTS` do host, que o compose entrega ao backend como
+secrets.
+
+```bash
+docker compose up -d --build
+```
+
+O compose sobe o Postgres, ajusta o dono do volume de plantas, compila as imagens
+do backend e do frontend com a versão de `DOCKKEEPER_VERSAO` (`1.0.0` no
+`.env.example`; ausente, a imagem sai como `dev`) e publica o painel em
+`http://127.0.0.1:8081` (`PANEL_BIND` e `PANEL_PORT` mudam).
+
+As tabelas são criadas no boot por migrações SQL versionadas, embutidas no
+binário e aplicadas em ordem, cada uma na própria transação
+([ADR 012](docs/adr/012-migracoes-versionadas-em-sql.md)). Não há passo manual,
+mas faça `pg_dump` antes de subir uma versão nova sobre um banco com dado: o
+detalhe está em [`docs/operacao.md`](docs/operacao.md#migrações-do-banco).
+
+### 4. Subir sem container, para desenvolver
+
+Só o Postgres pelo compose, que o publica em **5433** no host (`POSTGRES_PORT`),
+e não em 5432, para não conflitar com um Postgres já instalado. A `DATABASE_URL`
+do `.env.example` aponta para a mesma porta.
 
 ```bash
 docker compose up -d postgres
-```
 
-⚠️ O `docker-compose.yml` exige `POSTGRES_PASSWORD` e recusa subir sem ela, mas
-essa variável **não está no `.env.example`**. Acrescente ao seu `.env` antes de
-rodar o compose:
-
-```env
-POSTGRES_PASSWORD="a-mesma-senha-que-esta-na-DATABASE_URL"
-```
-
-O compose publica o Postgres em **5433** por padrão (`POSTGRES_PORT`), e não em
-5432, para não conflitar com um Postgres já instalado na máquina. A
-`DATABASE_URL` do `.env.example` aponta para a mesma porta — as duas divergiam,
-e quem seguisse os dois arquivos literalmente conectava na porta errada sem
-receber pista do motivo.
-
-As tabelas são criadas sozinhas no boot, por `AutoMigrate`. Não há passo de
-migração manual.
-
-### 4. Backend
-
-```bash
 cd backend
-go mod tidy
+go mod download
 go run ./cmd/dockkeeper
 ```
 
-A API sobe em `:8080` (`API_ADDR` muda).
-
-### 5. Frontend
+A API sobe em `:8080` (`API_ADDR` muda). Rodado assim, o binário se declara
+`dev`; a versão só entra por `-ldflags`, como na seção abaixo.
 
 ```bash
 cd frontend
@@ -304,7 +301,22 @@ npm run dev
 O Vite serve em `http://localhost:5173`, que é o valor padrão de
 `ALLOWED_ORIGINS`.
 
----
+### Versão
+
+Painel, agente e coletor saem como 1.0.0. A versão não está escrita no código:
+entra no build por `-ldflags`, e sem ela o binário se declara `dev`.
+
+| O quê | Como compilar com a versão |
+|---|---|
+| Painel pelo compose | `DOCKKEEPER_VERSAO` no `.env` e `docker compose build` |
+| Painel fora do compose | `go build -ldflags "-X github.com/jvS0uzx/dock_keeper/internal/versao.Versao=1.0.0" ./cmd/dockkeeper`, dentro de `backend/` |
+| Agente de estação | `make agent-all VERSAO=1.0.0`, dentro de `backend/`; os binários saem em `backend/dist/` |
+| Coletor de unidade | `go build -ldflags "-X main.Version=1.0.0" ./cmd/collector`, no repositório do coletor |
+
+Onde a versão do painel aparece: na linha de subida do log
+(`Iniciando motor DockKeeper 1.0.0...`) e no campo `versao` de `/readyz` e
+`/api/readyz`, que só vem na resposta a quem apresenta sessão válida ou o
+`API_TOKEN`. As imagens levam o rótulo OCI `org.opencontainers.image.version`.
 
 ## Verificação
 
@@ -328,20 +340,23 @@ npx vitest run
 npm run build
 ```
 
-⚠️ **`npx tsc --noEmit` não checa nada neste projeto.** O `tsconfig.json` da raiz
-tem `"files": []` e só referências de projeto, então o comando percorre **0 dos
-36 arquivos** de `src/` e passa sempre. Use `npm run typecheck`. Um passo de
+**`npx tsc --noEmit` não checa nada neste projeto.** O `tsconfig.json` da raiz
+tem `"files": []` e só referências de projeto, então o comando não percorre
+nenhum arquivo de `src/` e passa sempre. Use `npm run typecheck`. Um passo de
 verificação que nunca falha é pior que passo nenhum, porque dá a impressão de
 cobertura.
 
-Para rodar os testes de integração, aponte um Postgres descartável:
+Para rodar os testes de integração, aponte um Postgres em que o usuário possa
+criar banco. Cada pacote cria o próprio banco descartável
+(`dk_teste_<pid>_<nanos>`) a partir dessa `DATABASE_URL` e o apaga no fim:
 
 ```bash
-export DATABASE_URL="postgres://postgres@127.0.0.1:5433/dockkeeper_test?sslmode=disable"
-go test ./...
+export DATABASE_URL="postgres://postgres:SENHA@127.0.0.1:5433/dockkeeper_test?sslmode=disable"
+TEST_EXIGE_BANCO=1 go test -p 1 ./...
 ```
 
----
+Com `TEST_EXIGE_BANCO=1`, teste que precisa de banco e não o alcança falha em vez
+de pular, como no CI. Detalhes em [`CONTRIBUTING.md`](CONTRIBUTING.md#testes).
 
 ## Contribuindo
 
@@ -349,9 +364,7 @@ go test ./...
   de um pull request.
 - [`SECURITY.md`](SECURITY.md) — como reportar uma vulnerabilidade em privado.
 - [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — conduta esperada de quem participa.
-- [`CHANGELOG.md`](CHANGELOG.md) — o que mudou, por data de entrega.
-
----
+- [`CHANGELOG.md`](CHANGELOG.md) — o que mudou em cada versão.
 
 ## Projetos relacionados
 

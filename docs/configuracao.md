@@ -59,11 +59,11 @@ que é exatamente o bug original.
 | `SESSION_TTL` | `12h` | Vida da sessão de login, formato `time.ParseDuration`. Sem renovação: vencida, o usuário entra de novo |
 | `HOST_OFFLINE_AFTER` | `30m` | Tempo sem ser visto a partir do qual um host do inventário aparece offline na tela de rede e na planta |
 
-⚠️ O padrão de `TRUSTED_PROXY_CIDRS` cobre o nginx do compose, mas também toda a LAN privada:
+O padrão de `TRUSTED_PROXY_CIDRS` cobre o nginx do compose, mas também toda a LAN privada:
 uma estação em `192.168.x` atrás do proxy pode forjar o início do `X-Forwarded-For`. Com clientes
 em faixa privada, restrinja a lista ao endereço do proxy (`TRUSTED_PROXY_CIDRS="172.18.0.5/32"`).
 
-⚠️ `TRUST_PROXY_HEADERS=true` **só** com proxy reverso à frente. Sem ele o
+`TRUST_PROXY_HEADERS=true` **só** com proxy reverso à frente. Sem ele o
 cabeçalho vem do próprio cliente, e o limite de tentativa por IP vira enfeite.
 Com ele, o nginx precisa de `proxy_set_header X-Forwarded-For
 $proxy_add_x_forwarded_for;` — senão o parque inteiro conta num balde só e um
@@ -103,11 +103,11 @@ nessa ordem, quem está bloqueado continua bloqueado.
 | `SSH_USE_SUDO` | `false` | Com usuário diferente de `root`, prefixa `sudo -n` e caminho absoluto no `tail` do `auth.log`, no `tail` do nginx, no `nginx -T` e no `ss -tulnp` — este último usado pelo radar **e** pela sonda de bancos, que sem ele não enxerga PostgreSQL rodando no host sob outro usuário. `sudo -n` que exija senha falha e a descoberta do lado do host se declara cega. Ver `docs/operacao.md` e `deploy/sudoers-dockkeeper-monitor.exemplo` |
 | `SSH_RECONNECT_MAX` | `5m` | Teto da espera entre reconexões. A espera começa em 5 s, dobra a cada queda e volta a 5 s depois de uma sessão que ficou de pé por 60 s ou mais, com variação de ±20 % |
 | `RTT_PROBE` | `true` | Grava o RTT medido pelo keepalive SSH (`rtt_ms`). Desligado, o keepalive continua detectando conexão morta, só não grava. Ver `docs/metricas.md` |
-| `RTT_PROBE_INTERVAL` | `30s` | Intervalo entre dois keepalives na conexão de coleta, formato `time.ParseDuration` |
-| `SSH_KEEPALIVE_MAX_MISSES` | `3` | Keepalives seguidos sem resposta (timeout de 3 s cada) que fazem o painel fechar a conexão e reconectar |
+| `RTT_PROBE_INTERVAL` | `30s` | Intervalo entre dois keepalives, formato `time.ParseDuration`. Vale para a conexão de coleta de métricas e também para os streams de vida longa: logs de container, `auth.log` (o SSE da tela de Segurança e a vigia de força bruta) e o stream do Nginx. Só a conexão de métricas grava RTT |
+| `SSH_KEEPALIVE_MAX_MISSES` | `3` | Keepalives seguidos sem resposta (timeout de 3 s cada) que fazem o painel fechar a conexão. Na coleta de métricas a conexão é reaberta com o backoff de `SSH_RECONNECT_MAX`; nos streams, fechar a conexão encerra o stream em vez de deixá-lo preso numa conexão meio aberta até o timeout do TCP |
 | `SSH_MAX_SESSIONS_PER_HOST` | `6` | Sessões SSH sob demanda simultâneas por servidor (logs, `auth.log`, radar, ações). A excedente recebe 503 sem abrir conexão. Os streams de fundo (métricas e nginx) não contam |
 | `SSH_PSQL_CMD` | ver abaixo | Como a sonda de banco invoca o `psql` na máquina remota. Vazio, o padrão depende de `SSH_USE_SUDO`: ligado usa `sudo -n -u postgres psql`, desligado usa `psql -U postgres`. Valor com metacaractere é recusado com log, porque é interpolado num comando remoto |
-| `SSH_MYSQL_CMD` | ver abaixo | Como a sonda de bancos invoca o cliente `mysql` no host remoto, para MySQL e MariaDB fora de container. Vazio, o padrão depende de `SSH_USE_SUDO`: ligado, com usuário diferente de root, usa `sudo -n mysql`; desligado usa `mysql`. Mesma regra de metacaractere do `SSH_PSQL_CMD` |
+| `SSH_MYSQL_CMD` | ver abaixo | Como a sonda de bancos invoca o cliente `mysql` no host remoto, para MySQL e MariaDB fora de container. Vazio, o padrão depende de `SSH_USE_SUDO`: ligado, com usuário diferente de root, usa `sudo -n mysql`; desligado usa `mysql`. Aceita só letras, dígitos, espaço e `._/-`, então `mysql -u dk_monitor` passa e `--defaults-file=...` não; valor recusado cai no padrão com log. Num host sem o binário `mysql` (MariaDB 11 só traz `mariadb`), a sonda troca `mysql` por `mariadb` no comando sozinha |
 
 O padrão sem sudo é `psql -U postgres` e não `psql` puro: conectado como `root`,
 o `psql` sem `-U` tentaria autenticar como o usuário `root` do banco, que em
@@ -125,12 +125,69 @@ leitura. O `sudo -n mysql` não tem como ser restrito por argumento no sudoers
 (a consulta vai no `-e`), por isso o exemplo de sudoers não o concede.
 
 Em container a sonda não usa `SSH_MYSQL_CMD`: roda o cliente (`mysql`, ou
-`mariadb` nas imagens novas que só trazem esse) com `docker exec`, lê a senha de
-`MYSQL_ROOT_PASSWORD` ou `MARIADB_ROOT_PASSWORD` do ambiente do próprio container
-e a entrega ao cliente por `MYSQL_PWD` dentro do exec — ela nunca aparece na
-linha de comando visível no `ps` do host. Sem senha disponível, tenta sem senha;
-se a autenticação falhar, a instância fica `sem_acesso` com o motivo. Toda
-conexão usa `--connect-timeout=5`.
+`mariadb` nas imagens novas que só trazem esse) com `docker exec ... sh -c`,
+como `root` do banco. A senha sai do ambiente do próprio container:
+`MYSQL_ROOT_PASSWORD` ou `MARIADB_ROOT_PASSWORD`, ou, na falta delas, o arquivo
+apontado por `MYSQL_ROOT_PASSWORD_FILE` ou `MARIADB_ROOT_PASSWORD_FILE` (o
+padrão de quem usa Docker secrets). Ela chega ao cliente por `MYSQL_PWD` dentro
+do exec e nunca aparece na linha de comando visível no `ps` do host. Sem senha
+disponível, tenta sem senha; se a autenticação falhar, a instância fica
+`sem_acesso` com o motivo. Imagem sem `sh` ou sem cliente (as distroless, por
+exemplo) aparece com estado `desconhecido` e o motivo "sem cliente mysql
+disponível". Container pausado ou reiniciando fica `inativo`. Toda conexão usa
+`--connect-timeout=5`.
+
+#### Usuário de leitura para a sonda
+
+Fora de container, o caminho recomendado é um usuário só de leitura em vez do
+`root`. Os privilégios mínimos, no MySQL:
+
+```sql
+CREATE USER 'dk_monitor'@'localhost' IDENTIFIED BY 'troque-esta-senha';
+GRANT SELECT, SHOW DATABASES, PROCESS, REPLICATION CLIENT ON *.* TO 'dk_monitor'@'localhost';
+```
+
+No MariaDB 10.5 ou mais novo o `REPLICATION CLIENT` virou `BINLOG MONITOR`, que
+não libera `SHOW REPLICA STATUS`. O privilégio de réplica ali é o
+`SLAVE MONITOR`:
+
+```sql
+CREATE USER 'dk_monitor'@'localhost' IDENTIFIED BY 'troque-esta-senha';
+GRANT SELECT, SHOW DATABASES, PROCESS, SLAVE MONITOR ON *.* TO 'dk_monitor'@'localhost';
+```
+
+O que falta quando um privilégio falta:
+
+| Sem | Efeito na tela Bancos |
+|---|---|
+| `PROCESS` | Conexões por base ficam nulas. Sem ele o `processlist` só mostra a própria sessão, e contar ali daria um zero falso |
+| `REPLICATION CLIENT` (MySQL) ou `SLAVE MONITOR` (MariaDB) | Papel `desconhecido`, porque nem `SHOW REPLICA STATUS` nem `SHOW SLAVE STATUS` respondem |
+
+A senha fica no host monitorado, num `~/.my.cnf` do usuário SSH com modo `600`:
+
+```ini
+[client]
+user=dk_monitor
+password=troque-esta-senha
+```
+
+Com o arquivo e `SSH_USE_SUDO` desligado, o padrão `mysql` já entra como
+`dk_monitor`; com `SSH_USE_SUDO` ligado o padrão vira `sudo -n mysql`, que roda
+como root e em geral lê o `~/.my.cnf` do root, não o do usuário SSH; nesse caso
+defina `SSH_MYSQL_CMD` sem o `sudo`. Sem `user=` no
+arquivo, aponte o usuário em `SSH_MYSQL_CMD="mysql -u dk_monitor"`. O mesmo
+`~/.my.cnf` vale para a instância em porta diferente da 3306, que a sonda
+consulta por TCP em `127.0.0.1`.
+
+A sonda tem um teste opcional contra bancos reais, que sobe `mysql:8.4` (primário
+e réplica), `mysql:8.0`, `mariadb:11` com senha em arquivo de segredo e uma
+instância sem acesso, e confere motor, versão, papel, tamanho, conexões e
+`sem_acesso`. Precisa de Docker e leva cerca de 1 minuto:
+
+```bash
+cd backend
+TESTE_MYSQL_REAL=1 go test -run TestSondaMySQLContraBancosReais ./scripts/
+```
 
 ## Sondas periódicas
 
@@ -311,7 +368,8 @@ inexistente é apenas registrada no log; a varredura continua, sem classificar.
 | `TREND_RETENTION_DAYS` | `400` | Tendência agregada por hora |
 | `HOST_RETENTION_DAYS` | `30` | Host do inventário sem ser visto |
 | `AUDIT_RETENTION_DAYS` | `365` | Log de auditoria |
-| `NETWORK_METRIC_RETENTION` | `72h` | Leitura bruta de interface SNMP (`metric_network_interfaces`). Duração Go (`72h`, `168h`), não dias. Ainda não há tendência horária de interface: passado o prazo, a leitura some |
+| `NETWORK_METRIC_RETENTION` | `72h` | Leitura bruta de interface SNMP (`metric_network_interfaces`). Duração Go (`72h`, `168h`), não dias. Ainda não há tendência horária de interface: passado o prazo, a leitura some. O mesmo prazo poda a interface que deixou de vir no envio do coletor, quando ela passa dele sem ser vista e não tem mais nenhuma leitura |
+| `ANNOTATION_RETENTION_DAYS` | `365` | Anotações dos painéis (`annotations`, pela coluna `at`). `0` desliga a poda: anotação nunca é apagada |
 
 Os prazos não são arbitrários e só fazem sentido juntos: métrica bruta é volumosa
 e vira tendência; tendência é barata e serve à comparação ano a ano; inventário é
@@ -320,7 +378,14 @@ consulta **depois** do incidente, e o incidente costuma ser descoberto meses
 depois.
 
 Valor inválido, zero ou negativo cai no padrão com aviso. Zero significaria
-"apagar tudo a cada passada", e um erro de digitação não pode ter esse efeito.
+"apagar tudo a cada passada", e um erro de digitação não pode ter esse efeito. A
+exceção é `ANNOTATION_RETENTION_DAYS`, em que `0` quer dizer "nunca podar";
+inválido ou negativo cai no padrão como os demais.
+
+A poda roda de hora em hora, em lotes de 5000 linhas com 100 ms de pausa entre
+eles, e repete o lote até esvaziar o que venceu: não há teto de linhas por ciclo.
+No desligamento ela para entre lotes e cancela o `DELETE` em curso. Detalhe em
+[`operacao.md`](operacao.md#retenção-e-poda).
 A mesma regra vale para `SESSION_TTL`, `HOST_OFFLINE_AFTER`, `ALERT_COOLDOWN`,
 `SSH_RECONNECT_MAX` e `SSH_MAX_SESSIONS_PER_HOST`.
 
@@ -354,8 +419,6 @@ Constantes de código, listadas porque a mensagem de erro `413` não diz o valor
 | Dispositivos por envio de telemetria SNMP | 256 |
 | Interfaces por dispositivo num envio SNMP | 1024 |
 
----
-
 ## Variáveis do agente
 
 Definidas **na máquina monitorada**, não no painel. Ver [`agente.md`](agente.md).
@@ -385,19 +448,16 @@ Todas de desenvolvimento. Ver [`../frontend/README.md`](../frontend/README.md).
 | `VITE_API_TOKEN` | Token de máquina, **ignorado no build de produção** |
 | `VITE_LB_IP` | IP do host do balanceador, comparado com `servers.host_ip` |
 
----
-
 ## Divergências encontradas
 
-O `.env.example` está **em sincronia perfeita com o código Go**: 36 variáveis
-documentadas, 36 lidas, nenhuma sobrando dos dois lados. Isso foi verificado
-comparando `os.Getenv` e os helpers (`envInt`, `envDuration`, `RetentionDays`,
-`remotePathFromEnv`) contra as chaves do arquivo.
+Esta seção já afirmou que o `.env.example` e o código liam exatamente as mesmas 36
+variáveis. O arquivo tem hoje 96, e a comparação com o código não foi refeita; a
+conferência automática que existe é a do compose, descrita abaixo.
 
-Cinco variáveis são lidas pelo `docker-compose.yml` e **não** pelo backend. Elas
+Algumas variáveis são lidas pelo `docker-compose.yml` e **não** pelo backend. Elas
 estavam ausentes do `.env.example`, o que fazia `docker compose up` falhar na
 cara de quem tinha copiado o exemplo — `POSTGRES_PASSWORD` é declarada no compose
-com `:?`, ou seja, obrigatória. Foram acrescentadas:
+com `:?`, ou seja, obrigatória. Hoje estão no arquivo:
 
 | Variável | Padrão | Quem lê |
 |---|---|---|
@@ -407,6 +467,8 @@ com `:?`, ou seja, obrigatória. Foram acrescentadas:
 | `POSTGRES_PORT` | `5433` | compose |
 | `PANEL_PORT` | `8081` | compose |
 | `PANEL_BIND` | `127.0.0.1` | compose — endereço em que o painel é publicado. O nginx do container fala HTTP puro; abrir para a rede (`0.0.0.0`) só com um proxy TLS na frente |
+| `DOCKKEEPER_VERSAO` | `dev` no compose, `1.0.0` no `.env.example` | compose — argumento de build `VERSAO` das imagens do backend e do frontend. No backend vira a versão do binário por `-ldflags`, registrada no log de subida e devolvida no campo `versao` do `/readyz` a quem tem credencial; nas duas imagens vira o rótulo `org.opencontainers.image.version`. Só muda a imagem no próximo `docker compose build` |
+| `DOCKKEEPER_UID`, `DOCKKEEPER_GID` | `1000` | compose — usuário com que o backend roda, para ler a chave SSH e o `known_hosts` do host |
 
 No compose, o serviço `backend` recebe **todo** o `.env` por `env_file`, então qualquer variável
 desta página vale também em container. Seis são fixadas pelo próprio compose e ignoram o que

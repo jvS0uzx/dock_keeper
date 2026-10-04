@@ -174,8 +174,14 @@ próxima leitura bem-sucedida limpa o erro.
 reinicia ou ganha um módulo; o `ifName` não. A reconciliação casa primeiro por
 `if_name` dentro do host e só cai para `if_index` quando o nome vem vazio. Com
 o mesmo nome em outro índice, a linha é a mesma: o `if_index` é atualizado e o
-histórico continua. Interface que some do envio **não é apagada**, só deixa de
-ter o `last_seen` renovado, para o histórico não sumir junto com um cabo solto.
+histórico continua. Interface que some do envio não é apagada na hora, só deixa
+de ter o `last_seen` renovado, para o histórico não sumir junto com um cabo
+solto. Ela sai na poda horária quando passa de `NETWORK_METRIC_RETENTION` sem ser
+vista e já não tem nenhuma leitura guardada.
+
+**Um dispositivo ruim não derruba o lote.** Dispositivo com IP inválido é
+descartado e contado em `rejeitados` na resposta, e bps negativo vira `NULL`; os
+outros equipamentos do envio são gravados normalmente.
 
 | Limite | Valor |
 |---|---|
@@ -193,8 +199,7 @@ entrada e saída da última leitura, erros e descartes do último ciclo; e o gr�
 de tráfego da interface escolhida.
 
 Ainda não existe: tendência horária de interface (passado o prazo, a leitura
-some), poda de interface que sumiu há muito tempo, alerta sobre interface e
-SNMP v3.
+some), alerta sobre interface e SNMP v3.
 
 ## Planta baixa
 
