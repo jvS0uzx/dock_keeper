@@ -3,6 +3,7 @@
 PROC_STAT="${DOCKKEEPER_PROC_STAT:-/proc/stat}"
 read -r _ u1 n1 s1 i1 rest < "$PROC_STAT"
 prev_total=$((u1+n1+s1+i1)); prev_idle=$i1
+sleep 1
 
 NET_DEV="${DOCKKEEPER_NET_DEV:-/proc/net/dev}"
 net_sample() {
