@@ -125,6 +125,13 @@ func HistoryHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "métrica inválida para container")
 			return
 		}
+		var doServidor int64
+		err := database.From(r.Context()).Model(&database.Container{}).
+			Where("id = ? AND server_id = ?", containerID, serverID).Count(&doServidor).Error
+		if err != nil || doServidor == 0 {
+			writeError(w, http.StatusNotFound, "container não encontrado neste servidor")
+			return
+		}
 		table, valueExpr, filterCol, filterVal = "metric_containers", expr, "container_id", containerID
 	} else {
 		expr, valid := serverMetricExpr(metric)
