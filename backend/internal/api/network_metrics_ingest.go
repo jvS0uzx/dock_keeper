@@ -114,12 +114,9 @@ func NetworkMetricsIngestHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("schema %d não suportado: este painel aceita o schema %d", p.Schema, esquemaDaTelemetriaDeRede))
 		return
 	}
-	if err := validarEnvioDeRede(&p); err != nil {
-		if errors.Is(err, errEnvioGrandeDemais) {
-			writeError(w, http.StatusRequestEntityTooLarge, err.Error())
-			return
-		}
-		writeError(w, http.StatusBadRequest, err.Error())
+	rejeitados, err := validarEnvioDeRede(&p)
+	if err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
 
@@ -144,24 +141,30 @@ func NetworkMetricsIngestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]int{"devices": len(p.Devices), "interfaces": interfaces})
+	writeJSON(w, http.StatusOK, map[string]int{"devices": len(p.Devices), "interfaces": interfaces, "rejeitados": rejeitados})
 }
 
-func validarEnvioDeRede(p *envioDeTelemetriaDeRede) error {
+func validarEnvioDeRede(p *envioDeTelemetriaDeRede) (int, error) {
 	if len(p.Devices) > maxDispositivosPorEnvio {
-		return fmt.Errorf("%w: %d dispositivos, o teto é %d", errEnvioGrandeDemais, len(p.Devices), maxDispositivosPorEnvio)
+		return 0, fmt.Errorf("%w: %d dispositivos, o teto é %d", errEnvioGrandeDemais, len(p.Devices), maxDispositivosPorEnvio)
 	}
+	for _, d := range p.Devices {
+		if len(d.Interfaces) > maxInterfacesPorAparelho {
+			return 0, fmt.Errorf("%w: %d interfaces num dispositivo, o teto é %d", errEnvioGrandeDemais, len(d.Interfaces), maxInterfacesPorAparelho)
+		}
+	}
+
+	validos := p.Devices[:0]
+	rejeitados := 0
 	for i := range p.Devices {
-		d := &p.Devices[i]
-		d.IP = strings.TrimSpace(d.IP)
-		ip := net.ParseIP(d.IP)
+		d := p.Devices[i]
+		ip := net.ParseIP(strings.TrimSpace(d.IP))
 		if ip == nil {
-			return fmt.Errorf("ip inválido no dispositivo %d: %q", i, d.IP)
+			rejeitados++
+			log.Printf("[Rede] dispositivo %d da unidade %q descartado: ip inválido", i, textoSeguro(p.SiteCode, 64))
+			continue
 		}
 		d.IP = ip.String()
-		if len(d.Interfaces) > maxInterfacesPorAparelho {
-			return fmt.Errorf("%w: %d interfaces em %s, o teto é %d", errEnvioGrandeDemais, len(d.Interfaces), d.IP, maxInterfacesPorAparelho)
-		}
 		d.SysName = textoSeguro(d.SysName, tetoSysName)
 		d.SysDescr = textoSeguro(d.SysDescr, tetoSysDescr)
 		d.Error = textoSeguro(d.Error, tetoErroSNMP)
@@ -169,9 +172,8 @@ func validarEnvioDeRede(p *envioDeTelemetriaDeRede) error {
 
 		for j := range d.Interfaces {
 			itf := &d.Interfaces[j]
-			if negativo(itf.InBps) || negativo(itf.OutBps) {
-				return fmt.Errorf("bps negativo na interface %d de %s", itf.IfIndex, d.IP)
-			}
+			itf.InBps = bpsSemNegativo(itf.InBps)
+			itf.OutBps = bpsSemNegativo(itf.OutBps)
 			itf.IfName = textoSeguro(itf.IfName, tetoInterface)
 			itf.IfDescr = textoSeguro(itf.IfDescr, tetoInterface)
 			itf.IfAlias = textoSeguro(itf.IfAlias, tetoInterface)
@@ -183,12 +185,17 @@ func validarEnvioDeRede(p *envioDeTelemetriaDeRede) error {
 			itf.InDiscards = semNegativo(itf.InDiscards)
 			itf.OutDiscards = semNegativo(itf.OutDiscards)
 		}
+		validos = append(validos, d)
 	}
-	return nil
+	p.Devices = validos
+	return rejeitados, nil
 }
 
-func negativo(v *float64) bool {
-	return v != nil && *v < 0
+func bpsSemNegativo(v *float64) *float64 {
+	if v == nil || *v < 0 {
+		return nil
+	}
+	return v
 }
 
 func semNegativo(v *int64) *int64 {
