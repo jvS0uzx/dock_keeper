@@ -18,15 +18,13 @@ rotas**.
 "Global" quer dizer concessão sem unidade. Ver
 [`autenticacao.md`](autenticacao.md).
 
----
-
 ## Métricas
 
 | Rota | Métodos | Exige | O que faz |
 |---|---|---|---|
 | `/api/metrics/catalogo` | GET | `viewer` | O registro único de métricas: `[{nome, rotulo, unidade, tem_tendencia, escopo, em_regra}]`. `escopo` é `servidor`, `container` ou `ambos`; `tem_tendencia=false` significa que períodos acima de 7 dias respondem 400 no histórico; `em_regra` diz se a métrica vale em regra de alerta e em painel de dashboard. A interface monta seus seletores a partir daqui |
 | `/api/metrics/live` | GET | `viewer` | Último estado conhecido de hosts, containers e balanceador. É o que o painel consulta em polling. `lb_window_sec` diz a janela, em segundos, em que `load_balancing[].requests_count` foi contado. Por servidor traz `cpu`, `load1`, `temperature_c`, `net_rx_bps`, `net_tx_bps` e `rtt_ms`, `null` quando não há medição |
-| `/api/metrics/history` | GET | `viewer` | Série temporal de uma métrica, com janela. Lê a tendência agregada nas janelas longas. `metric`: `cpu`, `mem`, `disk`, `load`, `temperature`, `latency` (handshake SSH), `rtt` (ms), `net_rx` e `net_tx` (bytes/s). `latency` e todo histórico de container (`container_id`) não têm tendência: período acima de `METRIC_RETENTION_DAYS` (7 dias) responde **400** em vez de devolver 7 dias como se fossem 30 |
+| `/api/metrics/history` | GET | `viewer` | Série temporal de uma métrica, com janela. Lê a tendência agregada nas janelas longas. `metric`: `cpu`, `mem`, `disk`, `load`, `temperature`, `latency` (handshake SSH), `rtt` (ms), `net_rx` e `net_tx` (bytes/s). `latency` e todo histórico de container (`container_id`) não têm tendência: período acima de `METRIC_RETENTION_DAYS` (7 dias) responde **400** em vez de devolver 7 dias como se fossem 30. Com `container_id`, o container precisa pertencer ao servidor cujo escopo foi conferido; de outro servidor, inexistente ou com UUID inválido, responde 404 |
 | `/api/logs/search` | GET | `viewer` | Busca no histórico de linhas de log, recortada por unidade |
 
 ### Janela do histórico
@@ -168,7 +166,7 @@ responde `GET` e `/pins` só `PUT`.
 | Rota | Métodos | Exige | O que faz |
 |---|---|---|---|
 | `/api/alerts` | GET | `viewer` | Alertas disparados, recortados por unidade **no SQL**, antes do `limit` (sem unidade só para acesso global). `status`: `open` (padrão), `acked`, `resolved` ou `all`; `limit` de 1 a 500 (padrão 100); `from` e `to` em RFC3339 sobre `created_at`; `site_id`: id da unidade, `none` (só os sem unidade, exige acesso global) ou `all`/ausente (tudo o que a pessoa pode ver). Unidade fora do alcance responde 403; valor inválido, 400. Cada linha traz chave, severidade, texto, origem (`server_id`, `site_id`, `rule_id`, mais `server_name` e `site_name` resolvidos, `null` quando não há), a entrega (`delivery`, `attempts`, `next_attempt_at`, `last_attempt_at`, `last_error`) e o ciclo de vida (`renotify_count`, `last_notified_at`, `last_seen_at`) |
-| `/api/alerts/summary` | GET | `viewer` | `{"open":n,"acked":n,"falhou":n}` no alcance de quem pergunta, contado no SQL e sem teto de linhas. Aceita o mesmo `site_id` da listagem. `falhou` conta alerta aberto cuja entrega desistiu |
+| `/api/alerts/summary` | GET | `viewer` | `{"open":n,"acked":n,"falhou":n,"fila_pendente":n,"fila_atraso_seg":n}` no alcance de quem pergunta, contado no SQL e sem teto de linhas. Aceita o mesmo `site_id` da listagem. `falhou` conta alerta aberto cuja entrega desistiu. `fila_pendente` conta alerta não resolvido em `pendente` cuja próxima tentativa já venceu; `fila_atraso_seg` é há quantos segundos o mais antigo deles espera, inteiro, ou `null` quando não há nenhum |
 | `/api/alerts/ack` | POST | **operador** na unidade | Reconhece o alerta `?id=N`: grava `acked_at` e `acked_by`. Alerta sem unidade exige operador global. Viewer e sessão de máquina recebem 403; fora do alcance, 404; já resolvido, 409. Auditado como `alert.ack` |
 | `/api/alerts/resolve` | POST | **operador** na unidade | Resolve o alerta `?id=N`. Mesmos erros do `ack`, mais 403 para quem não é operador. Auditado como `alert.resolve` |
 | `/api/alerts/rules` | GET, POST, PUT, PATCH, DELETE | `viewer` / **operador global** | Regras de alerta. O `GET` é recortado por unidade. `metric`: `cpu`, `mem`, `disk`, `load`, `temperature`, `net_rx`, `net_tx` ou `rtt`. `"enabled"` omitido no `POST` vale `true`; `false` é gravado como `false` |
@@ -177,8 +175,8 @@ responde `GET` e `/pins` só `PUT`.
 
 | Rota | Métodos | Exige | O que faz |
 |---|---|---|---|
-| `/api/ingest/metrics` | POST | credencial `agent` | Push de métricas do agente. `cpu` e `load1` são **opcionais**: ausentes gravam `NULL` (a amostra ainda vale por memória, disco e rede) e nunca viram zero, então não disparam regra em falso; `0` explícito continua sendo medição. `net_rx_bps` e `net_tx_bps` (bytes/s) são opcionais; ausente ou negativo vira `NULL` |
-| `/api/ingest/inventory` | POST | credencial `collector` | Push de inventário do coletor remoto. `report_interval_sec` (opcional) declara de quanto em quanto tempo o coletor envia; fica gravado na credencial e é a base do alerta de ausência. Sem ele o painel assume 900 s |
+| `/api/ingest/metrics` | POST | credencial `agent` | Push de métricas do agente, com `schema` (ver [Contrato versionado](#contrato-versionado)). `cpu` e `load1` são **opcionais**: ausentes gravam `NULL` (a amostra ainda vale por memória, disco e rede) e nunca viram zero, então não disparam regra em falso; `0` explícito continua sendo medição. `net_rx_bps` e `net_tx_bps` (bytes/s) são opcionais; ausente ou negativo vira `NULL` |
+| `/api/ingest/inventory` | POST | credencial `collector` | Push de inventário do coletor remoto, com `schema` (ver [Contrato versionado](#contrato-versionado)). `report_interval_sec` (opcional) declara de quanto em quanto tempo o coletor envia; fica gravado na credencial e é a base do alerta de ausência. Sem ele o painel assume 900 s |
 | `/api/ingest/network-metrics` | POST | credencial `collector` | Telemetria SNMP do coletor remoto, contrato versionado `schema: 1`. Detalhe em [Telemetria SNMP](#telemetria-snmp) |
 
 Estas rotas **não passam pelos wrappers comuns**: sem CORS de navegador, e a
@@ -216,17 +214,37 @@ tipo e com aviso no log a cada uso. Ver o ADR
 
 | Resposta | Quando |
 |---|---|
+| 400 | JSON inválido, `schema` não aceito (ver abaixo), ou `site_code` vazio ou desconhecido quando a credencial não tem unidade |
 | 401 | Credencial ausente, inválida ou revogada, ou token compartilhado com `ALLOW_LEGACY_INGEST_TOKEN` desligada |
 | 403 | Credencial válida de outro tipo |
 | 409 | Unidade declarada diferente da unidade da credencial (`*.site_mismatch`) |
-| 413 | Inventário com mais de 5000 hosts, telemetria com mais de 256 dispositivos ou de 1024 interfaces num dispositivo, ou corpo acima do teto |
+| 413 | Corpo acima do teto (4 MB no inventário e na telemetria SNMP, 128 KB nas métricas), inventário com mais de 5000 hosts, ou telemetria com mais de 256 dispositivos ou de 1024 interfaces num dispositivo |
+
+Credencial com unidade dispensa o `site_code`: a unidade sai da credencial, e um
+`site_code` declarado só é conferido contra ela (409 quando diverge, 400 quando
+não existe).
+
+### Contrato versionado
+
+As três rotas de ingestão leem o campo `schema`. A versão atual do contrato é
+`1`, e o agente e o coletor 1.0.0 a declaram em todo envio.
+
+| Rota | `schema` ausente ou `0` | `schema: 1` | Outro valor |
+|---|---|---|---|
+| `/api/ingest/metrics` | aceito como 1 (agente anterior à 1.0.0) | aceito | 400 |
+| `/api/ingest/inventory` | aceito como 1 (coletor anterior à 1.0.0) | aceito | 400 |
+| `/api/ingest/network-metrics` | 400 | aceito | 400 |
+
+A recusa é a mesma nas três: `{"error":"schema N não suportado; este painel aceita 1"}`.
+A telemetria SNMP nasceu versionada e não tem envio legado a acolher, por isso
+exige o campo. Uma mudança de formato futura sobe o número, para que um corpo
+novo nunca seja gravado como se fosse o antigo.
 
 ### Telemetria SNMP
 
 `POST /api/ingest/network-metrics` recebe o que o coletor leu por SNMP. O coletor
 calcula o delta dos contadores; o painel só guarda. O contrato é o abaixo, e
-`schema` diferente de `1` é recusado com 400 para que uma mudança de formato nunca
-seja gravada como se fosse a antiga.
+`schema` diferente de `1`, inclusive ausente, é recusado com 400.
 
 ```json
 {
@@ -255,19 +273,22 @@ seja gravada como se fosse a antiga.
 | Campo | Regra no painel |
 |---|---|
 | `uptime_sec`, `speed_mbps`, `in_bps`, `out_bps`, `in_errors`, `out_errors`, `in_discards`, `out_discards` | Anuláveis. `null` grava `NULL`, nunca zero |
-| `in_bps`, `out_bps` negativos | **400** no lote inteiro: delta negativo é defeito do coletor |
-| Contadores, `speed_mbps` e `uptime_sec` negativos | Gravados como `NULL` (não medido) |
+| `in_bps`, `out_bps`, contadores, `speed_mbps` e `uptime_sec` negativos | Gravados como `NULL` (não medido); o resto do dispositivo é gravado |
 | `oper_status`, `admin_status` | `up`, `down`, `testing`, `unknown`, `dormant`, `notPresent`, `lowerLayerDown`, sem diferenciar maiúscula; fora disso vira `unknown` |
-| `ip` | Inválido é **400** no lote inteiro |
+| `ip` | Inválido descarta só aquele dispositivo, contado em `rejeitados` e registrado no log do painel; os demais são gravados |
 | `sys_name`, `sys_descr` | Truncados em 255 caracteres |
 | `if_name`, `if_descr`, `if_alias` | Truncados em 128 caracteres |
 | `error` | Truncado em 200 caracteres; vazio num dispositivo inalcançável vira `sem resposta SNMP` |
 | `collected_at` | Ausente, ilegível ou mais de 5 min no futuro: vale o relógio do painel |
 | Campo desconhecido | Ignorado |
 
-Resposta 200: `{"devices": n, "interfaces": m}`, em que `m` conta as leituras
-gravadas. As demais respostas seguem a tabela acima; a unidade divergente grava
-`network_metrics.site_mismatch`.
+Resposta 200: `{"devices": n, "interfaces": m, "rejeitados": r}`, em que `n` conta
+os dispositivos aceitos, `m` as leituras de interface gravadas e `r` os
+dispositivos descartados por IP inválido. Um lote com dispositivo ruim continua
+sendo gravado: o 400 fica para JSON inválido e `schema` diferente de 1 (e para o
+`site_code` sem unidade resolvível), o 409 para a unidade divergente, que grava
+`network_metrics.site_mismatch`, e o 413 para os tetos de 4 MB, 256 dispositivos
+e 1024 interfaces por dispositivo.
 
 ## Identidade de dispositivo
 
@@ -305,12 +326,13 @@ continuar apontando para um dispositivo que existiu.
 |---|---|---|---|
 | `/api/audit` | GET | **admin global** | Log de auditoria, paginado e filtrável por ator, ação, resultado, unidade e intervalo |
 | `/healthz` | GET | — | Liveness para o orquestrador. Sem credencial e sem tocar no banco |
-| `/readyz` | GET | — | Prontidão: 200 `{"status":"ok"}` com o banco respondendo ao ping em até 2 s; 503 com o banco nulo ou fora do ar. Sem credencial o corpo traz só `status`, `alertas` (`ok`, `degradado` ou `desligado`) e os contadores `logs_descartados`, `alertas_falhos` e `alertas_sem_canal`. Com sessão válida ou token de máquina (`Authorization: Bearer`), traz também `alertas_detalhe` e `degradado` com a lista de motivos: o erro cru do canal cita o `TELEGRAM_CHAT_ID` e não é público. O status HTTP é o mesmo nos dois casos e continua vindo só do banco |
-| `/metrics` | GET | `viewer` | Contadores do processo em texto (`dockkeeper_*`): alertas enfileirados, entregues e falhos, logs descartados, sessões SSH abertas, reconexões, pânicos recuperados e migrações aplicadas Canal de alerta degradado **não** derruba a prontidão: só o banco decide o status HTTP. Sem credencial |
+| `/readyz` | GET | — | Prontidão: 200 `{"status":"ok"}` com o banco respondendo ao ping em até 2 s; 503 com o banco nulo ou fora do ar. Sem credencial o corpo traz só `status`, `alertas` (`ok`, `degradado` ou `desligado`) e os contadores `logs_descartados`, `alertas_falhos` e `alertas_sem_canal`. Com sessão válida ou token de máquina (`Authorization: Bearer`), traz também `versao` (a versão do binário, `dev` quando compilado sem `-ldflags`), `alertas_detalhe` e `degradado` com a lista de motivos: o erro cru do canal cita o `TELEGRAM_CHAT_ID` e não é público. O status HTTP é o mesmo nos dois casos e continua vindo só do banco |
+| `/metrics` | GET | `viewer` | Contadores do processo em texto (`dockkeeper_*`): alertas enfileirados, entregues, falhos, descartados e sem canal, alertas na fila e atraso da fila em segundos, logs descartados, sessões SSH abertas, reconexões, pânicos recuperados e migrações aplicadas. Ver [`operacao.md`](operacao.md#log-e-contadores) |
 
 `/api/audit` é admin global porque a tabela mostra ação de **todas** as unidades.
 
----
+Canal de alerta degradado **não** derruba a prontidão: só o banco decide o status
+HTTP do `/readyz`.
 
 ## Convenções
 

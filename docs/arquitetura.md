@@ -37,8 +37,9 @@ Antes ele era lido do disco em runtime, o que amarrava o serviço ao diretório 
 trabalho e quebrava a coleta quando o deploy copiava só o executável.
 
 **O que ela dá.** CPU, memória, disco, load, uptime, temperatura, a lista de
-containers com estado e consumo, o access log do Nginx (quando `collect_nginx`
-está ligado no servidor) e o `auth.log`. É a única fonte que permite **agir** no
+containers com estado e consumo, o access log do Nginx (quando a sonda do Nginx
+o encontra ativo, com upstream e log legível, ou quando `collect_nginx` foi ligado
+à mão no servidor) e o `auth.log`. É a única fonte que permite **agir** no
 host: `start`, `stop` e `restart` de container passam por aqui.
 
 **O que ela não faz.** Não alcança máquina sem SSH — estação Windows, dispositivo

@@ -35,9 +35,13 @@ linhas e nenhuma dependência nova.
   cada coluna, índice com `IF NOT EXISTS` e constraint dentro de bloco `DO` que
   consulta `pg_constraint`. Nada de tabela existente é recriado, nenhum tipo é
   alterado e nenhuma linha é tocada: ela só cria o que falta.
-- **Regra de hash do baseline:** como a 001 é convergente, o hash dela é
-  **atualizado** quando muda, em vez de derrubar o boot. Da 002 em diante a regra
-  continua estrita: arquivo aplicado que muda recusa subir.
+- **Regra de hash do baseline:** a 001 roda em todo boot por ser convergente,
+  mas o hash dela segue a mesma regra estrita das demais, com uma exceção só: o
+  banco adotado do `AutoMigrate`, que gravou o hash do snapshot da `7feb083`
+  (`hashDoBaselineLegado` em `internal/database/migracoes.go`). Nesse banco o
+  hash registrado é trocado pelo atual na primeira subida. Em qualquer outro
+  caso, hash da 001 diferente do registrado recusa o boot com a mesma mensagem
+  das outras migrações. Da 002 em diante, arquivo aplicado que muda recusa subir.
 - `DB_AUTOMIGRATE=true` **foi removido em 2026-09-19**. O banco criado por ele saía sem
   9 chaves estrangeiras, 11 CHECKs, o índice trigram e o índice único de e-mail: dois
   caminhos para o mesmo esquema divergem em silêncio, e o mais fraco era justamente o
@@ -55,6 +59,16 @@ quebrava no boot ao criar FK de tabela inexistente, e o painel não subia. Uma c
 acrescentada a uma tabela antiga pela convergência nasce **nulável**, enquanto num
 banco novo ela vem do `CREATE TABLE` com a restrição original; é a diferença aceita
 em troca de nunca reescrever tabela com dado.
+
+### Revisão de 2026-10-04: o baseline deixou de trocar de hash livremente
+
+A primeira versão desta decisão atualizava o hash da 001 sempre que ele mudava,
+porque a migração é convergente. Isso convidava a editar a 001 em vez de criar
+uma migração nova: a edição passava em silêncio no banco do desenvolvedor e
+divergia do de quem já tinha migrado. A troca agora só é aceita a partir do
+hash legado. Para a edição aparecer já na suíte, e não no boot de alguém,
+`TestBaselineEmbutidoNaoMudou` fixa o hash atual do arquivo; quem mexer na 001
+vê esse teste falhar com a instrução de criar uma migração nova.
 
 ## Consequências
 

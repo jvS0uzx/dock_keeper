@@ -81,7 +81,7 @@ Bem menos exigente, porque o agente mede pela biblioteca e não por shell:
 | Saída TCP para as faixas varridas | Sondagem de portas | Inventário sem classificação |
 | `/proc/net/arp` | Endereço MAC dos hosts | Inventário sem MAC |
 
-### ⚠️ `/proc/net/arp` em container
+### `/proc/net/arp` em container
 
 Dentro de um container, `/proc/net/arp` é a tabela ARP do **namespace de rede**,
 não a do host. A varredura local enxerga quase nada.
@@ -105,9 +105,7 @@ coisas desta lista: o resolvedor de DNS reverso e os certificados raiz. Em
 | Ferramenta | Versão | Onde está declarada |
 |---|---|---|
 | Go | 1.26.5+ | `backend/go.mod` |
-| Node.js | 22+ | `frontend/Dockerfile`, `.github/workflows/ci.yml` |
+| Node.js | 22+ | `engines` do `frontend/package.json`, `frontend/Dockerfile`, `.github/workflows/ci.yml` |
 | PostgreSQL | 15+ | `docker-compose.yml` |
 
-⚠️ A máquina onde esta documentação foi escrita roda **Node 20**, e o `npm` avisa
-que não suporta essa versão. O build e os testes passaram mesmo assim, mas o CI
-usa 22 — divergência a resolver antes de confiar em "passa aqui".
+Com Node mais antigo que 22, o `npm` avisa que a versão não atende o `engines`.

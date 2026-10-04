@@ -211,7 +211,8 @@ próprio intervalo.
 ## Balanceador
 
 `MetricLoadBalancer` conta requisições por `upstream_addr` a partir do access log
-do Nginx, num host com `collect_nginx` ligado. A janela exibida no painel é de 5
+do Nginx, num host cujo access log o painel acompanha: descoberto pela sonda do
+Nginx (ativo, com upstream e log legível) ou com `collect_nginx` ligado à mão. A janela exibida no painel é de 5
 segundos.
 
 Desde a correção de recorte por unidade, a linha carrega `server_id` e `site_id`
@@ -236,7 +237,7 @@ chave (`ALERT_COOLDOWN`) e o mesmo piso (`ALERT_MIN_SEVERITY`). Todos carregam a
 
 | Aviso | Chave | Quando |
 |---|---|---|
-| `[CRITICO]` stream do nginx caiu | `nginx_down:<servidor>` | A sessão que lê o access log cai, em servidor com `collect_nginx` |
+| `[CRITICO]` stream do nginx caiu | `nginx_down:<servidor>` | A sessão que lê o access log cai, em servidor cujo log o painel acompanha (pela sonda ou por `collect_nginx`) |
 | `[ALERTA]` upstream com 5xx | `lb_upstream_5xx:<servidor>:<upstream>` | Na janela `LB_WINDOW` (5 min), o upstream recebeu pelo menos `LB_MIN_REQUESTS` (20) requisições e a proporção de 5xx chegou a `LB_ERROR_RATIO` (0,5) |
 | `[ALERTA]` força bruta | `bruteforce:<servidor>:<ip>` | Um mesmo IP de origem acumulou `BRUTEFORCE_THRESHOLD` (10) ou mais tentativas falhas na janela `BRUTEFORCE_WINDOW` (5 min) |
 | `[CRITICO]` VPS inalcançável | `host_unreachable:<servidor>` | O stream de métricas por SSH cai |
@@ -328,3 +329,17 @@ desenho quando o tráfego zerava. Agora a participação vem de uma janela de
 conhecidos do servidor, e pode ser fixada à mão em `servers.behind_lb`. O `GET
 /api/metrics/live` entrega o resultado já resolvido em `behind_lb`, com a procedência em
 `behind_lb_origem`.
+
+### Legenda da malha
+
+A tela inicial e a tela do Nginx desenham a aresta entre balanceador e destino com a
+mesma convenção, tirada de `frontend/src/lib/upstream.ts`:
+
+| Traço | Estado | Quando |
+|---|---|---|
+| Tracejado `4 4`, cor apagada | parada | Aresta declarada na configuração do Nginx sem nenhuma requisição na janela |
+| Tracejado `5 5`, meio transparente | potencial | Aresta que sai de um balanceador de reserva, que não recebe tráfego enquanto o principal responde |
+| Contínua, com pontos animados | ativa | Aresta com requisição na janela. Na tela do Nginx a cor segue a severidade do upstream |
+
+Uma aresta parada não é defeito: é o destino que a configuração conhece e que o tráfego
+ainda não usou, como a VPS que acabou de entrar no balanceador.

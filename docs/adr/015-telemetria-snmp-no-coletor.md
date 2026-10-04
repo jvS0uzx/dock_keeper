@@ -49,20 +49,34 @@ rollup horário ainda.
 equipamento gerenciável fala. v3 (autenticação e privacidade) entra no coletor
 sem mudar o contrato, porque a credencial SNMP nunca chega ao painel.
 
+### Revisão de 2026-10-04: lote parcial e poda de interface
+
+Duas decisões acima foram revistas antes da 1.0.0, e o texto original fica como
+registro:
+
+- **Lote parcial em vez de lote inteiro recusado.** Recusar o envio todo por um
+  IP inválido ou um bps negativo jogava fora a leitura de todos os outros
+  equipamentos da filial naquele ciclo. Agora o dispositivo de IP inválido é
+  descartado e contado em `rejeitados` na resposta 200, que o coletor registra
+  como aviso no log dele, e `in_bps`/`out_bps` negativos viram `NULL` como os
+  demais campos negativos. O 400 ficou para JSON inválido e `schema` diferente
+  de 1.
+- **Interface que some do envio é podada.** A poda horária tira a interface que
+  passou de `NETWORK_METRIC_RETENTION` sem ser vista e não tem mais nenhuma
+  leitura, em vez de esperar o host ser apagado.
+
 ## Consequências
 
 - O painel continua sem nenhuma porta UDP nem dependência SNMP, e a comunidade
   não sai da filial.
 - Coletor e painel evoluem separados, presos só ao contrato `schema: 1`. Um
   painel antigo recusa um coletor novo com 400 explícito em vez de gravar errado.
-- Um lote inteiro é recusado por um único IP inválido ou bps negativo. É
-  proposital: o defeito aparece no log do coletor em vez de virar buraco
-  silencioso, ao custo de perder aquele ciclo.
+- Um dispositivo com IP inválido é descartado e contado em `rejeitados`, sem
+  derrubar o resto do lote; bps negativo vira `NULL` (revisão de 2026-10-04).
 - Com 72 h e sem tendência, não dá para comparar a semana passada nem planejar
   capacidade. O rollup horário de interface é a próxima pendência do bloco.
-- Interface que deixou de existir fica na tabela até o host ser podado. Com
-  módulos trocados com frequência a lista cresce; poda por idade de interface é
-  pendência.
+- Interface que deixou de existir sai na poda depois de `NETWORK_METRIC_RETENTION`
+  sem ser vista e sem leitura restante (revisão de 2026-10-04).
 - O `last_seen` do host passa a ser renovado pela leitura SNMP. Switch que não
   abre porta TCP nenhuma deixa de sair do inventário por `HOST_RETENTION_DAYS`
   enquanto responder SNMP.

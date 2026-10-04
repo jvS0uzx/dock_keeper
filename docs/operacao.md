@@ -2,7 +2,8 @@
 
 ## Retenção e poda
 
-Cinco prazos, todos configuráveis. Ver [`configuracao.md`](configuracao.md).
+Os prazos principais, todos configuráveis. A lista completa está em
+[`configuracao.md`](configuracao.md#retenção).
 
 | Dado | Padrão | Racional |
 |---|---|---|
@@ -11,10 +12,20 @@ Cinco prazos, todos configuráveis. Ver [`configuracao.md`](configuracao.md).
 | Tendência horária | 400 dias | Permite comparar um mês com o mesmo mês do ano anterior |
 | Host do inventário | 30 dias | Cadastro, não série. Some quando o equipamento some |
 | Auditoria | 365 dias | Consultada **depois** do incidente, que costuma ser descoberto meses depois |
+| Anotação de painel | 365 dias | Explica o degrau no gráfico de tendência quando alguém compara um mês com o mesmo mês do ano anterior. `0` desliga a poda |
+| Leitura de interface SNMP | 72 h | Série bruta, ainda sem tendência horária |
 
-A poda roda de hora em hora, **em lotes com pausa**. Um `DELETE` sem limite numa
-tabela grande bloqueia e produz bloat; os lotes têm teto por passada, e o que
-sobra fica para o ciclo seguinte, registrado no log.
+A poda roda de hora em hora, **em lotes com pausa**: `DELETE` de até 5000 linhas
+por vez, com 100 ms entre um lote e outro, repetido até o lote vir incompleto. Um
+`DELETE` sem limite numa tabela grande bloqueia e produz bloat; o lote resolve
+isso sem deixar sobra, porque não há teto de lotes por ciclo. Uma versão anterior
+parava em 200 lotes por hora, e a tabela que recebia mais de 1 milhão de linhas
+por hora crescia sem limite. No desligamento a poda para entre lotes e o `DELETE`
+em curso é cancelado junto com o contexto do processo.
+
+Na mesma passada sai a interface SNMP que deixou de vir no envio do coletor: a
+que está há mais de `NETWORK_METRIC_RETENTION` sem ser vista e já não tem nenhuma
+leitura. Antes ela só saía quando o host inteiro era apagado.
 
 ### A ordem entre rollup e poda importa
 
@@ -333,6 +344,17 @@ tail -n 3 /var/log/nginx/access.log | grep ' to: '
 Sem saída, o formato ainda não está valendo para esse `server`. Um `access_log` declarado
 dentro de um bloco `server` ou `location` sobrepõe o do bloco `http`.
 
+O painel também avisa sozinho. Enquanto acompanha o access log de um host, ele conta a
+cada minuto quantas linhas chegaram e quantas o parser reconheceu, e quando menos de 1%
+foi reconhecida grava no log:
+
+```
+[Nginx] vps-01: 1840 linhas recebidas, 0 reconhecidas; o access log não está no formato exigido (ver docs/operacao.md#formato-do-access-log-do-nginx)
+```
+
+O aviso repete a cada minuto enquanto o formato continuar errado, e para quando a
+proporção volta a passar de 1%. Minuto sem nenhuma linha não gera aviso.
+
 ## O que olhar quando quebra
 
 ### O painel não sobe
@@ -343,6 +365,12 @@ dentro de um bloco `server` ou `location` sobrepõe o do bloco `http`.
 | `Configuração SSH inválida` | Falta `SSH_KNOWN_HOSTS`. Ver [`../backend/deploy/README.md`](../backend/deploy/README.md) |
 | `Falha crítica ao conectar no banco` | `DATABASE_URL` errada, ou banco fora |
 | `sorry, too many clients` | O teto do pool não cabe no `max_connections`. Ver `DB_MAX_OPEN_CONNS` |
+| `migração NNN_nome mudou depois de aplicada` | Um arquivo de migração já aplicado foi editado. Ver [Migrações do banco](#migrações-do-banco) |
+
+Quando sobe, o painel registra a versão (`Iniciando motor DockKeeper 1.0.0...`) e o
+endereço em que escuta, montado a partir do `API_ADDR`: `[API] escutando em
+http://localhost:8080`. Host vazio, `0.0.0.0` e `[::]` aparecem como `localhost`;
+um host explícito, como `127.0.0.1:18080`, aparece como está.
 
 ### Uma tela está vazia sem erro
 
@@ -351,10 +379,18 @@ Esta é a classe de falha mais traiçoeira do sistema, e quase sempre é uma des
 | Tela | Causa provável |
 |---|---|
 | Segurança (auth.log) | Caminho de log errado para a distribuição. Ver `SSH_AUTH_LOG_PATH` |
-| Descoberta de SSL | Nenhum host com `collect_nginx` ligado — não há access log para observar |
-| Malha sem tráfego, ou Descoberta de SSL vazia com o Nginx coletado | Access log no formato `combined`. Ver [Formato do access log do Nginx](#formato-do-access-log-do-nginx) |
+| Descoberta de SSL | Nenhum host com o access log acompanhado. O painel só abre o stream quando a sonda do Nginx o encontra ativo, com upstream declarado e log legível pelo usuário SSH, ou quando `collect_nginx` foi ligado à mão no servidor. O estado da sonda (`nginx_estado`) e o motivo aparecem na tela Servidores |
+| Malha sem tráfego, ou Descoberta de SSL vazia com o Nginx coletado | Access log no formato `combined`. O sintoma no log do painel é `[Nginx] <host>: X linhas recebidas, Y reconhecidas; o access log não está no formato exigido`. Ver [Formato do access log do Nginx](#formato-do-access-log-do-nginx) |
 | Inventário de rede | `DISCOVERY_CIDRS` vazio, ou painel em container sem `network_mode: host` |
 | Inventário, numa unidade só | A varredura local se desligou porque a unidade tem coletor registrado. O log diz |
+
+### Host recém-conectado sem amostra
+
+A primeira amostra de métricas por SSH sai cerca de 1 s depois de a sessão abrir:
+o script lê `/proc/stat`, espera 1 s e lê de novo, para a CPU da primeira amostra
+ser medida sobre uma janela de verdade. As seguintes saem a cada
+`SSH_COLLECT_INTERVAL`. Host conectado há mais de alguns segundos sem nenhuma
+amostra é problema no script remoto, não espera.
 
 ### Métrica parada, host "offline" reportando
 
@@ -377,6 +413,28 @@ cadeia e hostname de verdade — antes só olhava a data de validade. Popule
 
 Certificado autoassinado continua vermelho, e corretamente: é a tela existir para
 detectar isso.
+
+## Relógio sincronizado
+
+O painel compara horários o tempo todo, e quase nunca com uma hora que veio de fora:
+amostra por SSH e push do agente são gravadas com o relógio do painel, e as janelas são
+calculadas ora no processo (`time.Now`), ora no banco (`NOW()`). Por isso a máquina do
+painel e a do Postgres precisam do mesmo relógio, com NTP (`chrony` ou
+`systemd-timesyncd`). Onde a diferença pesa:
+
+| Onde | Efeito de relógio divergente |
+|---|---|
+| Janela de "online" e dados ao vivo | A amostra é gravada com a hora do painel e a janela é conferida com `NOW()` do banco. Painel atrasado em relação ao banco faz host ativo parecer offline e sumir da malha e do ao vivo |
+| Retenção | O corte de cada poda é `agora` menos o prazo, pelo relógio do painel. Um relógio adiantado poda antes da hora |
+| Tendência horária | O rollup fecha a hora por `date_trunc('hour', NOW())` no banco |
+| Alertas | Duração mínima de regra, `ALERT_COOLDOWN`, backoff de entrega, `ALERT_RESUME_HOURS` e o atraso da fila são medidos pelo relógio do painel contra horários gravados |
+| Sessão, convite e ticket | `SESSION_TTL`, a validade de 24 h do convite e os 30 s do ticket de SSE |
+| Telemetria SNMP | É a única gravada com a hora do coletor (`collected_at`). Coletor mais de 5 min adiantado é ignorado e vale a hora do painel; coletor atrasado grava no passado, e uma leitura mais velha que `NETWORK_METRIC_RETENTION` já nasce podável |
+
+Os hosts monitorados não precisam estar sincronizados com o painel para as métricas,
+mas vale sincronizá-los também: as linhas do `auth.log` e do access log do Nginx trazem no
+texto a hora do host, e o painel as grava com a própria hora. Com relógios divergentes as
+duas não batem na hora de investigar um incidente.
 
 ## Uma instância só
 
@@ -451,7 +509,9 @@ Depois de migrar, `SELECT * FROM migracao_limpeza` mostra o que foi apagado de f
 
 **Nunca edite uma migração já aplicada.** O migrador guarda o hash do arquivo e
 recusa subir se ele mudar, dizendo qual versão foi editada. Corrija com uma
-migração nova.
+migração nova. Isso vale também para a `001_baseline`: ela roda em todo boot por ser
+convergente, mas o hash gravado só é trocado quando o banco guarda o hash legado da
+adoção do `AutoMigrate` (ver o [ADR 012](adr/012-migracoes-versionadas-em-sql.md)).
 
 **Banco antigo, criado pelo `AutoMigrate`:** na primeira subida a `001_baseline` é
 adotada sem recriar nada, e só as seguintes rodam. Não é preciso recriar o banco.
@@ -482,9 +542,13 @@ O log sai em JSON (`log/slog`), um objeto por linha, com `level`, `msg` e
 `GET /metrics` devolve os contadores do processo em texto simples:
 
 ```
+dockkeeper_alertas_descartados 0
 dockkeeper_alertas_enfileirados 12
 dockkeeper_alertas_entregues 11
 dockkeeper_alertas_falhos 0
+dockkeeper_alertas_fila_atraso_seg null
+dockkeeper_alertas_na_fila 0
+dockkeeper_alertas_sem_canal 0
 dockkeeper_logs_descartados 0
 dockkeeper_migracoes_aplicadas 4
 dockkeeper_panicos_recuperados 0
@@ -492,10 +556,32 @@ dockkeeper_reconexoes_ssh 3
 dockkeeper_sessoes_ssh_abertas 1
 ```
 
+`dockkeeper_alertas_na_fila` e `dockkeeper_alertas_fila_atraso_seg` são medidos a
+cada ciclo do despachante (5 s): quantos alertas estão em `pendente` com a próxima
+tentativa já vencida, e há quantos segundos o mais antigo deles espera (`null`
+com a fila vazia).
+
 O `/readyz` diz o que está degradado sem derrubar a prontidão: canal de alerta
 degradado, alerta cuja entrega falhou, ou linha de log descartada pela fila. O
 status HTTP continua dependendo só do banco, porque é ele que decide se o painel
 consegue servir.
+
+### Fila de alertas atrasada
+
+O despachante entrega até 10 alertas a cada 5 s. Quando a fila passa de 50
+pendentes, ou quando o mais antigo espera 2 min ou mais, o log registra:
+
+```
+[Alert] aviso: fila de alertas atrasada: 73 pendente(s), o mais antigo espera há 140 s; o despacho entrega até 10 a cada 5s
+```
+
+O aviso sai na hora em que a fila atrasa e se repete a cada 5 min enquanto ela
+continuar atrasada. Quando volta ao normal, sai uma linha
+`[Alert] fila de alertas em dia de novo: N pendente(s)`. O mesmo estado aparece em
+`fila_pendente` e `fila_atraso_seg` de `GET /api/alerts/summary`, recortado pela
+unidade de quem pergunta. Fila atrasada costuma ser rajada de alertas maior que a
+vazão do despacho ou canal lento respondendo perto do prazo; canal fora do ar
+aparece antes como entrega `falhou`.
 
 ### Alerta repetido depois de um restart
 
@@ -556,6 +642,12 @@ O escritor do logstore grava em lote. Quando o lote falha, ele separa dois casos
 A fila tem 10 mil linhas. Cheia, a linha nova é descartada em vez de travar o stream SSE que a
 produziu. O total descartado sai em `logstore.Descartadas()`, exposto no corpo do `/readyz` como
 `logs_descartados`, e o log de aviso sai no máximo uma vez por minuto.
+
+A fila vive só na memória do processo. No desligamento por `SIGTERM` ou `SIGINT` o painel
+drena a fila e grava o que restou antes de sair. Num encerramento abrupto (`kill -9`, falta de
+memória, queda da máquina) as linhas ainda na fila, até 10 mil mais o lote em montagem, se
+perdem sem entrar em `logs_descartados`. O stream ao vivo não é afetado; o que falta é a
+busca de logs daquele intervalo.
 
 ## Painel sem canal de alerta
 

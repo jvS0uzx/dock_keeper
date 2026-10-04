@@ -33,6 +33,7 @@ cp .env.example .env
 docker compose up -d postgres
 
 cd backend
+go mod download
 go run ./cmd/dockkeeper
 
 cd ../frontend
@@ -46,9 +47,16 @@ A lista completa de variáveis está em [`docs/configuracao.md`](docs/configurac
 ## Testes
 
 Os testes de integração do backend pulam sozinhos sem `DATABASE_URL`, e pular é
-exatamente o que deixa passar uma regressão de recorte por unidade. Rode contra um
-Postgres descartável, nunca contra o banco que você usa no dia a dia: os testes
-criam e apagam linhas.
+exatamente o que deixa passar uma regressão de recorte por unidade. Por isso o CI
+liga `TEST_EXIGE_BANCO=1`: com ela, teste que precisa de banco e não o alcança
+**falha** em vez de pular, e o pacote inteiro falha se não conseguir criar o
+banco descartável.
+
+Cada pacote com teste de banco cria, no `TestMain`, um banco próprio chamado
+`dk_teste_<pid>_<nanos>` no mesmo servidor do `DATABASE_URL`, roda os testes nele
+e o apaga no fim (`backend/internal/bancoteste`). O banco apontado na URL só serve
+de porta de entrada, e o usuário precisa poder criar banco. Mesmo assim, aponte
+para um Postgres descartável, nunca para o que você usa no dia a dia.
 
 ```bash
 docker run --rm -d --name dockkeeper-test-pg \
@@ -57,15 +65,26 @@ docker run --rm -d --name dockkeeper-test-pg \
 
 cd backend
 export DATABASE_URL="postgres://postgres:ci@127.0.0.1:55432/dockkeeper_test?sslmode=disable"
+export TEST_EXIGE_BANCO=1
 gofmt -l .
 go vet ./...
-go test -race -count=1 -p 1 ./...
+go test -race -count=1 -p 1 -timeout 25m ./...
 
 docker stop dockkeeper-test-pg
 ```
 
-`gofmt -l .` precisa sair vazio. O `-p 1` roda um pacote de cada vez, porque todos
-usam o mesmo banco de teste.
+`gofmt -l .` precisa sair vazio. O comando de teste é o mesmo do CI: um pacote de
+cada vez (`-p 1`) e prazo explícito de 25 min (`-timeout 25m`). O pacote
+`internal/api` leva de 5 a 8 min sob `-race`, perto dos 10 min padrão do
+`go test`, e num runner lento a suíte morreria por tempo, não por defeito.
+
+A sonda de MySQL e MariaDB tem um teste opcional contra containers reais, fora da
+suíte padrão e do CI. Precisa de Docker e leva cerca de 1 minuto:
+
+```bash
+cd backend
+TESTE_MYSQL_REAL=1 go test -run TestSondaMySQLContraBancosReais ./scripts/
+```
 
 ```bash
 cd frontend
@@ -79,8 +98,9 @@ npm run build
 referências de projeto e o comando não checa arquivo nenhum. Use
 `npm run typecheck`.
 
-O CI roda tudo isso em todo pull request, com Postgres como serviço, mais o
-`gitleaks` na árvore e no histórico.
+O CI roda tudo isso em `ubuntu-24.04`, em todo pull request e em todo push para a
+`main`, com Postgres como serviço, mais o `gitleaks` na árvore e no histórico. O
+runner é fixado porque o `ubuntu-latest` muda de versão sem aviso.
 
 ## Dependências do CI
 
@@ -90,16 +110,16 @@ sem SHA de 40 caracteres e download de release sem conferência de SHA-256.
 
 | Dependência | Versão | Fixada em |
 |---|---|---|
-| `actions/checkout` | v4.4.0 | `11d5960a326750d5838078e36cf38b85af677262` |
-| `actions/setup-go` | v5.6.0 | `40f1582b2485089dde7abd97c1529aa768e1baff` |
-| `actions/setup-node` | v4.4.0 | `49933ea5288caeca8642d1e84afbd3f7d6820020` |
+| `actions/checkout` | v7.0.1 | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
+| `actions/setup-go` | v7.0.0 | `b7ad1dad31e06c5925ef5d2fc7ad053ef454303e` |
+| `actions/setup-node` | v7.0.0 | `820762786026740c76f36085b0efc47a31fe5020` |
 | `gitleaks` (`linux_x64.tar.gz`) | 8.18.4 | SHA-256 `ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d` |
 
 Para atualizar uma action, pegue o SHA da tag nova e troque no workflow e nesta
 tabela, no mesmo commit:
 
 ```bash
-gh api repos/actions/checkout/git/ref/tags/v4.4.0 --jq .object.sha
+gh api repos/actions/checkout/git/ref/tags/v7.0.1 --jq .object.sha
 ```
 
 Se a resposta vier com `type` igual a `tag`, e não `commit`, a tag é anotada: resolva
@@ -107,6 +127,11 @@ o commit com `gh api repos/actions/checkout/git/tags/<sha> --jq .object.sha`.
 
 Para atualizar o `gitleaks`, troque `VERSAO` e `SHA256` no workflow pelo valor da
 linha `linux_x64` do arquivo `gitleaks_<versão>_checksums.txt` publicado no release.
+
+O Dependabot (`.github/dependabot.yml`) abre, uma vez por semana, pull request de
+atualização para os módulos Go de `backend/`, o npm de `frontend/`, as actions e
+as imagens base dos dois `Dockerfile`. O pull request de action troca só o SHA no
+workflow: atualize a versão nesta tabela no mesmo pull request.
 
 ## Regras do projeto
 

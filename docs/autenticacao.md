@@ -79,7 +79,7 @@ Exige `admin` em concessão global **em todos os métodos, inclusive na leitura*
 Protege `/api/servers`, `/api/users`, `/api/audit`, `/api/enroll/tokens` e
 `/api/devices`.
 
-> ⚠️ **Quem tem papel `admin` apenas numa unidade não acessa `/api/servers` nem
+> **Quem tem papel `admin` apenas numa unidade não acessa `/api/servers` nem
 > `/api/users` — nem para ler.**
 
 Isso é decisão, não efeito colateral. Cadastrar servidor entrega uma chave SSH
