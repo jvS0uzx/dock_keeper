@@ -11,7 +11,7 @@ COPY . .
 
 RUN npm run build
 
-FROM nginx:1.30-alpine
+FROM nginx:1.31-alpine
 
 ARG VERSAO=dev
 LABEL org.opencontainers.image.version="${VERSAO}"
