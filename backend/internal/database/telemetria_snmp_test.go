@@ -99,3 +99,35 @@ func TestNomeDeInterfaceEhUnicoPorHostSoQuandoPreenchido(t *testing.T) {
 		}
 	}
 }
+
+func TestPodaTiraInterfaceSemSinalESemLeitura(t *testing.T) {
+	sumida := interfaceDePoda(t)
+
+	agora := time.Now().UTC()
+	velho := agora.Add(-defaultNetworkMetricRetention - time.Hour)
+	comLeitura := NetworkInterface{NetworkHostID: sumida.NetworkHostID, IfIndex: 2, IfName: "ge-0/0/2",
+		OperStatus: "up", AdminStatus: "up", FirstSeen: velho, LastSeen: velho}
+	recente := NetworkInterface{NetworkHostID: sumida.NetworkHostID, IfIndex: 3, IfName: "ge-0/0/3",
+		OperStatus: "up", AdminStatus: "up", FirstSeen: agora, LastSeen: agora.Add(-time.Hour)}
+	for _, itf := range []*NetworkInterface{&comLeitura, &recente} {
+		if err := DB.Create(itf).Error; err != nil {
+			t.Fatalf("criar interface: %v", err)
+		}
+	}
+	if err := DB.Model(&NetworkInterface{}).Where("id = ?", sumida.ID).Update("last_seen", velho).Error; err != nil {
+		t.Fatalf("envelhecer interface: %v", err)
+	}
+	if err := DB.Create(&MetricNetworkInterface{InterfaceID: comLeitura.ID, Ts: agora.Add(-time.Hour), OperStatus: "up"}).Error; err != nil {
+		t.Fatalf("criar leitura: %v", err)
+	}
+
+	prune(context.Background(), 7*24*time.Hour, 365*24*time.Hour)
+
+	for id, quer := range map[uint]int64{sumida.ID: 0, comLeitura.ID: 1, recente.ID: 1} {
+		var n int64
+		DB.Model(&NetworkInterface{}).Where("id = ?", id).Count(&n)
+		if n != quer {
+			t.Errorf("interface %d: %d linha(s), esperado %d", id, n, quer)
+		}
+	}
+}

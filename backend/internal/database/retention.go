@@ -54,6 +54,27 @@ func PodarMetricasDeInterface(ctx context.Context, maxAge time.Duration) {
 	}
 }
 
+func podarInterfacesSemSinal(ctx context.Context, maxAge time.Duration) {
+	cutoff := time.Now().UTC().Add(-maxAge)
+	sql := `DELETE FROM network_interfaces n
+		WHERE n.last_seen < ?
+		  AND NOT EXISTS (SELECT 1 FROM metric_network_interfaces m WHERE m.interface_id = n.id)
+		  AND n.id IN (
+			SELECT i.id FROM network_interfaces i
+			WHERE i.last_seen < ?
+			  AND NOT EXISTS (SELECT 1 FROM metric_network_interfaces m WHERE m.interface_id = i.id)
+			ORDER BY i.id LIMIT ?)`
+
+	n, err := podarEmLotes(ctx, dbExec, pruneBatchPause, sql, cutoff, cutoff)
+	if err != nil {
+		log.Printf("[Retention] erro ao podar network_interfaces: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("[Retention] network_interfaces: %d interfaces sem sinal e sem leitura removidas", n)
+	}
+}
+
 func pruneAlerts(ctx context.Context, maxAge time.Duration) {
 	cutoff := time.Now().UTC().Add(-maxAge)
 	sql := `DELETE FROM alerts WHERE id IN (
@@ -99,7 +120,9 @@ func prune(ctx context.Context, maxAge, auditMaxAge time.Duration) {
 	pruneAuditLog(ctx, auditMaxAge)
 	pruneAlerts(ctx, config.Dias("ALERT_RETENTION_DAYS", defaultAlertRetentionDays))
 	PodarEnderecos(config.Dias("ADDRESS_RETENTION_DAYS", defaultAddressRetentionDays))
-	PodarMetricasDeInterface(ctx, config.Duracao("NETWORK_METRIC_RETENTION", defaultNetworkMetricRetention))
+	retencaoDeRede := config.Duracao("NETWORK_METRIC_RETENTION", defaultNetworkMetricRetention)
+	PodarMetricasDeInterface(ctx, retencaoDeRede)
+	podarInterfacesSemSinal(ctx, retencaoDeRede)
 }
 
 func pruneAuditLog(ctx context.Context, maxAge time.Duration) {
