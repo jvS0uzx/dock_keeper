@@ -13,6 +13,8 @@ if (!globalThis.ResizeObserver) {
   };
 }
 
+getComputedStyle(document.documentElement);
+
 afterEach(async () => {
   cleanup();
   localStorage.clear();

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { semEspera } from '../test/usuario';
 
 import Dashboard from './Dashboard';
@@ -267,8 +267,8 @@ describe('cadastro de servidor com endereço repetido', () => {
     );
     renderizar(<ServersView />);
 
-    await semEspera().type(await screen.findByLabelText(/nome de identificação/i), 'VPS nova');
-    await semEspera().type(screen.getByLabelText(/endereço ip/i), '203.0.113.39');
+    fireEvent.change(await screen.findByLabelText(/nome de identificação/i), { target: { value: 'VPS nova' } });
+    fireEvent.change(screen.getByLabelText(/endereço ip/i), { target: { value: '203.0.113.39' } });
     await semEspera().click(screen.getByRole('button', { name: /conectar vps/i }));
 
     expect(dialogo.notify).toHaveBeenCalledWith(
