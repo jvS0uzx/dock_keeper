@@ -19,7 +19,8 @@ as telas seguem; os tokens vivem em `frontend/src/index.css` (`@theme`).
    métrica: `.mono-data` (Geist Mono, `tabular-nums`). Texto corrente é Inter.
 5. **Profundidade por camada, não por brilho.** Superfícies `ink-950 → 700`
    sobem uma elevação por nível; borda `line`/`line-hi` e `--shadow-panel` dão o
-   relevo. Glass só no `.topbar-glass`; `text-glow-*` está aposentado.
+   relevo. Painel não é vidro: `backdrop-blur` só no fundo de modal e de toast,
+   e texto não ganha brilho.
 6. **Semântica de nulo preservada.** "Sem medição" continua cinza
    (`text-text-faint`) com a causa no `title`; zero medido continua `0`. O
    redesign nunca troca essa distinção — ela foi conquistada no QA.
