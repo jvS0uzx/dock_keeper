@@ -504,7 +504,11 @@ Um incidente é **um** registro. Enquanto a condição continua, a mesma linha �
 - Alerta reconhecido (`acked`) continua sendo o mesmo incidente e **para de renotificar**. Reconhecer
   é dizer "já vi".
 - Incidente sem sinal de vida há mais de `ALERT_RESUME_HOURS` não segura a chave: a próxima
-  ocorrência abre um alerta novo. O antigo fica aberto até alguém resolver.
+  ocorrência abre um alerta novo, e na mesma transação o antigo vira `resolved`, com
+  `resolved_at` no último momento em que a condição foi vista (`last_seen_at`) e o texto
+  original. Ele não gera mensagem de recuperação: o incidente continua vivo na linha nova.
+  Cada chave tem no máximo uma linha não resolvida; na subida, o despachante fecha do mesmo
+  jeito as duplicatas gravadas antes desta regra e mantém só a mais recente.
 - Incidente novo dentro do `ALERT_COOLDOWN` do último aviso da chave é gravado na hora, para o
   painel mostrar, e o aviso no canal espera o cooldown vencer. Resolvido antes disso, vira `dispensado`.
 - A mensagem de recuperação é uma linha própria, de chave `<chave>:recuperacao`, que **nasce

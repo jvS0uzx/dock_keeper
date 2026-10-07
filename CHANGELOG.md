@@ -19,6 +19,12 @@ abaixo dela são o histórico de entregas na `main` antes da numeração.
   por exemplo) ficava `open` para sempre. Rodada com a lista vazia não fecha nada,
   porque `docker ps` que falha chega igual a um host sem containers. O estado de
   reinícios do container removido também é descartado.
+- Uma chave de alerta não fica mais com duas linhas abertas. Quando o incidente
+  passa de `ALERT_RESUME_HOURS` sem sinal de vida e volta, a linha nova é criada
+  e a antiga vira `resolved` na mesma transação, com `resolved_at` no seu
+  `last_seen_at` e sem mensagem de recuperação. Na subida, o despachante fecha
+  da mesma forma as duplicatas já gravadas e deixa aberta só a linha mais
+  recente de cada chave.
 
 ## [1.0.0] - 2026-10-04
 

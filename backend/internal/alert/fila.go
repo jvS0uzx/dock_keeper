@@ -139,7 +139,13 @@ func Enqueue(e Entrada) bool {
 	alerta.ServerID, alerta.SiteID, alerta.RuleID = e.ServerID, e.SiteID, e.RuleID
 	alerta.CreatedAt, alerta.LastSeenAt = now, &now
 	alerta.Delivery, alerta.NextAttemptAt = database.AlertDeliveryPendente, &proxima
-	if err := database.DB.Create(&alerta).Error; err != nil {
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&alerta).Error; err != nil {
+			return err
+		}
+		return substituirAntigos(tx.Where("key = ? AND id <> ?", e.Key, alerta.ID)).Error
+	})
+	if err != nil {
 		return descartar(e, err)
 	}
 
@@ -277,6 +283,27 @@ func Recovered(e Entrada) bool {
 	return true
 }
 
+func substituirAntigos(consulta *gorm.DB) *gorm.DB {
+	return consulta.Model(&database.Alert{}).Where("status <> ?", database.AlertStatusResolved).
+		Updates(map[string]any{
+			"status":      database.AlertStatusResolved,
+			"resolved_at": gorm.Expr("COALESCE(last_seen_at, created_at)"),
+		})
+}
+
+func fecharDuplicados() {
+	res := substituirAntigos(database.DB.Where(
+		"id < (SELECT MAX(b.id) FROM alerts b WHERE b.key = alerts.key AND b.status <> ?)",
+		database.AlertStatusResolved))
+	if res.Error != nil {
+		log.Printf("[Alert] erro ao fechar alertas duplicados: %v", res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("[Alert] %d alerta(s) duplicado(s) fechado(s): cada chave ficou só com a linha aberta mais recente", res.RowsAffected)
+	}
+}
+
 func ChavesAbertas(prefixo string) []string {
 	if database.DB == nil {
 		return nil
@@ -295,6 +322,9 @@ func ChavesAbertas(prefixo string) []string {
 
 func StartDispatcher(ctx context.Context) <-chan struct{} {
 	return safego.Run(ctx, "alert:despacho", func(ctx context.Context) {
+		if database.DB != nil {
+			fecharDuplicados()
+		}
 		ticker := time.NewTicker(despachoIntervalo)
 		defer ticker.Stop()
 		for {
