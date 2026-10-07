@@ -189,6 +189,42 @@ func (v *vigiaDeContainers) observe(ps []DockerPSPayload, inspecao []DockerInspe
 			v.caidos.abrir(c.Name, alvoDoContainer(c), "high", fmt.Sprintf("[ALERTA] Container %s está %s em %s", c.Name, c.State, v.t.Host))
 		}
 	}
+
+	v.esquecerRemovidos(ps)
+}
+
+func (v *vigiaDeContainers) esquecerRemovidos(ps []DockerPSPayload) {
+	if len(ps) == 0 {
+		return
+	}
+
+	nomes := make(map[string]bool, len(ps))
+	ids := make(map[string]bool, len(ps))
+	for _, c := range ps {
+		nomes[c.Name] = true
+		ids[c.DockerID] = true
+	}
+
+	for nome := range v.caidos.abertos {
+		if nomes[nome] {
+			continue
+		}
+		v.caidos.fechar(nome, alvoDoContainer(DockerPSPayload{Name: nome}),
+			fmt.Sprintf("[INFO] Container %s foi removido de %s", nome, v.t.Host))
+	}
+
+	for _, porID := range []map[string]int{v.reinicios, v.crescimentos, v.estaveis} {
+		for id := range porID {
+			if !ids[id] {
+				delete(porID, id)
+			}
+		}
+	}
+	for id := range v.emLoop {
+		if !ids[id] {
+			delete(v.emLoop, id)
+		}
+	}
 }
 
 func failedLoginIP(line string) (string, bool) {

@@ -256,7 +256,7 @@ evidência positiva: silêncio não resolve nada.
 |---|---|
 | `host_unreachable` | O SSH reconectou **e** a primeira amostra de métrica da nova sessão foi lida. Conectar e cair antes da amostra não conta |
 | `nginx_down` | A sessão que lê o access log abriu e continua de pé 30 s depois. Sessão que abre e cai em seguida (arquivo inexistente, permissão) não conta |
-| `container_down` | O mesmo container aparece como `running`. Container removido do host **não** resolve: sumir não é voltar, e o alerta fica para o operador fechar |
+| `container_down` | O mesmo container aparece como `running`, ou some do `docker ps -a` numa rodada que listou outros containers do host: o alerta fecha com `[INFO] Container <nome> foi removido de <host>`. Como o `ps -a` lista também os parados, ausência ali é remoção, não silêncio. Rodada com a lista vazia não fecha nada: `docker ps` que falha chega ao painel igual a um host sem containers |
 | `ssl_invalid` | A verificação seguinte encontra o certificado válido |
 | `ssl_expiring` | O certificado está válido com mais de 14 dias (foi renovado) |
 | `bruteforce` | A janela `BRUTEFORCE_WINDOW` esvaziou: nenhuma falha de login daquele IP no período. Conferido a cada fatia da janela, não só quando chega linha nova |
