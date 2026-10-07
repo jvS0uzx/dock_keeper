@@ -241,7 +241,7 @@ chave (`ALERT_COOLDOWN`) e o mesmo piso (`ALERT_MIN_SEVERITY`). Todos carregam a
 | `[ALERTA]` upstream com 5xx | `lb_upstream_5xx:<servidor>:<upstream>` | Na janela `LB_WINDOW` (5 min), o upstream recebeu pelo menos `LB_MIN_REQUESTS` (20) requisições e a proporção de 5xx chegou a `LB_ERROR_RATIO` (0,5) |
 | `[ALERTA]` força bruta | `bruteforce:<servidor>:<ip>` | Um mesmo IP de origem acumulou `BRUTEFORCE_THRESHOLD` (10) ou mais tentativas falhas na janela `BRUTEFORCE_WINDOW` (5 min) |
 | `[CRITICO]` VPS inalcançável | `host_unreachable:<servidor>` | O stream de métricas por SSH cai |
-| `[ALERTA]` container parado | `container_down:<servidor>:<container>` | O `docker ps` do host devolve o container em estado diferente de `running` |
+| `[ALERTA]` container parado | `container_down:<servidor>:<container>` | O `docker ps` do host devolve o container em estado diferente de `running`. Em `created`, só a partir da 3ª amostra seguida do mesmo container nesse estado: o `docker compose up` cria temporários `<12 hex>_<nome>` em `created` que somem logo depois. Sair de `created` ou sumir do `ps` zera a contagem |
 | `[CRITICO]` certificado inválido | `ssl_invalid:<domínio>` | A verificação TLS do domínio falha |
 | `[ALERTA]` certificado vencendo | `ssl_expiring:<domínio>` | Certificado válido com 14 dias ou menos |
 | `[ALERTA]` estação sem reportar | `agent_absent:<servidor>` | Servidor `kind=agent` **marcado com `absence_alert`** sem métrica há mais de 3 vezes o `report_interval_sec` (piso de 30 s) |
