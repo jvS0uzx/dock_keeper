@@ -10,6 +10,27 @@ abaixo dela são o histórico de entregas na `main` antes da numeração.
 
 ## [Não lançado]
 
+### Corrigido
+
+- `container_down` de container removido do host fecha sozinho, com
+  `[INFO] Container <nome> foi removido de <host>`, na primeira rodada do
+  `docker ps -a` que lista outros containers e não lista ele. Antes, o alerta de
+  container que deixava de existir (os temporários `<12 hex>_<nome>` do Compose,
+  por exemplo) ficava `open` para sempre. Rodada com a lista vazia não fecha nada,
+  porque `docker ps` que falha chega igual a um host sem containers. O estado de
+  reinícios do container removido também é descartado.
+- Uma chave de alerta não fica mais com duas linhas abertas. Quando o incidente
+  passa de `ALERT_RESUME_HOURS` sem sinal de vida e volta, a linha nova é criada
+  e a antiga vira `resolved` na mesma transação, com `resolved_at` no seu
+  `last_seen_at` e sem mensagem de recuperação. Na subida, o despachante fecha
+  da mesma forma as duplicatas já gravadas e deixa aberta só a linha mais
+  recente de cada chave.
+- Recriação pelo Compose não abre mais `container_down` falso. Container em
+  `created` só alerta a partir da 3ª amostra seguida no mesmo estado; sair de
+  `created` ou sumir do `docker ps` zera a contagem. Os temporários
+  `<12 hex>_<nome>` que o `docker compose up` cria passavam por `created` e
+  abriam alerta na primeira amostra.
+
 ## [1.0.0] - 2026-10-04
 
 Primeira versão numerada. Reúne o que foi entregue desde 2026-09-10.

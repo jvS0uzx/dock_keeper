@@ -123,7 +123,8 @@ Alerta pendente antigo é sinal de canal parado: olhe `alertas` no `/readyz` e o
 **Um incidente, um alerta.** Enquanto a condição continua, o painel reaproveita a mesma linha
 e só soma `renotify_count` a cada `ALERT_COOLDOWN`. Reconhecer (`ack`) para a renotificação.
 Alerta sem sinal de vida há mais de `ALERT_RESUME_HOURS` não cala a chave: a ocorrência seguinte
-abre alerta novo, mesmo que o antigo esteja preso em `sem_canal`.
+abre alerta novo, mesmo que o antigo esteja preso em `sem_canal`, e o antigo vira `resolved`
+(em `last_seen_at`, sem aviso de recuperação). A chave nunca fica com duas linhas abertas.
 
 **Notificação de recuperação.** Regra do motor e gatilho direto fecham o próprio alerta quando
 a condição volta (a definição de "voltou" de cada gatilho está em `docs/metricas.md`). Se o

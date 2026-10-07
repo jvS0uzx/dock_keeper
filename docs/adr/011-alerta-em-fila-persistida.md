@@ -53,7 +53,11 @@ preso em `sem_canal` calava a chave para sempre. O desenho atual:
   `renotify_count` e, entregue, grava `last_notified_at`. `Notify` deixou de existir:
   todo chamador usa `Enqueue`, com `server_id` e `site_id`.
 - **Alerta antigo não cala a chave.** Incidente sem sinal de vida além da janela, ou
-  resolvido, não é mais o incidente corrente: a ocorrência seguinte abre alerta novo.
+  resolvido, não é mais o incidente corrente: a ocorrência seguinte abre alerta novo
+  e, na mesma transação, resolve a linha antiga em `last_seen_at`, sem mensagem de
+  recuperação. `resolved` é o único estado do `CHECK` de `alerts.status` que tira a
+  linha do conjunto aberto; `acked` continuaria segurando a chave. Na subida o
+  despachante aplica a mesma regra às duplicatas que já existiam, sem migração.
 - **Reconhecer silencia.** Alerta `acked` continua sendo o incidente e para de
   renotificar. Desde a mesma revisão, reconhecer exige operador na unidade do alerta.
 - **Incidente novo dentro do cooldown** é gravado na hora, para o painel mostrar, com

@@ -241,7 +241,7 @@ chave (`ALERT_COOLDOWN`) e o mesmo piso (`ALERT_MIN_SEVERITY`). Todos carregam a
 | `[ALERTA]` upstream com 5xx | `lb_upstream_5xx:<servidor>:<upstream>` | Na janela `LB_WINDOW` (5 min), o upstream recebeu pelo menos `LB_MIN_REQUESTS` (20) requisições e a proporção de 5xx chegou a `LB_ERROR_RATIO` (0,5) |
 | `[ALERTA]` força bruta | `bruteforce:<servidor>:<ip>` | Um mesmo IP de origem acumulou `BRUTEFORCE_THRESHOLD` (10) ou mais tentativas falhas na janela `BRUTEFORCE_WINDOW` (5 min) |
 | `[CRITICO]` VPS inalcançável | `host_unreachable:<servidor>` | O stream de métricas por SSH cai |
-| `[ALERTA]` container parado | `container_down:<servidor>:<container>` | O `docker ps` do host devolve o container em estado diferente de `running` |
+| `[ALERTA]` container parado | `container_down:<servidor>:<container>` | O `docker ps` do host devolve o container em estado diferente de `running`. Em `created`, só a partir da 3ª amostra seguida do mesmo container nesse estado: o `docker compose up` cria temporários `<12 hex>_<nome>` em `created` que somem logo depois. Sair de `created` ou sumir do `ps` zera a contagem |
 | `[CRITICO]` certificado inválido | `ssl_invalid:<domínio>` | A verificação TLS do domínio falha |
 | `[ALERTA]` certificado vencendo | `ssl_expiring:<domínio>` | Certificado válido com 14 dias ou menos |
 | `[ALERTA]` estação sem reportar | `agent_absent:<servidor>` | Servidor `kind=agent` **marcado com `absence_alert`** sem métrica há mais de 3 vezes o `report_interval_sec` (piso de 30 s) |
@@ -256,7 +256,7 @@ evidência positiva: silêncio não resolve nada.
 |---|---|
 | `host_unreachable` | O SSH reconectou **e** a primeira amostra de métrica da nova sessão foi lida. Conectar e cair antes da amostra não conta |
 | `nginx_down` | A sessão que lê o access log abriu e continua de pé 30 s depois. Sessão que abre e cai em seguida (arquivo inexistente, permissão) não conta |
-| `container_down` | O mesmo container aparece como `running`. Container removido do host **não** resolve: sumir não é voltar, e o alerta fica para o operador fechar |
+| `container_down` | O mesmo container aparece como `running`, ou some do `docker ps -a` numa rodada que listou outros containers do host: o alerta fecha com `[INFO] Container <nome> foi removido de <host>`. Como o `ps -a` lista também os parados, ausência ali é remoção, não silêncio. Rodada com a lista vazia não fecha nada: `docker ps` que falha chega ao painel igual a um host sem containers |
 | `ssl_invalid` | A verificação seguinte encontra o certificado válido |
 | `ssl_expiring` | O certificado está válido com mais de 14 dias (foi renovado) |
 | `bruteforce` | A janela `BRUTEFORCE_WINDOW` esvaziou: nenhuma falha de login daquele IP no período. Conferido a cada fatia da janela, não só quando chega linha nova |
