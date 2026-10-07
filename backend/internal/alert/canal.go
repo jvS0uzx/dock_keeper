@@ -30,15 +30,6 @@ func canaisAtivos() []Canal {
 	return ativos
 }
 
-func CanaisAtivos() []string {
-	ativos := canaisAtivos()
-	nomes := make([]string, 0, len(ativos))
-	for _, c := range ativos {
-		nomes = append(nomes, c.Nome())
-	}
-	return nomes
-}
-
 func Send(msg string) {
 	ativos := canaisAtivos()
 	if len(ativos) == 0 {

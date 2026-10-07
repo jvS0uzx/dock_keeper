@@ -19,7 +19,6 @@ const (
 	FalhaBaseInvalida    = "base_invalida"
 	FalhaBaseInexistente = "base_inexistente"
 	FalhaSemPermissao    = "sem_permissao"
-	FalhaIndisponivel    = "indisponivel"
 
 	maxLinhaDoEsquema = 16 << 20
 )
