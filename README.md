@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="frontend/src/assets/dockkeeper.png" alt="DockKeeper" width="160">
+</p>
+
 # DockKeeper
 
 Painel de monitoramento de infraestrutura: métricas de host em tempo real,
