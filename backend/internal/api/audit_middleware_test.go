@@ -30,6 +30,9 @@ func TestAuditActionDerivaONomeDaRota(t *testing.T) {
 		{http.MethodPost, "/api/auth/login", "auth.login"},
 		{http.MethodPost, "/api/auth/logout", "auth.logout"},
 		{http.MethodPost, "/api/rota/nova", "desconhecido.create"},
+		{http.MethodGet, "/api/servers", "server.read"},
+		{http.MethodGet, "/api/ssl/recheck", "ssl.read"},
+		{http.MethodGet, "/api/security/radar", "security-radar.read"},
 	}
 	for _, c := range casos {
 		t.Run(c.metodo+" "+c.rota, func(t *testing.T) {

@@ -491,6 +491,10 @@ func auditResultFor(status int) string {
 func auditAction(r *http.Request) string {
 	path := r.URL.Path
 	if a, ok := auditRouteActions[path]; ok {
+		if ehLeitura(r.Method) {
+			recurso, _, _ := strings.Cut(a, ".")
+			return recurso + ".read"
+		}
 		return a
 	}
 
