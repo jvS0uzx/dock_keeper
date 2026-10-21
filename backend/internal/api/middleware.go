@@ -345,6 +345,8 @@ var auditVerbs = map[string]string{
 	http.MethodPut:    "update",
 	http.MethodPatch:  "update",
 	http.MethodDelete: "delete",
+	http.MethodGet:    "read",
+	http.MethodHead:   "read",
 }
 
 var auditRouteActions = map[string]string{
@@ -375,6 +377,11 @@ var auditRouteResources = map[string]string{
 	"/api/users":        "user",
 	"/api/dashboards":   "dashboards",
 	"/api/annotations":  "annotations",
+
+	"/api/security/radar":          "security-radar",
+	"/api/security/authlog/stream": "authlog",
+	"/api/containers/logs/stream":  "container-logs",
+	"/api/logs/search":             "logs",
 }
 
 var auditQueryAllowlist = []string{
@@ -384,16 +391,14 @@ var auditQueryAllowlist = []string{
 func (c Config) audit(onlyDenied bool) middleware {
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodGet || r.Method == http.MethodHead {
-				next(w, r)
-				return
-			}
-
 			aw := &auditWriter{ResponseWriter: w, status: http.StatusOK}
 			r, target := withAuditTarget(r)
 			next(aw, r)
 
 			if target.handled {
+				return
+			}
+			if ehLeitura(r.Method) && !leituraNegadaPorEscopo(aw.status) {
 				return
 			}
 			result := auditResultFor(aw.status)
@@ -451,10 +456,22 @@ func (a *auditWriter) Write(p []byte) (int, error) {
 	return a.ResponseWriter.Write(p)
 }
 
+func (a *auditWriter) Unwrap() http.ResponseWriter {
+	return a.ResponseWriter
+}
+
 func (a *auditWriter) Flush() {
 	if f, ok := a.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+func ehLeitura(method string) bool {
+	return method == http.MethodGet || method == http.MethodHead
+}
+
+func leituraNegadaPorEscopo(status int) bool {
+	return status == http.StatusNotFound || status == http.StatusForbidden
 }
 
 func auditResultFor(status int) string {

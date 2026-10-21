@@ -58,7 +58,7 @@ func Routes(cfg Config) http.Handler {
 			allowMethods(methods...))
 	}
 	stream := func(h http.HandlerFunc) http.HandlerFunc {
-		return chain(semPrazoDeEscrita(h), cfg.withCORS, cfg.requireTicket, allowMethods(http.MethodGet))
+		return chain(semPrazoDeEscrita(h), cfg.withCORS, cfg.audit(auditAll), cfg.requireTicket, allowMethods(http.MethodGet))
 	}
 
 	mux.HandleFunc("/api/servers", admin(cfg.serversHandler,
