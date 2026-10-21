@@ -38,27 +38,7 @@ pego.
 
 [![CI](https://github.com/jvS0uzx/dock_keeper/actions/workflows/ci.yml/badge.svg)](https://github.com/jvS0uzx/dock_keeper/actions/workflows/ci.yml)
 
-<!--
-GIF de demonstração: ainda não gravado. Quando o arquivo existir, troque este
-comentário inteiro pela tag abaixo. A tag fica comentada até lá porque imagem
-apontando para arquivo inexistente rende ícone de imagem quebrada no GitHub, o
-que é pior que não ter imagem.
-
-<img src="docs/img/dockkeeper-demo.gif" alt="Painel do DockKeeper: gráfico de métrica em movimento, log chegando em streaming e restart de container" width="900">
-
-Roteiro, 20 segundos, nesta ordem:
-  1. o gráfico de métrica se movendo sozinho, sem nenhuma interação na tela;
-  2. o log chegando em streaming pelo SSE;
-  3. um restart de container, com o estado mudando na tela.
-
-Gravar e cortar:
-  wf-recorder -g "$(slurp)" -f /tmp/demo.mp4    (no X11, use o peek)
-  ffmpeg -i /tmp/demo.mp4 -t 20 \
-    -vf "fps=12,scale=900:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse" \
-    -loop 0 docs/img/dockkeeper-demo.gif
-
-Manter abaixo de 5 MB. Se passar, baixe o fps para 10 ou a largura para 800.
--->
+<img src="docs/img/dockkeeper-demo.gif" alt="Painel do DockKeeper num laboratório com VPS fictícias: malha do Nginx com tráfego, medidores ao vivo, log de container em streaming, tentativas de login por SSH e histórico de CPU" width="900">
 
 ## Arquitetura
 
