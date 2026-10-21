@@ -14,6 +14,7 @@ import {
   type ServerRecord,
 } from '../lib/api';
 import {
+  ALTURA_DO_ICONE,
   ALTURA_MAXIMA_MALHA,
   LARGURA_PADRAO_MALHA,
   PASSO_BALANCEADOR,
@@ -456,8 +457,9 @@ const LoadBalancerFlow = ({
             </div>
 
             <div
+              data-testid="malha-internet"
               className="absolute z-10 flex flex-col items-center left-0"
-              style={{ top: yMeio, transform: 'translateY(-50%)' }}
+              style={{ top: yMeio - ALTURA_DO_ICONE / 2 }}
             >
               <div className="w-14 h-14 rounded-full bg-ink-800 border border-line flex items-center justify-center">
                 <Globe size={22} strokeWidth={1.75} className="text-text-mut" />
@@ -474,7 +476,7 @@ const LoadBalancerFlow = ({
                   data-testid="malha-lb"
                   data-papel={lb.potencial ? 'reserva' : lb.principal ? 'principal' : 'indefinido'}
                   className="absolute z-10 left-1/2 flex flex-col items-center"
-                  style={{ top: yLb(li), transform: 'translate(-50%, -50%)' }}
+                  style={{ top: yLb(li) - ALTURA_DO_ICONE / 2, transform: 'translateX(-50%)' }}
                 >
                   <div
                     className={`w-14 h-14 rounded-card bg-ink-800 border flex items-center justify-center transition-colors ${

@@ -8,6 +8,7 @@ import { SessionContext, type SessionState } from './ui/session-context';
 import { SiteScopeContext, type SiteScopeState } from './ui/site-scope-context';
 import {
   ALTURA_BALANCEADOR,
+  ALTURA_DO_ICONE,
   ALTURA_CARTAO,
   ALTURA_MAXIMA_MALHA,
   PASSO_CARTAO,
@@ -248,5 +249,38 @@ describe('malha sem tráfego na janela', () => {
     const linhas = tracos();
     expect(linhas.every((l) => l.stroke !== ACENTO_ATIVO)).toBe(true);
     expect(linhas.every((l) => l.stroke !== FUNDO_DO_PAINEL)).toBe(true);
+  });
+});
+
+const extremos = (d: string) => {
+  const numeros = d.match(/-?\d+(\.\d+)?/g)!.map(Number);
+  return { y0: numeros[1], y1: numeros[numeros.length - 1] };
+};
+
+const centroDoIcone = (el: HTMLElement) => {
+  expect(el.style.transform).not.toMatch(/translateY|translate\(-50%, -50%\)/);
+  return Number.parseFloat(el.style.top) + ALTURA_DO_ICONE / 2;
+};
+
+describe('âncoras das linhas da malha', () => {
+  it.each([1, 2])('com %i balanceador(es) a linha sai do centro do ícone da Internet e chega no centro do ícone de cada balanceador', async (quantos) => {
+    api.liveMetrics.mockReset().mockResolvedValue(cenario(4, quantos));
+    renderizar();
+
+    await screen.findAllByTestId('malha-no');
+    await vi.waitFor(() => expect(screen.getAllByTestId('malha-lb')).toHaveLength(quantos));
+
+    const yInternet = centroDoIcone(screen.getByTestId('malha-internet'));
+    const entradas = screen
+      .getAllByTestId('malha-aresta')
+      .filter((el) => el.id.startsWith('path-in-'))
+      .map((el) => extremos(el.getAttribute('d')!));
+    const centrosDosLbs = screen.getAllByTestId('malha-lb').map((el) => centroDoIcone(el));
+
+    expect(entradas).toHaveLength(quantos);
+    for (const entrada of entradas) expect(entrada.y0).toBeCloseTo(yInternet);
+    expect(entradas.map((e) => e.y1).sort((a, b) => a - b)).toEqual(
+      [...centrosDosLbs].sort((a, b) => a - b).map((y) => expect.closeTo(y)),
+    );
   });
 });
