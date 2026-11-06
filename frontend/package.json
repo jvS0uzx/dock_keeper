@@ -31,7 +31,7 @@
     "autoprefixer": "^10.6.1",
     "jsdom": "^29.1.1",
     "oxlint": "^1.86.0",
-    "postcss": "^8.5.28",
+    "postcss": "^8.5.29",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.3.2",
